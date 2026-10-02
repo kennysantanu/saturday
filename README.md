@@ -1,6 +1,6 @@
-# Saturday — Career Center
+# Saturday: Career Dashboard
 
-Saturday is a career center for managing your job search, career pivot, or next step up. It keeps your opportunities, notes, and progress together in one place on your own computer.
+Saturday is a career dashboard for managing your job search, career pivot, or next step up. It keeps your opportunities, notes, and progress together in one place on your own computer.
 
 **What makes it different from a typical job tracker:** Saturday is built to work alongside a personal AI assistant. Most trackers are a spreadsheet you have to maintain by hand. Saturday keeps your records in a structured form that your assistant can read and update when you ask, so it has lasting context about your search instead of starting from scratch in every chat. Over time, this is meant to be the foundation for an assistant that works as your career agent.
 
@@ -89,12 +89,11 @@ See [Connect your assistant](docs/assistant-guide.md) for the full steps, an exa
 
 ## Where Saturday is headed
 
-Saturday will grow beyond job tracking into a fuller career center. Planned features include tracking your professional network, storing resumes and other career documents, managing follow-ups, backup and restore, and more ways to support your career progression. See the [roadmap](plans/ROADMAP.md) for details.
+Saturday will grow beyond job tracking into a fuller career center. Planned features include tracking your professional network, storing resumes and other career documents, managing follow-ups, backup and restore, and more ways to support your career progression.
 
 These features are not available yet. Saturday does not currently apply to jobs for you, import postings or PDFs, or sync between computers.
 
 ## Contributing
-
 Development commands, project layout, and conventions are in [docs/contributing.md](docs/contributing.md). The [documentation index](docs/README.md) lists all guides.
 
 ## License
