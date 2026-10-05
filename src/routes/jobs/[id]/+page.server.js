@@ -1,5 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import {
+	setJobFollowUp,
+	setJobStarred,
 	addJobUpdate,
 	correctJobUpdate,
 	dismissJob,
@@ -36,6 +38,32 @@ export function load({ params }) {
 }
 
 export const actions = {
+	followUp: async ({ params, request }) => {
+		const values = formValues(await request.formData());
+		try {
+			setJobFollowUp(params.id, values.follow_up_date || null, values.follow_up_comment);
+		} catch (error) {
+			return actionError(error, values, 'followUp');
+		}
+		redirect(303, `/jobs/${params.id}?saved=follow-up`);
+	},
+	clearFollowUp: async ({ params }) => {
+		try {
+			setJobFollowUp(params.id, null);
+		} catch (error) {
+			return actionError(error, {}, 'followUp');
+		}
+		redirect(303, `/jobs/${params.id}?saved=follow-up-cleared`);
+	},
+	star: async ({ params, request }) => {
+		const values = formValues(await request.formData());
+		try {
+			setJobStarred(params.id, values.is_starred === '1');
+		} catch (error) {
+			return actionError(error, values, 'star');
+		}
+		redirect(303, `/jobs/${params.id}?saved=starred`);
+	},
 	addUpdate: async ({ params, request }) => {
 		const values = formValues(await request.formData());
 		try {

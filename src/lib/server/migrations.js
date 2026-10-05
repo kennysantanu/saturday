@@ -37,6 +37,25 @@ CREATE INDEX job_updates_timeline
 CREATE INDEX job_updates_by_type
   ON job_updates(event_type, job_id);
 `
+	},
+	{
+		version: 2,
+		name: 'add_optional_job_details',
+		sql: `
+ALTER TABLE jobs ADD COLUMN location TEXT;
+ALTER TABLE jobs ADD COLUMN work_arrangement TEXT CHECK (work_arrangement IN ('remote', 'hybrid', 'on-site'));
+ALTER TABLE jobs ADD COLUMN employment_type TEXT CHECK (employment_type IN ('full-time', 'part-time', 'contract', 'internship', 'temporary'));
+ALTER TABLE jobs ADD COLUMN compensation TEXT;
+ALTER TABLE jobs ADD COLUMN source TEXT;
+ALTER TABLE jobs ADD COLUMN application_deadline TEXT;
+ALTER TABLE jobs ADD COLUMN follow_up_date TEXT;
+ALTER TABLE jobs ADD COLUMN follow_up_comment TEXT CHECK (follow_up_comment IS NULL OR follow_up_date IS NOT NULL);
+ALTER TABLE jobs ADD COLUMN is_starred INTEGER NOT NULL DEFAULT 0 CHECK (is_starred IN (0, 1));
+ALTER TABLE jobs ADD COLUMN score REAL;
+ALTER TABLE jobs ADD COLUMN score_comment TEXT;
+CREATE INDEX jobs_follow_up ON jobs(follow_up_date) WHERE is_active = 1 AND follow_up_date IS NOT NULL;
+CREATE INDEX jobs_application_deadline ON jobs(application_deadline) WHERE is_active = 1 AND application_deadline IS NOT NULL;
+`
 	}
 ];
 
@@ -55,7 +74,7 @@ export function assertMigrationHistory(db) {
 	}
 }
 
-export function applyMigrations(db) {
+export function applyMigrations(db, targetVersion = schemaVersion) {
 	db.exec('BEGIN IMMEDIATE');
 	try {
 		assertMigrationHistory(db);
@@ -69,7 +88,7 @@ export function applyMigrations(db) {
 				.map((row) => row.version)
 		);
 		for (const migration of migrations) {
-			if (applied.has(migration.version)) continue;
+			if (applied.has(migration.version) || migration.version > targetVersion) continue;
 			db.exec(migration.sql);
 			db.prepare('INSERT INTO schema_migrations (version,name,applied_at) VALUES (?,?,?)').run(
 				migration.version,

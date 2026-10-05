@@ -26,6 +26,7 @@ import {
 	editJob
 } from '../src/lib/server/services.js';
 import * as backups from '../src/lib/server/backups.js';
+import { schemaVersion } from '../src/lib/server/migrations.js';
 let scratch;
 const initialPath = process.env.SATURDAY_DB_PATH;
 beforeEach(() => {
@@ -182,11 +183,17 @@ test('newer schema is rejected by imports and normal application connections', (
 	const b = backups.createBackup();
 	const source = backups.getBackupFile(b.backup_id).path;
 	const db = raw(source);
-	db.exec("INSERT INTO schema_migrations VALUES(2,'future','2026-10-05')");
+	db.prepare('INSERT INTO schema_migrations VALUES(?, ?, ?)').run(
+		schemaVersion + 1,
+		'future',
+		'2026-10-05'
+	);
 	db.close();
 	assert.throws(() => backups.importBackup(source), failure('unsupported_schema'));
 	const live = raw();
-	live.exec("INSERT INTO schema_migrations VALUES(2,'future','2026-10-05')");
+	live
+		.prepare('INSERT INTO schema_migrations VALUES(?, ?, ?)')
+		.run(schemaVersion + 1, 'future', '2026-10-05');
 	live.close();
 	assert.throws(() => openDatabase(), /Unsupported database schema/);
 });
@@ -296,7 +303,7 @@ test('two processes coordinate one scheduled backup and concurrent migrations', 
 	const migration = `process.env.SATURDAY_DB_PATH=${JSON.stringify(newDb)};const {migrateDatabase}=await import('./src/lib/server/database.js');migrateDatabase();`;
 	await Promise.all([completed(childScript(migration)), completed(childScript(migration))]);
 	const db = raw(newDb);
-	assert.equal(db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n, 1);
+	assert.equal(db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n, schemaVersion);
 	db.close();
 });
 test('live snapshots remain consistent while a separate process writes', async () => {
@@ -374,7 +381,7 @@ test('CLI exports, previews, confirms and emits structured errors', () => {
 	assert.equal(settings.status, 0);
 	assert.equal(JSON.parse(settings.stdout).enabled, true);
 });
-test('built MCP exposes ten tools and complete backup/restore workflow without private paths', async () => {
+test('built MCP exposes thirteen tools and complete backup/restore workflow without private paths', async () => {
 	const child = spawn(process.execPath, ['build/mcp/index.js'], {
 		env: { ...process.env },
 		stdio: ['pipe', 'pipe', 'pipe']
@@ -418,7 +425,46 @@ test('built MCP exposes ten tools and complete backup/restore workflow without p
 			JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n'
 		);
 		const listing = await request('tools/list', {});
-		assert.equal(listing.tools.length, 10);
+		assert.equal(listing.tools.length, 13);
+		const job = await call('create_job', {
+			job_title: 'Engineer',
+			company_name: 'Example',
+			location: 'Remote',
+			posting_url: 'https://example.com/job',
+			job_description: 'Original description',
+			notes: 'Original notes',
+			is_starred: true,
+			score: 7.5,
+			score_comment: 'Initial fit'
+		});
+		await call('edit_job', { job_id: job.id, compensation: '$140k/year' });
+		const edited = await call('get_job', { job_id: job.id });
+		assert.equal(edited.location, 'Remote');
+		assert.equal(edited.posting_url, 'https://example.com/job');
+		assert.equal(edited.job_description, 'Original description');
+		assert.equal(edited.notes, 'Original notes');
+		assert.equal(edited.compensation, '$140k/year');
+		assert.equal(edited.is_starred, true);
+		assert.equal(edited.score, 7.5);
+		await call('set_job_follow_up', {
+			job_id: job.id,
+			follow_up_date: '2026-11-01',
+			follow_up_comment: 'Check progress'
+		});
+		await call('set_job_score', {
+			job_id: job.id,
+			score: 8.25,
+			score_comment: 'Relevant experience'
+		});
+		const assessed = await call('get_job', { job_id: job.id });
+		assert.equal(assessed.follow_up_comment, 'Check progress');
+		assert.equal(assessed.score_comment, 'Relevant experience');
+		assert.equal(assessed.score, 8.25);
+		assert.equal(assessed.updates.length, 0);
+		await call('edit_job', { job_id: job.id, source: 'Referral' });
+		assert.equal((await call('get_job', { job_id: job.id })).follow_up_date, '2026-11-01');
+		await call('set_job_follow_up', { job_id: job.id, follow_up_date: null });
+		assert.equal((await call('get_job', { job_id: job.id })).follow_up_comment, null);
 		const b = await call('create_backup');
 		assert.ok(b.backup_id);
 		const p = await call('prepare_restore', { backup_id: b.backup_id });

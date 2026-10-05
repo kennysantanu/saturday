@@ -10,7 +10,17 @@ import {
 import { McpServer } from '@modelcontextprotocol/server';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
-import { addJobUpdate, createJob, getJob, listJobs } from './services.js';
+import {
+	addJobUpdate,
+	createJob,
+	editJob,
+	setJobScore,
+	setJobFollowUp,
+	getJob,
+	listJobs
+} from './services.js';
+import { jobForMcp } from '../job-fields.js';
+import { jobMcpInputShape, followUpMcpSchema, assessmentSchema } from './validation.js';
 import { ServiceError, ValidationError } from './validation.js';
 
 const server = new McpServer({ name: 'saturday', version: '0.1.0' });
@@ -40,23 +50,7 @@ server.registerTool(
 	{
 		description:
 			'Create a job in Saturday. This writes a new record. Provide the exact job title and company; optional fields are stored as plain text.',
-		inputSchema: z.object({
-			job_title: z.string().trim().min(1).max(200).describe('Required job title.'),
-			company_name: z.string().trim().min(1).max(200).describe('Required company name.'),
-			posting_url: z
-				.string()
-				.trim()
-				.max(2048)
-				.optional()
-				.describe('Optional http or https job posting link.'),
-			job_description: z
-				.string()
-				.trim()
-				.max(50000)
-				.optional()
-				.describe('Optional job description as plain text.'),
-			notes: z.string().trim().max(10000).optional().describe('Optional job notes as plain text.')
-		})
+		inputSchema: z.object(jobMcpInputShape({ assessment: true }))
 	},
 	async (input) => {
 		try {
@@ -90,13 +84,7 @@ server.registerTool(
 	async ({ query }) => {
 		try {
 			const jobs = listJobs({ includeInactive: true, query: query ?? '', limit: 50 }).map(
-				(job) => ({
-					id: job.id,
-					title: job.title,
-					company: job.company,
-					is_active: job.isActive,
-					status: job.status.label
-				})
+				(job) => ({ ...jobForMcp(job, { list: true }), status: job.status.label })
 			);
 			return toolResult({ jobs });
 		} catch (error) {
@@ -121,13 +109,7 @@ server.registerTool(
 					new ServiceError('Job not found. Check the job ID and try again.', 'not_found')
 				);
 			return toolResult({
-				id: job.id,
-				title: job.title,
-				company: job.company,
-				posting_url: job.postingUrl,
-				job_description: job.description,
-				notes: job.notes,
-				is_active: job.isActive,
+				...jobForMcp(job),
 				status: job.status.label,
 				updates: job.updates.map(({ id, eventType, date, note, createdVia }) => ({
 					id,
@@ -186,6 +168,54 @@ server.registerTool(
 		}
 	}
 );
+
+const jobTools = [
+	[
+		'edit_job',
+		'Edit job details. Omitted fields are preserved; null or empty optional values clear them. Clearing follow_up_date also clears its comment. Assessment fields are changed with set_job_score.',
+		z.object({
+			job_id: z.string().min(1),
+			...jobMcpInputShape({ partial: true })
+		}),
+		({ job_id, ...input }) => editJob(job_id, input)
+	],
+	[
+		'set_job_follow_up',
+		'Set or reschedule one follow-up without adding history or changing status. Null date clears date and comment. Inactive jobs retain follow-ups but hide them from Dashboard.',
+		followUpMcpSchema.extend({ job_id: z.string().min(1) }),
+		({ job_id, follow_up_date, follow_up_comment }) =>
+			setJobFollowUp(job_id, follow_up_date, follow_up_comment)
+	],
+	[
+		'set_job_score',
+		'Set the AI assistant assessment and its explanation. Score accepts finite numbers, including decimals, without a fixed scale. Null means unscored; omitted comment clears the previous explanation. These fields are read-only in the UI.',
+		assessmentSchema.extend({ job_id: z.string().min(1) }),
+		({ job_id, ...input }) => setJobScore(job_id, input)
+	]
+];
+for (const [name, description, inputSchema, operation] of jobTools) {
+	server.registerTool(
+		name,
+		{
+			description,
+			inputSchema,
+			annotations: {
+				readOnlyHint: false,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: false
+			}
+		},
+		async (input) => {
+			try {
+				const job = operation(input);
+				return toolResult(jobForMcp(job));
+			} catch (error) {
+				return toolError(error);
+			}
+		}
+	);
+}
 
 // Backup tools intentionally accept managed IDs rather than arbitrary filesystem paths.
 const backupTools = [

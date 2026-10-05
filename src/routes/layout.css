@@ -450,6 +450,10 @@ p {
 	font-size: 0.875rem;
 	font-weight: 550;
 }
+.disclosure.inset-surface,
+.disclosure.inset-surface > summary {
+	border-radius: var(--r-group);
+}
 .disclosure > summary::-webkit-details-marker {
 	display: none;
 }

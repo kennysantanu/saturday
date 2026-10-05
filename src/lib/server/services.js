@@ -1,7 +1,15 @@
 import { randomUUID } from 'node:crypto';
+import {
+	editableJobFields,
+	assessmentJobFields,
+	jobColumns,
+	jobFromStorage,
+	jobToStorage
+} from '../job-fields.js';
 import { EVENT_LABELS } from '../event-labels.js';
 import { inTransaction, withDatabase } from './database.js';
 import {
+	parseAssessment,
 	parseEventDate,
 	parseJobInput,
 	parseUpdateInput,
@@ -71,20 +79,7 @@ function statusFor(isActive, updates) {
 
 function jobFromRow(row, updates = []) {
 	const isActive = Boolean(row.is_active);
-	return {
-		id: row.id,
-		title: row.job_title,
-		company: row.company_name,
-		postingUrl: row.posting_url,
-		description: row.job_description,
-		notes: row.notes,
-		isActive,
-		createdVia: row.created_via,
-		createdAt: row.created_at,
-		updatedAt: row.updated_at,
-		status: statusFor(isActive, updates),
-		updates
-	};
+	return { ...jobFromStorage(row), status: statusFor(isActive, updates), updates };
 }
 
 function getJobRow(db, id) {
@@ -131,45 +126,78 @@ export function createJob(input, createdVia = 'manual') {
 		inTransaction(db, () => {
 			const now = timestamp();
 			const id = randomUUID();
-			db.prepare(
-				`INSERT INTO jobs (id, job_title, company_name, posting_url, job_description, notes,
-				 is_active, created_via, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
-			).run(
+			const assessment =
+				createdVia === 'mcp'
+					? parseAssessment({
+							...Object.fromEntries(assessmentJobFields.map((field) => [field.name, null])),
+							...input
+						})
+					: Object.fromEntries(assessmentJobFields.map((field) => [field.name, null]));
+			const record = {
+				...values,
+				...assessment,
 				id,
-				values.job_title,
-				values.company_name,
-				values.posting_url,
-				values.job_description,
-				values.notes,
-				createdVia,
-				now,
-				now
-			);
+				is_active: true,
+				created_via: createdVia,
+				created_at: now,
+				updated_at: now
+			};
+			const columns = jobColumns();
+			db.prepare(
+				`INSERT INTO jobs (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`
+			).run(...jobToStorage(record));
+
 			return jobFromRow(getJobRow(db, id));
 		})
 	);
 }
 
+function saveJobFields(db, id, values, fields) {
+	db.prepare(
+		`UPDATE jobs SET ${fields.map((field) => `${field.name} = ?`).join(',')}, updated_at = ? WHERE id = ?`
+	).run(...jobToStorage(values, fields), timestamp(), id);
+}
 export function editJob(id, input) {
-	const values = parseJobInput(input);
 	return withDatabase((db) =>
 		inTransaction(db, () => {
-			if (!getJobRow(db, id)) throw new ServiceError('Job not found.', 'not_found');
-			db.prepare(
-				`UPDATE jobs SET job_title = ?, company_name = ?, posting_url = ?,
-				 job_description = ?, notes = ?, updated_at = ? WHERE id = ?`
-			).run(
-				values.job_title,
-				values.company_name,
-				values.posting_url,
-				values.job_description,
-				values.notes,
-				timestamp(),
-				id
-			);
+			const existing = getJobRow(db, id);
+			if (!existing) throw new ServiceError('Job not found.', 'not_found');
+			const merged = {
+				...Object.fromEntries(
+					editableJobFields.map((field) => [
+						field.name,
+						field.type === 'boolean' ? Boolean(existing[field.name]) : existing[field.name]
+					])
+				),
+				...input
+			};
+			for (const field of editableJobFields) {
+				if (field.requires && field.requires in input && !input[field.requires])
+					merged[field.name] = null;
+			}
+			const values = parseJobInput(merged);
+			saveJobFields(db, id, values, editableJobFields);
 			return jobFromRow(getJobRow(db, id), readUpdates(db, id));
 		})
 	);
+}
+
+// Assessment writes are exposed through MCP only; normal job editing never changes them.
+export function setJobScore(id, input) {
+	const values = parseAssessment(input);
+	return withDatabase((db) =>
+		inTransaction(db, () => {
+			if (!getJobRow(db, id)) throw new ServiceError('Job not found.', 'not_found');
+			saveJobFields(db, id, values, assessmentJobFields);
+			return jobFromRow(getJobRow(db, id), readUpdates(db, id));
+		})
+	);
+}
+export function setJobFollowUp(id, date, comment) {
+	return editJob(id, { follow_up_date: date, follow_up_comment: date ? (comment ?? null) : null });
+}
+export function setJobStarred(id, starred) {
+	return editJob(id, { is_starred: starred });
 }
 
 export function getJob(id) {
@@ -388,7 +416,30 @@ export function getDashboardStats({ today = new Date().toISOString().slice(0, 10
 				title: row.job_title,
 				company: row.company_name
 			}));
-		return { stats, recentJobs, upcoming };
+		const followUps = db
+			.prepare(
+				`SELECT * FROM jobs WHERE is_active = 1 AND follow_up_date IS NOT NULL ORDER BY follow_up_date, id`
+			)
+			.all()
+			.map((row) => ({
+				jobId: row.id,
+				title: row.job_title,
+				company: row.company_name,
+				date: row.follow_up_date,
+				comment: row.follow_up_comment
+			}));
+		const deadlines = db
+			.prepare(
+				`SELECT * FROM jobs WHERE is_active = 1 AND application_deadline >= ? ORDER BY application_deadline, id`
+			)
+			.all(today)
+			.map((row) => ({
+				jobId: row.id,
+				title: row.job_title,
+				company: row.company_name,
+				date: row.application_deadline
+			}));
+		return { stats, recentJobs, upcoming, followUps, deadlines };
 	});
 }
 

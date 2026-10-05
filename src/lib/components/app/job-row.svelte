@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import Star from '@lucide/svelte/icons/star';
 	import StatusBadge from './status-badge.svelte';
 	import type { StatusInfo } from '$lib/status';
 
@@ -8,24 +9,36 @@
 		title,
 		company,
 		status,
-		latestUpdate
+		latestUpdate,
+		isStarred = false,
+		score = null
 	}: {
 		href: string;
 		title: string;
 		company: string;
 		status: StatusInfo;
 		latestUpdate: string;
+		isStarred?: boolean;
+		score?: number | null;
 	} = $props();
 </script>
 
 <a {href} class="job-row group">
 	<div class="company-mark" aria-hidden="true">{company.slice(0, 1).toLocaleUpperCase()}</div>
 	<div class="job-row-title min-w-0">
-		<p class="font-semibold">{title}</p>
+		<p class="font-semibold">
+			{#if isStarred}<Star class="mr-1 inline size-4 fill-current text-primary" /><span
+					class="sr-only"
+					>Starred:
+				</span>{/if}{title}
+		</p>
 		<p class="mt-1 text-sm text-muted-foreground">{company}</p>
 	</div>
 	<div class="job-row-status">
 		<StatusBadge {status} />
+		{#if score !== null}<span class="text-[0.8125rem] text-muted-foreground"
+				>Assistant score: {score}</span
+			>{/if}
 		<span class="text-[0.8125rem] text-muted-foreground">{latestUpdate}</span>
 	</div>
 	<ChevronRight

@@ -21,7 +21,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { getDatabasePath, inTransaction } from './database.js';
 import { applyMigrations, assertMigrationHistory, schemaVersion } from './migrations.js';
-import { parseJobInput, validDate, ordinaryEventTypes } from './validation.js';
+import { parseJobInput, parseAssessment, validDate, ordinaryEventTypes } from './validation.js';
+import { jobColumns, jobFields } from '../job-fields.js';
 
 export const MAX_BACKUP_BYTES = 100 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -36,18 +37,6 @@ const defaults = {
 	last_error: null
 };
 const columns = {
-	jobs: [
-		'id',
-		'job_title',
-		'company_name',
-		'posting_url',
-		'job_description',
-		'notes',
-		'is_active',
-		'created_via',
-		'created_at',
-		'updated_at'
-	],
 	job_updates: [
 		'recorded_order',
 		'id',
@@ -168,9 +157,15 @@ function connect(path, readOnly = true) {
 	db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA trusted_schema=OFF;');
 	return db;
 }
+function databaseVersion(db) {
+	return Number(db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version);
+}
+function columnsFor(version) {
+	return { jobs: jobColumns(version), ...columns };
+}
 function dataset(db) {
 	return Object.fromEntries(
-		Object.entries(columns).map(([table, fields]) => [
+		Object.entries(columnsFor(databaseVersion(db))).map(([table, fields]) => [
 			table,
 			db
 				.prepare(
@@ -191,7 +186,7 @@ function fingerprint(db) {
 		.update(JSON.stringify(db.prepare('SELECT * FROM schema_migrations ORDER BY version').all()))
 		.digest('hex');
 }
-let expected;
+const expected = new Map();
 function signature(db) {
 	return db
 		.prepare(
@@ -200,21 +195,21 @@ function signature(db) {
 		.all()
 		.map((row) => ({ ...row, sql: row.sql?.replace(/\s+/g, '').replace(/IFNOTEXISTS/gi, '') }));
 }
-function expectedSchema() {
-	if (!expected) {
+function expectedSchema(version) {
+	if (!expected.has(version)) {
 		const db = new DatabaseSync(':memory:');
 		try {
-			applyMigrations(db);
-			expected = signature(db);
+			applyMigrations(db, version);
+			expected.set(version, signature(db));
 		} finally {
 			db.close();
 		}
 	}
-	return expected;
+	return expected.get(version);
 }
 function summary(db) {
 	return {
-		schema_version: schemaVersion,
+		schema_version: databaseVersion(db),
 		job_count: Number(db.prepare('SELECT COUNT(*) AS n FROM jobs').get().n),
 		update_count: Number(db.prepare('SELECT COUNT(*) AS n FROM job_updates').get().n)
 	};
@@ -223,12 +218,12 @@ function validateSchema(db) {
 	try {
 		assertMigrationHistory(db);
 		const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all();
-		if (versions.length !== schemaVersion)
+		if (versions.length < 1 || versions.length > schemaVersion)
 			fail(
 				'unsupported_schema',
 				'This backup schema is not supported by this version of Saturday.'
 			);
-		if (JSON.stringify(signature(db)) !== JSON.stringify(expectedSchema()))
+		if (JSON.stringify(signature(db)) !== JSON.stringify(expectedSchema(versions.length)))
 			fail('unsupported_schema', 'The file does not have the expected Saturday schema.');
 	} catch (error) {
 		if (error instanceof BackupError) throw error;
@@ -247,15 +242,23 @@ function validate(db) {
 			fail('invalid_backup', 'The backup failed database integrity or relationship checks.');
 		const data = dataset(db);
 		const active = new Map();
+		const version = databaseVersion(db);
 		for (const job of data.jobs) {
-			if (typeof job.id !== 'string' || !job.id || ![0, 1].includes(job.is_active))
-				throw new Error('job');
+			if (typeof job.id !== 'string' || !job.id) throw new Error('job');
 			parseJobInput({
 				...job,
-				posting_url: job.posting_url ?? undefined,
-				job_description: job.job_description ?? undefined,
-				notes: job.notes ?? undefined
+				...Object.fromEntries(
+					jobFields
+						.filter((field) => field.type === 'boolean' && field.since <= version)
+						.map((field) => [field.name, Boolean(job[field.name])])
+				)
 			});
+			for (const field of jobFields.filter(
+				(field) => field.type === 'boolean' && field.since <= version
+			)) {
+				if (![0, 1].includes(job[field.name])) throw new Error('boolean');
+			}
+			parseAssessment(job, version);
 			active.set(job.id, true);
 		}
 		for (const update of data.job_updates) {
@@ -446,7 +449,7 @@ function locked(operation, validateRecords = true) {
 	}
 }
 function insertData(db, data) {
-	for (const [table, fields] of Object.entries(columns)) {
+	for (const [table, fields] of Object.entries(columnsFor(databaseVersion(db)))) {
 		const statement = db.prepare(
 			`INSERT INTO ${table} (${fields.join(',')}) VALUES (${fields.map(() => '?').join(',')})`
 		);
@@ -483,8 +486,9 @@ export function prepareRestore(backupId, { now = Date.now() } = {}) {
 				incoming = connect(source.path);
 				validate(incoming);
 				stage = connect(stagePath, false);
-				applyMigrations(stage);
+				applyMigrations(stage, databaseVersion(incoming));
 				inTransaction(stage, () => insertData(stage, dataset(incoming)));
+				applyMigrations(stage);
 				const incomingSummary = validate(stage);
 				stage.close();
 				stage = null;

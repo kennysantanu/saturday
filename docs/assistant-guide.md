@@ -35,12 +35,15 @@ If **Settings** says the MCP entry point is missing, run `npm run build` and rel
 
 ## What your assistant can do
 
-| Tool             | What it does                                             | Changes data |
-| ---------------- | -------------------------------------------------------- | ------------ |
-| `list_jobs`      | Finds jobs by title or company (up to 50 per search)     | No           |
-| `get_job`        | Reads one job with its notes and dated update history    | No           |
-| `create_job`     | Adds a job with a title, company, and optional details   | Yes          |
-| `add_job_update` | Records a dated progress step or note on an existing job | Yes          |
+| Tool                | What it does                                                  | Changes data |
+| ------------------- | ------------------------------------------------------------- | ------------ |
+| `list_jobs`         | Finds jobs by title or company (up to 50 per search)          | No           |
+| `get_job`           | Reads one job with its notes and dated update history         | No           |
+| `create_job`        | Adds a job with a title, company, and optional details        | Yes          |
+| `edit_job`          | Updates job details; omitted fields are preserved             | Yes          |
+| `set_job_follow_up` | Sets/reschedules one follow-up, or clears it with a null date | Yes          |
+| `set_job_score`     | Sets assistant score and its explanation, read-only in the UI | Yes          |
+| `add_job_update`    | Records a dated progress step or note on an existing job      | Yes          |
 
 | `create_backup` | Saves a local backup and returns its ID | Creates a file |
 | `list_backups` | Lists backups, including recovery backups | No |
@@ -49,7 +52,11 @@ If **Settings** says the MCP entry point is missing, run `npm run build` and rel
 | `get_backup_settings` | Reads automatic backup settings/status | No |
 | `set_backup_settings` | Configures enablement, interval, and retained automatic-file count | Yes; authorizes retention |
 
-Records created this way are labeled **Added by assistant**. Editing or removing updates, editing jobs, dismissing jobs, and reopening jobs stay in the web app. Your assistant app may ask you to approve changes before it makes them.
+Records created this way are labeled **Added by assistant**. Editing or removing history updates, dismissing jobs, and reopening jobs stay in the web app. Your assistant app may ask you to approve changes before it makes them.
+
+Optional job fields include `location`, `work_arrangement` (`remote`, `hybrid`, `on-site`), `employment_type` (`full-time`, `part-time`, `contract`, `internship`, `temporary`), `compensation`, `source`, `application_deadline`, `follow_up_date`, `follow_up_comment`, and `is_starred`. Dates must be real `YYYY-MM-DD` calendar dates; a follow-up comment requires a date. Empty/null optional values clear them; clearing the date clears its comment. `edit_job` preserves omitted fields and never writes assessment fields.
+
+`create_job` can include `score` and `score_comment`. For an existing job use `set_job_score` with a required finite numeric `score` (decimals allowed, no fixed range) or null for unscored, plus an optional `score_comment` (up to 10,000 characters). This replaces the assessment; omitting the comment clears the previous one. Explain the scoring criteria and keep a consistent scale. Follow-up writes do not create history or change status; inactive follow-ups remain stored and are hidden from Dashboard.
 
 Example requests:
 
