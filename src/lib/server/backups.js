@@ -1,0 +1,722 @@
+import {
+	chmodSync,
+	mkdirSync,
+	readFileSync,
+	writeFileSync,
+	renameSync,
+	unlinkSync,
+	readdirSync,
+	lstatSync,
+	realpathSync,
+	existsSync,
+	openSync,
+	closeSync,
+	fsyncSync,
+	copyFileSync,
+	constants,
+	rmSync
+} from 'node:fs';
+import { resolve, join, dirname } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
+import { getDatabasePath, inTransaction } from './database.js';
+import { applyMigrations, assertMigrationHistory, schemaVersion } from './migrations.js';
+import { parseJobInput, validDate, ordinaryEventTypes } from './validation.js';
+
+export const MAX_BACKUP_BYTES = 100 * 1024 * 1024;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const defaults = {
+	enabled: false,
+	interval_hours: 24,
+	keep_count: 10,
+	last_success_at: null,
+	last_backup_id: null,
+	next_due_at: null,
+	retry_after: null,
+	last_error: null
+};
+const columns = {
+	jobs: [
+		'id',
+		'job_title',
+		'company_name',
+		'posting_url',
+		'job_description',
+		'notes',
+		'is_active',
+		'created_via',
+		'created_at',
+		'updated_at'
+	],
+	job_updates: [
+		'recorded_order',
+		'id',
+		'job_id',
+		'event_type',
+		'event_date',
+		'note',
+		'created_via',
+		'created_at',
+		'updated_at'
+	]
+};
+export class BackupError extends Error {
+	constructor(code, message) {
+		super(message);
+		this.code = code;
+		this.name = 'BackupError';
+	}
+}
+function fail(code, message) {
+	throw new BackupError(code, message);
+}
+export function publicBackupError(error) {
+	if (error instanceof BackupError) return { code: error.code, message: error.message };
+	if (String(error?.message).includes('locked') || String(error?.message).includes('busy'))
+		return { code: 'database_busy', message: 'Saturday is busy. Try again shortly.' };
+	return {
+		code: 'io_error',
+		message: 'The backup operation failed. Check storage space and file permissions.'
+	};
+}
+function safe(operation) {
+	try {
+		return operation();
+	} catch (error) {
+		const result = publicBackupError(error);
+		throw new BackupError(result.code, result.message);
+	}
+}
+function root() {
+	const p = getDatabasePath();
+	return existsSync(p) ? realpathSync(p) : resolve(p);
+}
+function paths() {
+	const p = root();
+	return { database: p, backups: `${p}.backups`, restore: `${p}.restore` };
+}
+function privateDir(path) {
+	if (existsSync(path) && (lstatSync(path).isSymbolicLink() || !lstatSync(path).isDirectory()))
+		fail('io_error', 'Backup storage must be a regular directory.');
+	mkdirSync(path, { recursive: true, mode: 0o700 });
+	return path;
+}
+function storage() {
+	const p = paths();
+	privateDir(p.backups);
+	privateDir(p.restore);
+	return p;
+}
+function id(value) {
+	if (typeof value !== 'string' || !UUID.test(value))
+		fail('not_found', 'Backup or restore ID not found.');
+	return value;
+}
+function regular(path) {
+	if (!existsSync(path)) fail('not_found', 'Backup file not found.');
+	const s = lstatSync(path);
+	if (s.isSymbolicLink() || !s.isFile())
+		fail('invalid_backup', 'Select a regular SQLite backup file.');
+	if (s.size > MAX_BACKUP_BYTES)
+		fail('backup_too_large', 'Backups must be no larger than 100 MiB.');
+	if (!s.size) fail('invalid_backup', 'The backup is empty.');
+	return s;
+}
+function syncFile(path) {
+	const fd = openSync(path, 'r');
+	try {
+		fsyncSync(fd);
+	} finally {
+		closeSync(fd);
+	}
+}
+function syncDirectory(path) {
+	let fd;
+	try {
+		fd = openSync(path, 'r');
+		fsyncSync(fd);
+	} catch (error) {
+		if (
+			process.platform !== 'win32' ||
+			!['EPERM', 'EACCES', 'EISDIR', 'EINVAL'].includes(error.code)
+		)
+			throw error;
+	} finally {
+		if (fd !== undefined) closeSync(fd);
+	}
+}
+function atomicJSON(path, data) {
+	const temp = `${path}.${randomUUID()}.tmp`;
+	try {
+		writeFileSync(temp, JSON.stringify(data), { mode: 0o600, flag: 'wx' });
+		syncFile(temp);
+		renameSync(temp, path);
+		syncDirectory(dirname(path));
+	} finally {
+		if (existsSync(temp)) unlinkSync(temp);
+	}
+}
+function json(path) {
+	return JSON.parse(readFileSync(path, 'utf8'));
+}
+function digest(path) {
+	regular(path);
+	return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+function connect(path, readOnly = true) {
+	const db = new DatabaseSync(path, { readOnly, allowExtension: false });
+	db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA trusted_schema=OFF;');
+	return db;
+}
+function dataset(db) {
+	return Object.fromEntries(
+		Object.entries(columns).map(([table, fields]) => [
+			table,
+			db
+				.prepare(
+					`SELECT ${fields.join(',')} FROM ${table} ORDER BY ${table === 'jobs' ? 'id' : 'recorded_order'}`
+				)
+				.all()
+		])
+	);
+}
+function dataHash(db) {
+	return createHash('sha256')
+		.update(JSON.stringify(dataset(db)))
+		.digest('hex');
+}
+function fingerprint(db) {
+	return createHash('sha256')
+		.update(dataHash(db))
+		.update(JSON.stringify(db.prepare('SELECT * FROM schema_migrations ORDER BY version').all()))
+		.digest('hex');
+}
+let expected;
+function signature(db) {
+	return db
+		.prepare(
+			"SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
+		)
+		.all()
+		.map((row) => ({ ...row, sql: row.sql?.replace(/\s+/g, '').replace(/IFNOTEXISTS/gi, '') }));
+}
+function expectedSchema() {
+	if (!expected) {
+		const db = new DatabaseSync(':memory:');
+		try {
+			applyMigrations(db);
+			expected = signature(db);
+		} finally {
+			db.close();
+		}
+	}
+	return expected;
+}
+function summary(db) {
+	return {
+		schema_version: schemaVersion,
+		job_count: Number(db.prepare('SELECT COUNT(*) AS n FROM jobs').get().n),
+		update_count: Number(db.prepare('SELECT COUNT(*) AS n FROM job_updates').get().n)
+	};
+}
+function validateSchema(db) {
+	try {
+		assertMigrationHistory(db);
+		const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all();
+		if (versions.length !== schemaVersion)
+			fail(
+				'unsupported_schema',
+				'This backup schema is not supported by this version of Saturday.'
+			);
+		if (JSON.stringify(signature(db)) !== JSON.stringify(expectedSchema()))
+			fail('unsupported_schema', 'The file does not have the expected Saturday schema.');
+	} catch (error) {
+		if (error instanceof BackupError) throw error;
+		if (String(error.message).includes('Unsupported database schema'))
+			fail('unsupported_schema', 'This database schema is not supported. Update Saturday.');
+		fail('invalid_backup', 'The file is not a valid Saturday backup.');
+	}
+}
+function validate(db) {
+	try {
+		validateSchema(db);
+		if (
+			db.prepare('PRAGMA integrity_check').get().integrity_check !== 'ok' ||
+			db.prepare('PRAGMA foreign_key_check').all().length
+		)
+			fail('invalid_backup', 'The backup failed database integrity or relationship checks.');
+		const data = dataset(db);
+		const active = new Map();
+		for (const job of data.jobs) {
+			if (typeof job.id !== 'string' || !job.id || ![0, 1].includes(job.is_active))
+				throw new Error('job');
+			parseJobInput({
+				...job,
+				posting_url: job.posting_url ?? undefined,
+				job_description: job.job_description ?? undefined,
+				notes: job.notes ?? undefined
+			});
+			active.set(job.id, true);
+		}
+		for (const update of data.job_updates) {
+			if (
+				!Number.isSafeInteger(update.recorded_order) ||
+				update.recorded_order < 1 ||
+				typeof update.id !== 'string' ||
+				!update.id ||
+				!active.has(update.job_id) ||
+				!validDate(update.event_date)
+			)
+				throw new Error('update');
+			if (
+				update.event_type !== null &&
+				![...ordinaryEventTypes, 'dismissed', 'reopened'].includes(update.event_type)
+			)
+				throw new Error('event');
+			if (update.note !== null && (typeof update.note !== 'string' || update.note.length > 10000))
+				throw new Error('note');
+			if (update.event_type === null && !update.note?.trim()) throw new Error('note');
+			if (['accepted', 'rejected', 'dismissed'].includes(update.event_type))
+				active.set(update.job_id, false);
+			if (update.event_type === 'reopened') active.set(update.job_id, true);
+		}
+		for (const row of [...data.jobs, ...data.job_updates]) {
+			if (
+				!['manual', 'mcp'].includes(row.created_via) ||
+				!['created_at', 'updated_at'].every(
+					(key) => typeof row[key] === 'string' && Number.isFinite(Date.parse(row[key]))
+				)
+			)
+				throw new Error('metadata');
+		}
+		if (data.jobs.some((job) => Boolean(job.is_active) !== active.get(job.id)))
+			throw new Error('state');
+		return summary(db);
+	} catch (error) {
+		if (error instanceof BackupError) throw error;
+		if (String(error.message).includes('Unsupported database schema'))
+			fail('unsupported_schema', 'This database schema is not supported. Update Saturday.');
+		fail('invalid_backup', 'The file is not a valid Saturday backup.');
+	}
+}
+function inspectPath(path) {
+	regular(path);
+	let db;
+	try {
+		db = connect(path);
+		return validate(db);
+	} catch (error) {
+		if (error instanceof BackupError) throw error;
+		fail('invalid_backup', 'The file is not a readable SQLite backup.');
+	} finally {
+		db?.close();
+	}
+}
+function backupPath(backupId) {
+	return join(storage().backups, `${id(backupId)}.sqlite`);
+}
+export function getBackupFile(backupId) {
+	return safe(() => {
+		const p = backupPath(backupId);
+		const metadataPath = join(storage().backups, `${id(backupId)}.json`);
+		if (!existsSync(metadataPath)) fail('not_found', 'Backup file not found.');
+		const metadata = json(metadataPath);
+		if (digest(p) !== metadata.sha256) fail('invalid_backup', 'The backup file has changed.');
+		return { path: p, metadata };
+	});
+}
+function publish(temp, kind, now) {
+	const p = storage();
+	const counts = inspectPath(temp);
+	const backupId = randomUUID();
+	const metadata = {
+		backup_id: backupId,
+		filename: `saturday-${kind}-${new Date(now).toISOString().replace(/[:.]/g, '-')}.sqlite`,
+		kind,
+		created_at: new Date(now).toISOString(),
+		app_version: '0.0.1',
+		...counts,
+		bytes: regular(temp).size,
+		sha256: digest(temp)
+	};
+	chmodSync(temp, 0o600);
+	syncFile(temp);
+	renameSync(temp, join(p.backups, `${backupId}.sqlite`));
+	try {
+		atomicJSON(join(p.backups, `${backupId}.json`), metadata);
+	} catch (error) {
+		unlinkSync(join(p.backups, `${backupId}.sqlite`));
+		throw error;
+	}
+	return metadata;
+}
+function snapshot(kind, now = Date.now()) {
+	const p = storage();
+	const temp = join(p.backups, `${randomUUID()}.tmp`);
+	let db;
+	try {
+		db = connect(p.database);
+		validateSchema(db);
+		db.prepare('VACUUM INTO ?').run(temp);
+		db.close();
+		db = null;
+		return publish(temp, kind, now);
+	} finally {
+		db?.close();
+		if (existsSync(temp)) unlinkSync(temp);
+	}
+}
+export function createBackup() {
+	return safe(() => snapshot('manual'));
+}
+export function importBackup(source) {
+	return safe(() => {
+		regular(source);
+		const p = storage();
+		const temp = join(p.backups, `${randomUUID()}.tmp`);
+		try {
+			copyFileSync(source, temp, constants.COPYFILE_EXCL);
+			return publish(temp, 'imported', Date.now());
+		} finally {
+			if (existsSync(temp)) unlinkSync(temp);
+		}
+	});
+}
+export function importBackupBytes(bytes) {
+	return safe(() => {
+		if (bytes.length > MAX_BACKUP_BYTES)
+			fail('backup_too_large', 'Backups must be no larger than 100 MiB.');
+		const p = storage();
+		const temp = join(p.backups, `${randomUUID()}.tmp`);
+		try {
+			writeFileSync(temp, bytes, { flag: 'wx', mode: 0o600 });
+			return publish(temp, 'imported', Date.now());
+		} finally {
+			if (existsSync(temp)) unlinkSync(temp);
+		}
+	});
+}
+export function listBackups({ limit = 20, offset = 0 } = {}) {
+	return safe(() => {
+		if (
+			!Number.isInteger(limit) ||
+			limit < 1 ||
+			limit > 50 ||
+			!Number.isInteger(offset) ||
+			offset < 0
+		)
+			fail('invalid_request', 'Invalid backup pagination.');
+		const p = storage();
+		const all = readdirSync(p.backups)
+			.filter((n) => UUID.test(n.replace(/\.json$/, '')) && n.endsWith('.json'))
+			.flatMap((name) => {
+				try {
+					const m = json(join(p.backups, name));
+					if (m.backup_id !== name.slice(0, -5)) return [];
+					regular(join(p.backups, `${m.backup_id}.sqlite`));
+					return [m];
+				} catch {
+					return [];
+				}
+			})
+			.sort(
+				(a, b) => b.created_at.localeCompare(a.created_at) || b.backup_id.localeCompare(a.backup_id)
+			);
+		return {
+			backups: all.slice(offset, offset + limit),
+			next_offset: all.length > offset + limit ? offset + limit : null
+		};
+	});
+}
+export function inspectBackup(backupId) {
+	return safe(() => inspectPath(getBackupFile(backupId).path));
+}
+function locked(operation, validateRecords = true) {
+	if (!existsSync(paths().database))
+		fail('not_found', 'Saturday database not found. Run setup first.');
+	const db = connect(paths().database, false);
+	try {
+		return inTransaction(db, () => {
+			if (validateRecords) validate(db);
+			else validateSchema(db);
+			return operation(db);
+		});
+	} finally {
+		db.close();
+	}
+}
+function insertData(db, data) {
+	for (const [table, fields] of Object.entries(columns)) {
+		const statement = db.prepare(
+			`INSERT INTO ${table} (${fields.join(',')}) VALUES (${fields.map(() => '?').join(',')})`
+		);
+		for (const row of data[table]) statement.run(...fields.map((key) => row[key]));
+	}
+}
+function cleanup(now) {
+	const p = storage();
+	for (const name of readdirSync(p.restore).filter(
+		(n) => n.endsWith('.json') && UUID.test(n.slice(0, -5))
+	)) {
+		const restoreId = name.slice(0, -5);
+		if (existsSync(join(p.restore, `${restoreId}.claim`))) continue;
+		try {
+			if (Date.parse(json(join(p.restore, name)).expires_at) <= now) {
+				rmSync(join(p.restore, `${restoreId}.sqlite`), { force: true });
+				unlinkSync(join(p.restore, name));
+			}
+		} catch {
+			/* An incomplete preparation is never usable. */
+		}
+	}
+}
+export function prepareRestore(backupId, { now = Date.now() } = {}) {
+	return safe(() =>
+		locked((db) => {
+			cleanup(now);
+			const p = storage();
+			const source = getBackupFile(backupId);
+			const restoreId = randomUUID();
+			const stagePath = join(p.restore, `${restoreId}.sqlite`);
+			let stage, incoming;
+			try {
+				incoming = connect(source.path);
+				validate(incoming);
+				stage = connect(stagePath, false);
+				applyMigrations(stage);
+				inTransaction(stage, () => insertData(stage, dataset(incoming)));
+				const incomingSummary = validate(stage);
+				stage.close();
+				stage = null;
+				chmodSync(stagePath, 0o600);
+				syncFile(stagePath);
+				const preview = {
+					restore_id: restoreId,
+					backup_id: backupId,
+					expires_at: new Date(now + 600000).toISOString(),
+					current: summary(db),
+					incoming: incomingSummary,
+					requires_confirmation: true,
+					warning:
+						'Restoring replaces all current jobs and updates. A recovery backup will be created first.'
+				};
+				atomicJSON(join(p.restore, `${restoreId}.json`), {
+					...preview,
+					target: root(),
+					sha256: digest(stagePath),
+					fingerprint: fingerprint(db)
+				});
+				return preview;
+			} catch (error) {
+				rmSync(stagePath, { force: true });
+				throw error;
+			} finally {
+				incoming?.close();
+				stage?.close();
+			}
+		})
+	);
+}
+export function restoreBackup(restoreId, confirm, { now = Date.now(), beforeCommit } = {}) {
+	return safe(() => {
+		if (confirm !== true)
+			fail(
+				'confirmation_required',
+				'Explicit confirmation is required after reviewing the restore preview.'
+			);
+		const p = storage();
+		id(restoreId);
+		const recordPath = join(p.restore, `${restoreId}.json`);
+		if (!existsSync(recordPath)) fail('not_found', 'Prepare the restore first.');
+		const claim = join(p.restore, `${restoreId}.claim`);
+		try {
+			mkdirSync(claim, { mode: 0o700 });
+			syncDirectory(p.restore);
+		} catch (error) {
+			if (error.code === 'EEXIST')
+				fail('restore_consumed', 'This restore has already been attempted. Prepare again.');
+			throw error;
+		}
+		const record = json(recordPath);
+		const stagePath = join(p.restore, `${restoreId}.sqlite`);
+		try {
+			if (Date.parse(record.expires_at) <= now)
+				fail('restore_expired', 'This preview has expired. Prepare again.');
+			if (record.target !== root() || digest(stagePath) !== record.sha256)
+				fail('restore_stale', 'The restore source or target has changed. Prepare again.');
+			const stage = connect(stagePath);
+			let result;
+			try {
+				validate(stage);
+				const incoming = dataset(stage);
+				const expectedHash = dataHash(stage);
+				result = locked((db) => {
+					if (fingerprint(db) !== record.fingerprint)
+						fail('restore_stale', 'Current records changed after the preview. Prepare again.');
+					const recovery = snapshot('recovery', now);
+					db.exec('DELETE FROM job_updates; DELETE FROM jobs;');
+					insertData(db, incoming);
+					beforeCommit?.();
+					validate(db);
+					if (dataHash(db) !== expectedHash)
+						fail('invalid_backup', 'Restored records did not match the backup.');
+					return { restore_id: restoreId, ...summary(db), recovery_backup_id: recovery.backup_id };
+				});
+			} finally {
+				stage.close();
+			}
+			// Commit already succeeded. Cleanup failure must not report a rolled-back restore.
+			try {
+				atomicJSON(recordPath, { ...record, status: 'completed', result });
+				rmSync(stagePath, { force: true });
+			} catch (error) {
+				result.cleanup_warning =
+					'Records were restored, but temporary-file cleanup failed. Do not retry this restore.';
+			}
+			return result;
+		} catch (error) {
+			try {
+				atomicJSON(recordPath, {
+					...record,
+					status: 'failed_or_uncertain',
+					error: publicBackupError(error)
+				});
+			} catch {}
+			throw error;
+		}
+	});
+}
+function settingsPath() {
+	return join(storage().backups, 'schedule.json');
+}
+export function getBackupSettings() {
+	return safe(() =>
+		existsSync(settingsPath()) ? { ...defaults, ...json(settingsPath()) } : { ...defaults }
+	);
+}
+export function setBackupSettings(input, { now = Date.now() } = {}) {
+	return safe(() => {
+		const keys = Object.keys(input);
+		if (
+			!keys.length ||
+			keys.some((key) => !['enabled', 'interval_hours', 'keep_count'].includes(key)) ||
+			('enabled' in input && typeof input.enabled !== 'boolean') ||
+			('interval_hours' in input &&
+				(!Number.isInteger(input.interval_hours) ||
+					input.interval_hours < 1 ||
+					input.interval_hours > 168)) ||
+			('keep_count' in input &&
+				(!Number.isInteger(input.keep_count) || input.keep_count < 1 || input.keep_count > 100))
+		)
+			fail(
+				'invalid_request',
+				'Use enabled true/false, an interval of 1–168 whole hours, and a count of 1–100.'
+			);
+		return locked(() => {
+			const old = getBackupSettings();
+			const updated = { ...old, ...input };
+			if ((!old.enabled && updated.enabled) || old.interval_hours !== updated.interval_hours) {
+				updated.next_due_at = new Date(
+					(!old.enabled && updated.enabled) || !old.last_success_at
+						? now
+						: Date.parse(old.last_success_at) + updated.interval_hours * 3600000
+				).toISOString();
+				updated.retry_after = null;
+			}
+			atomicJSON(settingsPath(), updated);
+			return updated;
+		}, false);
+	});
+}
+function prune(keep, now) {
+	const p = storage();
+	const protectedIds = new Set();
+	for (const name of readdirSync(p.restore).filter(
+		(n) => n.endsWith('.json') && UUID.test(n.slice(0, -5))
+	)) {
+		const r = json(join(p.restore, name));
+		if (
+			Date.parse(r.expires_at) > now ||
+			(existsSync(join(p.restore, `${r.restore_id}.claim`)) && !r.status)
+		)
+			protectedIds.add(r.backup_id);
+	}
+	let offset = 0;
+	const all = [];
+	do {
+		const page = listBackups({ limit: 50, offset });
+		all.push(...page.backups);
+		offset = page.next_offset;
+	} while (offset !== null);
+	const scheduled = all.filter((m) => m.kind === 'scheduled');
+	for (const m of scheduled.slice(keep)) {
+		if (protectedIds.has(m.backup_id)) continue;
+		regular(join(p.backups, `${m.backup_id}.sqlite`));
+		unlinkSync(join(p.backups, `${m.backup_id}.sqlite`));
+		unlinkSync(join(p.backups, `${m.backup_id}.json`));
+	}
+}
+export function runScheduledBackup({ now = Date.now() } = {}) {
+	return safe(() =>
+		locked(() => {
+			const settings = getBackupSettings();
+			if (
+				!settings.enabled ||
+				Date.parse(settings.next_due_at ?? '') > now ||
+				Date.parse(settings.retry_after ?? '') > now
+			)
+				return { ran: false };
+			let backup;
+			try {
+				backup = snapshot('scheduled', now);
+			} catch (error) {
+				atomicJSON(settingsPath(), {
+					...settings,
+					retry_after: new Date(now + 300000).toISOString(),
+					last_error: { ...publicBackupError(error), at: new Date(now).toISOString() }
+				});
+				return { ran: false, error: publicBackupError(error) };
+			}
+			let lastError = null;
+			try {
+				prune(settings.keep_count, now);
+			} catch (error) {
+				lastError = { ...publicBackupError(error), at: new Date(now).toISOString() };
+			}
+			atomicJSON(settingsPath(), {
+				...settings,
+				last_success_at: new Date(now).toISOString(),
+				last_backup_id: backup.backup_id,
+				next_due_at: new Date(now + settings.interval_hours * 3600000).toISOString(),
+				retry_after: null,
+				last_error: lastError
+			});
+			return { ran: true, backup };
+		}, false)
+	);
+}
+export function exportBackup(backupId, destination) {
+	return safe(() => {
+		const target = resolve(destination);
+		const p = paths();
+		if (
+			target === p.database ||
+			target.startsWith(`${p.database}-`) ||
+			target === p.backups ||
+			target.startsWith(`${p.backups}/`) ||
+			target === p.restore ||
+			target.startsWith(`${p.restore}/`)
+		)
+			fail('destination_exists', 'Choose a new destination outside Saturday database storage.');
+		const file = getBackupFile(backupId);
+		try {
+			copyFileSync(file.path, target, constants.COPYFILE_EXCL);
+			syncFile(target);
+		} catch (error) {
+			if (error.code === 'EEXIST')
+				fail('destination_exists', 'The destination already exists. Choose a new filename.');
+			throw error;
+		}
+		return target;
+	});
+}

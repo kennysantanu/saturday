@@ -70,13 +70,15 @@ Saturday saves your jobs in `data/saturday.db` inside the cloned repository. **S
 
 Your data stays on your computer, and Saturday does not collect anything. If you connect an assistant, the privacy of what it reads depends on that assistant's provider, so review their terms before sharing sensitive details.
 
-Saturday does not have a backup or restore feature yet; it is planned. Until then, you can stop the app and copy the database file somewhere safe.
+Use **Settings → Backup and restore** to download a portable SQLite snapshot or preview and restore an existing backup. Restoring replaces current jobs and updates and creates a recovery backup first. Backups are unencrypted; store downloaded copies somewhere safe. The [user guide](docs/user-guide.md#backup-and-restore) covers the full workflow.
+
+Automatic backups are optional: choose an interval of 1–168 hours and keep 1–100 automatic files (defaults: off, 24 hours, 10 files). They run while Saturday is started with `npm run start` or `npm run dev` and the computer is awake. Older automatic files are removed only after a new backup succeeds; manual, imported, and recovery files remain. Backups and schedule settings are stored beside the database in `<database-path>.backups/`; restore staging uses `<database-path>.restore/`. With a custom database outside this repository, these folders stay with that database.
 
 ## Connect your assistant (optional)
 
 Saturday includes a local MCP connection so an assistant can use the same job records you see in the browser. In short: open **Settings → Connect an assistant**, copy the configuration into your assistant app's MCP settings, reconnect, and ask it to list your jobs. The assistant's app starts the connection itself; you do not need to run another server. The web app and the assistant share one database, so changes from either appear in both. Refresh the browser to see an assistant's latest changes.
 
-An assistant can find and read jobs, create a job, and add a dated update. Its records are labeled **Added by assistant**. Editing or removing updates, dismissing jobs, and reopening jobs remain in the browser. The web app does not need an AI account or API key. Keep the generated configuration private because it contains paths on your computer.
+An assistant can find and read jobs, create a job, and add a dated update. Its records are labeled **Added by assistant**. It can also create/list backups, configure automatic backups, and preview/confirm a restore. Ask it to show the restore preview before authorizing replacement. Editing or removing updates, dismissing jobs, and reopening jobs remain in the browser. The web app does not need an AI account or API key. Keep the generated configuration private because it contains paths on your computer.
 
 See [Connect your assistant](docs/assistant-guide.md) for the full steps, an example configuration, and troubleshooting.
 
@@ -89,11 +91,12 @@ See [Connect your assistant](docs/assistant-guide.md) for the full steps, an exa
 
 ## Where Saturday is headed
 
-Saturday will grow beyond job tracking into a fuller career center. Planned features include tracking your professional network, storing resumes and other career documents, managing follow-ups, backup and restore, and more ways to support your career progression.
+Saturday will grow beyond job tracking into a fuller career center. Planned features include tracking your professional network, storing resumes and other career documents, managing follow-ups, and more ways to support your career progression.
 
 These features are not available yet. Saturday does not currently apply to jobs for you, import postings or PDFs, or sync between computers.
 
 ## Contributing
+
 Development commands, project layout, and conventions are in [docs/contributing.md](docs/contributing.md). The [documentation index](docs/README.md) lists all guides.
 
 ## License

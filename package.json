@@ -19,7 +19,11 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"lint": "prettier --check .",
-		"format": "prettier --write ."
+		"format": "prettier --write .",
+		"backup": "node scripts/backup.mjs",
+		"restore": "node scripts/restore.mjs",
+		"test": "npm run build:mcp && node --test tests/*.test.mjs",
+		"test:web": "npm run build && node --test tests/web.integration.mjs"
 	},
 	"devDependencies": {
 		"@internationalized/date": "^3.12.4",

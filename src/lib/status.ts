@@ -1,7 +1,7 @@
 /**
  * Shared labels and display rules for job status and update types.
  * Safe to import from browser and server code (no database access here).
- * Names follow plans/MVP.md ("User workflow and names").
+ * User-facing names are documented in docs/user-guide.md.
  */
 
 import { EVENT_LABELS as eventLabels } from './event-labels.js';

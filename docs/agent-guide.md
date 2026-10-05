@@ -81,3 +81,21 @@ The local desktop client starts the MCP process when it connects; it is not a se
 ## Report completion
 
 Tell the user the local browser address, whether the app is answering, the database location shown in Settings, whether the desktop client has successfully called an MCP tool, and any remaining step that needs their action. The client may ask the user to approve MCP write calls.
+
+## Backup and recovery commands
+
+Use the same `SATURDAY_DB_PATH` as the web/MCP process. CLI file arguments resolve from the caller's working directory. Commands with `--json` emit one result on stdout; diagnostics go to stderr. Exit codes are 0 success, 2 invalid arguments, and 1 operational failure.
+
+```sh
+npm run backup -- --output ./career-backup.sqlite --json
+npm run restore -- ./career-backup.sqlite --inspect --json
+npm run restore -- --restore-id <preview-id> --confirm --json
+npm run backup -- schedule show --json
+npm run backup -- schedule set --enabled true --interval-hours 24 --keep 10 --json
+```
+
+When parsing program output, use `node scripts/backup.mjs ... --json` or `node scripts/restore.mjs ... --json` directly; npm may print its own script banner. Backup retains a managed copy even when exporting. Export never overwrites an existing file. Show the preview to the user and obtain authorization before committing a restore; record the recovery backup location returned on success. Never automatically retry after an uncertain response. Do not send backup contents or private paths to unrelated services.
+
+Enabling/changing automatic backup retention requires user authorization to delete older automatic files under that policy. Manual/imported/recovery backups remain. Start the web app through the documented npm scripts to run the scheduler; MCP alone does not schedule backups. Custom launches of `build/index.js` must set `BODY_SIZE_LIMIT=105906176` to support the documented 100 MiB uploads, and do not automatically start the scheduler.
+
+The current app rejects newer migration histories. Do not alter migration records to bypass this check: upgrade the app instead. In-app/CLI restore requires a healthy target database; offline replacement of a corrupt database requires stopping web/MCP processes first and preserving the original database and sidecars for recovery.

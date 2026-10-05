@@ -19,12 +19,15 @@ You need Node.js 22.13 or newer and npm 10 or newer. Run `npm ci`, then `npm run
 | `npm run lint`      | Check formatting with Prettier                                |
 | `npm run format`    | Format project files                                          |
 
+Additional commands: `npm run backup` creates a managed snapshot, `npm run restore -- <file> --inspect` prepares a restore, and `npm test` builds MCP and runs backup/restore integration tests using temporary databases. `npm run test:web` builds the app and tests production Settings actions and worker supervision on localhost. See the [agent guide](agent-guide.md#backup-and-recovery-commands) for confirmation and scheduling commands.
+
 ## Project layout
 
 - `src/routes` — app pages
-- `src/lib/server` — database, job logic, validation, and the MCP server
+- `src/lib/server` — database, immutable migrations, job logic, backup/restore services, validation, and the MCP server
 - `src/lib/components` — shared interface components
-- `scripts` — setup and run commands
+- `scripts` — setup/run commands, backup/restore CLI, and supervised backup worker
+- `tests` — temporary-database service, process, CLI, and MCP integration tests
 - `docs` — user and contributor documentation
 - `plans` — product, architecture, and roadmap planning
 
