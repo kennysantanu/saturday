@@ -62,6 +62,38 @@
 			<ArrowUpRight class="size-5 shrink-0" aria-hidden="true" />
 		</a>
 
+		{#each [{ key: 'follow-ups', label: 'Follow-ups', items: data.followUps }, { key: 'deadlines', label: 'Application deadlines', items: data.deadlines }] as section (section.key)}
+			{#if section.items.length > 0}
+				<section aria-labelledby={section.key + '-heading'} class="space-y-3">
+					<h2 id={section.key + '-heading'} class="section-title">{section.label}</h2>
+					<Card.Root class="gap-0 divide-y divide-border p-0">
+						{#each section.items as item (item.jobId)}
+							<a href="/jobs/{item.jobId}" class="job-row group">
+								<div class="company-mark" aria-hidden="true"><CalendarDays class="size-5" /></div>
+								<div class="job-row-title min-w-0">
+									<p class="font-semibold">{item.title}</p>
+									<p class="mt-1 text-sm text-muted-foreground">{item.company}</p>
+									{#if 'comment' in item && item.comment}<p
+											class="mt-1 text-sm break-words whitespace-pre-wrap text-muted-foreground"
+										>
+											{item.comment}
+										</p>{/if}
+								</div>
+								<div class="job-row-status">
+									<Badge variant={item.date < data.today ? 'destructive' : 'secondary'}
+										>{item.date < data.today ? 'Overdue · ' : ''}{relativeDay(
+											item.date,
+											data.today
+										)}</Badge
+									>
+								</div>
+								<ChevronRight class="size-4 shrink-0 text-muted-foreground" />
+							</a>
+						{/each}
+					</Card.Root>
+				</section>
+			{/if}
+		{/each}
 		{#if data.upcoming.length > 0}
 			<section aria-labelledby="upcoming-heading" class="space-y-3">
 				<h2 id="upcoming-heading" class="section-title">Coming up</h2>
@@ -130,6 +162,8 @@
 						company={job.company}
 						status={job.status}
 						latestUpdate={job.latestUpdate}
+						isStarred={job.isStarred}
+						score={job.score}
 					/>
 				{/each}
 			</Card.Root>

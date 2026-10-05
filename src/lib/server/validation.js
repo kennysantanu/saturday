@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { editableJobFields, assessmentJobFields } from '../job-fields.js';
 
 export class ValidationError extends Error {
 	constructor(fieldErrors, message = 'Some details need attention.') {
@@ -19,7 +20,12 @@ export class ServiceError extends Error {
 const optionalText = (max, label) =>
 	z
 		.preprocess(
-			(value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+			(value) =>
+				typeof value === 'string' && value.trim() === ''
+					? undefined
+					: value === null
+						? undefined
+						: value,
 			z.string().trim().max(max, `${label} must be ${max} characters or fewer.`).optional()
 		)
 		.transform((value) => value ?? null);
@@ -30,30 +36,92 @@ const validDate = (value) => {
 	return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 };
 
-const postingUrlSchema = optionalText(2048, 'Job posting link').refine((value) => {
-	if (value === null) return true;
-	try {
-		const url = new URL(value);
-		return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.hostname);
-	} catch {
-		return false;
+function jobFieldSchema(field, wire = false) {
+	if (field.type === 'boolean') {
+		if (wire) return z.boolean();
+		return z
+			.preprocess(
+				(value) => (value === '1' || value === 'on' ? true : value === '0' ? false : value),
+				z.boolean().optional()
+			)
+			.transform((value) => value ?? field.default);
 	}
-}, 'Enter a valid link that starts with http:// or https://.');
-
-const jobInputSchema = z.object({
-	job_title: z
-		.string()
-		.trim()
-		.min(1, 'Enter a job title.')
-		.max(200, 'Job title must be 200 characters or fewer.'),
-	company_name: z
-		.string()
-		.trim()
-		.min(1, 'Enter a company.')
-		.max(200, 'Company must be 200 characters or fewer.'),
-	posting_url: postingUrlSchema,
-	job_description: optionalText(50000, 'Job description'),
-	notes: optionalText(10000, 'Job notes')
+	if (field.type === 'number') return z.number().finite().nullable();
+	if (field.type === 'enum') {
+		if (wire) return z.enum([...field.options, '']).nullable();
+		return z
+			.preprocess(
+				(value) => (value === '' || value === null ? undefined : value),
+				z.enum(field.options).optional()
+			)
+			.transform((value) => value ?? null);
+	}
+	if (field.required)
+		return z
+			.string()
+			.trim()
+			.min(1, field.requiredMessage)
+			.max(field.max, `${field.label} must be ${field.max} characters or fewer.`);
+	const text = wire
+		? z.string().trim().max(field.max).nullable()
+		: optionalText(field.max, field.label);
+	if (field.type === 'date')
+		return text.refine(
+			(value) => value === null || (wire && value === '') || validDate(value),
+			'Enter a real date in YYYY-MM-DD format.'
+		);
+	if (field.type === 'url')
+		return text.refine((value) => {
+			if (value === null || (wire && value === '')) return true;
+			try {
+				const url = new URL(value);
+				return ['http:', 'https:'].includes(url.protocol) && Boolean(url.hostname);
+			} catch {
+				return false;
+			}
+		}, 'Enter a valid link that starts with http:// or https://.');
+	return text;
+}
+export const jobInputShape = Object.fromEntries(
+	editableJobFields.map((field) => [field.name, jobFieldSchema(field)])
+);
+export const assessmentSchema = z.object(
+	Object.fromEntries(assessmentJobFields.map((field) => [field.name, jobFieldSchema(field)]))
+);
+export function parseAssessment(input, version = Infinity) {
+	const schema =
+		version === Infinity
+			? assessmentSchema
+			: z.object(
+					Object.fromEntries(
+						assessmentJobFields
+							.filter((field) => field.since <= version)
+							.map((field) => [field.name, jobFieldSchema(field)])
+					)
+				);
+	return parseSchema(schema, input);
+}
+const jobInputSchema = z.object(jobInputShape).superRefine((value, ctx) => {
+	for (const field of editableJobFields) {
+		if (field.requires && value[field.name] && !value[field.requires])
+			ctx.addIssue({ code: 'custom', path: [field.name], message: field.requiresMessage });
+	}
+});
+// Wire schemas keep omitted keys omitted; services apply blank/null normalization and defaults.
+export function jobMcpInputShape({ partial = false, assessment = false } = {}) {
+	return Object.fromEntries(
+		[...editableJobFields, ...(assessment ? assessmentJobFields : [])].map((field) => {
+			const schema = jobFieldSchema(field, true);
+			return [field.name, partial || !field.required ? schema.optional() : schema];
+		})
+	);
+}
+export const followUpMcpSchema = z.object({
+	follow_up_date: jobFieldSchema(
+		editableJobFields.find((field) => field.name === 'follow_up_date'),
+		true
+	),
+	follow_up_comment: jobMcpInputShape().follow_up_comment
 });
 
 const ordinaryEventTypes = [

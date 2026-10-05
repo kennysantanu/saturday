@@ -92,6 +92,8 @@
 						company={job.company}
 						status={job.status}
 						latestUpdate={job.latestUpdate}
+						isStarred={job.isStarred}
+						score={job.score}
 					/>
 				{/each}
 			</Card.Root>

@@ -4,6 +4,9 @@
 	import Bot from '@lucide/svelte/icons/bot';
 	import { enhance } from '$app/forms';
 	import Plus from '@lucide/svelte/icons/plus';
+	import Star from '@lucide/svelte/icons/star';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import { jobInfoFields } from '$lib/job-fields.js';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import ConfirmDialog from '$lib/components/app/confirm-dialog.svelte';
@@ -19,8 +22,8 @@
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
-	import { focusFirstError } from '$lib/forms';
-	import { hostOf } from '$lib/format';
+	import { focusFirstError, enhanceWithFocus } from '$lib/forms';
+	import { hostOf, formatDate, relativeDay } from '$lib/format';
 	import { UPDATE_CHOICES } from '$lib/status';
 
 	type JobUpdate = {
@@ -41,7 +44,7 @@
 	// Each form shows its own errors: Add update and Edit update in their dialogs, the rest here.
 	const addErrors = $derived(form?.action === 'addUpdate' ? errors : {});
 	const pageError = $derived(
-		form?.action === 'dismiss' || form?.action === 'reopen' ? errors.form : undefined
+		['dismiss', 'reopen', 'star'].includes(form?.action ?? '') ? errors.form : undefined
 	);
 	let open = $state(false);
 	let dismissOpen = $state(false);
@@ -87,6 +90,15 @@
 					{/if}
 				{/snippet}
 				{#snippet actions()}
+					<form method="POST" action="?/star" use:enhance={enhanceWithFocus}>
+						<input type="hidden" name="is_starred" value={job.isStarred ? '0' : '1'} />
+						<Button type="submit" variant="outline" aria-pressed={job.isStarred}>
+							<Star
+								data-icon="inline-start"
+								class={job.isStarred ? 'fill-current text-primary' : ''}
+							/>{job.isStarred ? 'Starred' : 'Star'}
+						</Button>
+					</form>
 					<Button href="/jobs/{job.id}/edit" variant="outline"
 						><Pencil data-icon="inline-start" />Edit</Button
 					>
@@ -164,8 +176,106 @@
 
 			<aside class="min-w-0 space-y-6">
 				<Card.Root>
+					<Card.Header><Card.Title class="text-base">Follow-up</Card.Title></Card.Header>
+					<Card.Content class="space-y-4">
+						{#if job.followUpDate}
+							<p class="text-sm font-medium">
+								{job.followUpDate < data.today ? 'Overdue · ' : ''}{relativeDay(
+									job.followUpDate,
+									data.today
+								)}
+							</p>
+							{#if job.followUpComment}<p class="text-sm break-words whitespace-pre-wrap">
+									{job.followUpComment}
+								</p>{/if}
+						{:else}<p class="text-sm text-muted-foreground">No follow-up scheduled.</p>{/if}
+						{#if !job.isActive && job.followUpDate}<p class="text-sm text-muted-foreground">
+								Kept here while inactive. Reopening shows it on the Dashboard again.
+							</p>{/if}
+						<details
+							class="disclosure inset-surface group"
+							open={form?.action === 'followUp' && Boolean(form?.errors)}
+						>
+							<summary
+								>{job.followUpDate ? 'Reschedule or edit' : 'Schedule follow-up'}<ChevronDown
+									class="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+								/></summary
+							>
+							<form
+								method="POST"
+								action="?/followUp"
+								use:enhance={enhanceWithFocus}
+								class="disclosure-body"
+							>
+								{#if form?.action === 'followUp' && errors.form}<Notice
+										tone="error"
+										title="Follow-up was not saved">{errors.form}</Notice
+									>{/if}
+								<Field
+									id="follow_up_date"
+									label="Follow-up date"
+									error={form?.action === 'followUp' ? errors.follow_up_date : undefined}
+								>
+									{#snippet control(attrs)}<Input
+											{...attrs}
+											name="follow_up_date"
+											type="date"
+											value={form?.action === 'followUp'
+												? (values.follow_up_date ?? job.followUpDate ?? '')
+												: (job.followUpDate ?? '')}
+										/>{/snippet}
+								</Field>
+								<Field
+									id="follow_up_comment"
+									label="Comment"
+									hint="Optional. Set a date to add a comment."
+									error={form?.action === 'followUp' ? errors.follow_up_comment : undefined}
+								>
+									{#snippet control(attrs)}<Textarea
+											{...attrs}
+											name="follow_up_comment"
+											rows={3}
+											maxlength={10000}
+											value={form?.action === 'followUp'
+												? (values.follow_up_comment ?? job.followUpComment ?? '')
+												: (job.followUpComment ?? '')}
+										/>{/snippet}
+								</Field>
+								<Button type="submit" variant="outline">Save follow-up</Button>
+							</form>
+						</details>
+						{#if job.followUpDate}<form
+								method="POST"
+								action="?/clearFollowUp"
+								use:enhance={enhanceWithFocus}
+							>
+								<Button type="submit" variant="ghost" size="sm">Clear follow-up</Button>
+							</form>{/if}
+					</Card.Content>
+				</Card.Root>
+				<Card.Root>
+					<Card.Header><Card.Title class="text-base">Assistant assessment</Card.Title></Card.Header>
+					<Card.Content class="space-y-3">
+						<p class="text-2xl font-semibold tabular-nums">{job.score ?? 'Unscored'}</p>
+						{#if job.scoreComment}<p class="text-sm break-words whitespace-pre-wrap">
+								{job.scoreComment}
+							</p>{/if}
+						<p class="text-sm text-muted-foreground">
+							Your AI assistant manages the score and its explanation.
+						</p>
+					</Card.Content>
+				</Card.Root>
+				<Card.Root>
 					<Card.Header><Card.Title class="text-base">Job information</Card.Title></Card.Header>
 					<Card.Content class="space-y-4 text-sm">
+						{#each jobInfoFields as field (field.name)}
+							{#if job[field.key]}<div class="space-y-1">
+									<p class="text-muted-foreground">{field.label}</p>
+									<p class="break-words whitespace-pre-wrap">
+										{field.type === 'date' ? formatDate(job[field.key]) : job[field.key]}
+									</p>
+								</div>{/if}
+						{/each}
 						{#if job.postingUrl}
 							<div class="space-y-1">
 								<p class="text-muted-foreground">Job posting link</p>

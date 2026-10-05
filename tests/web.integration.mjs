@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { parse } from 'devalue';
 import { migrateDatabase } from '../src/lib/server/database.js';
-import { createJob, getJob } from '../src/lib/server/services.js';
+import { createJob, getJob, setJobScore } from '../src/lib/server/services.js';
 import { setBackupSettings, listBackups } from '../src/lib/server/backups.js';
 
 test('production Settings download/upload/preview/confirm and supervised worker lifecycle', async () => {
@@ -102,6 +102,79 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 		schedule.set('interval_hours', '24');
 		schedule.set('keep_count', '10');
 		assert.equal((await post('schedule', schedule)).type, 'redirect');
+		const postJob = async (path, values) => {
+			const response = await fetch(`${base}${path}`, {
+				method: 'POST',
+				headers: { origin: base, accept: 'application/json', 'x-sveltekit-action': 'true' },
+				body: new URLSearchParams(values)
+			});
+			return response.json();
+		};
+		const newPage = await (await fetch(`${base}/jobs/new`)).text();
+		assert.ok(newPage.includes('name="work_arrangement"'));
+		assert.ok(newPage.includes('name="follow_up_comment"'));
+		assert.ok(!newPage.includes('name="score"'));
+		const newJob = await postJob('/jobs/new', {
+			job_title: 'UI details',
+			company_name: 'Example',
+			location: 'Seattle',
+			work_arrangement: 'remote',
+			employment_type: 'contract',
+			compensation: '$100/hour',
+			source: 'Referral',
+			application_deadline: '2026-11-01',
+			follow_up_date: '2026-10-01',
+			follow_up_comment: 'Send email',
+			is_starred: '1',
+			score: '999',
+			score_comment: 'Forged'
+		});
+		assert.equal(newJob.type, 'redirect');
+		const newId = newJob.location.split('/').at(-1).split('?')[0];
+		assert.equal(getJob(newId).location, 'Seattle');
+		assert.equal(getJob(newId).score, null);
+		setJobScore(newId, { score: 8.5, score_comment: 'Strong relevant skills' });
+		const detail = await (await fetch(`${base}/jobs/${newId}`)).text();
+		assert.ok(detail.includes('Seattle'));
+		assert.ok(detail.includes('Strong relevant skills'));
+		assert.ok(detail.includes('Starred'));
+		assert.ok(!detail.includes('name="score"'));
+		const dashboard = await (await fetch(base)).text();
+		assert.ok(dashboard.includes('Follow-ups'));
+		assert.ok(dashboard.includes('Send email'));
+		assert.ok(dashboard.includes('Overdue'));
+		const edited = await postJob(`/jobs/${newId}/edit`, {
+			job_title: 'UI details edited',
+			company_name: 'Example',
+			location: 'Portland',
+			is_starred: '0',
+			score: '0',
+			score_comment: 'Forged'
+		});
+		assert.equal(edited.type, 'redirect');
+		assert.equal(getJob(newId).score, 8.5);
+		assert.equal(getJob(newId).scoreComment, 'Strong relevant skills');
+		assert.equal(getJob(newId).followUpComment, 'Send email');
+		const invalidJob = await postJob(`/jobs/${newId}/edit`, {
+			job_title: 'Title',
+			company_name: 'Example',
+			application_deadline: '2026-02-30'
+		});
+		assert.equal(invalidJob.type, 'failure');
+		assert.equal(getJob(newId).location, 'Portland');
+		assert.equal(
+			(
+				await postJob(`/jobs/${newId}?/followUp`, {
+					follow_up_date: '2026-12-01',
+					follow_up_comment: 'New reminder'
+				})
+			).type,
+			'redirect'
+		);
+		assert.equal(getJob(newId).followUpComment, 'New reminder');
+		assert.equal((await postJob(`/jobs/${newId}?/clearFollowUp`, {})).type, 'redirect');
+		assert.equal(getJob(newId).followUpDate, null);
+		assert.equal(getJob(newId).followUpComment, null);
 		const childExit = new Promise((r) => child.on('close', r));
 		child.kill('SIGTERM');
 		await childExit;

@@ -103,7 +103,9 @@ the tab bar. In Tailwind, write `rounded-[var(--r-group)]`; do not use
   menus work best on touch); `Input` and `Textarea` from the ui folder.
 - Mark required fields with `*` and include a “* Required” cue at the top of
   the form.
-- Optional fields go in a `.disclosure` with a `.disclosure-body`.
+- Additional optional fields go in a `.disclosure` with a `.disclosure-body`.
+  Add/Edit job keeps the posting link, description, notes, and star checkbox
+  alongside title/company; employment and follow-up details use the disclosure.
 - Form footers use `.form-actions` (capsules; primary last).
 - After a failed save, focus moves to the first invalid field or the error
   `Notice`. Use `enhanceWithFocus` from `$lib/forms` with `use:enhance`, or call

@@ -20,7 +20,8 @@ You do not need AI to use Saturday. The app works fully on its own, and connecti
 
 ## What Saturday can do today
 
-- **Keep each opportunity together.** Save a job title and company, then add a posting link, description, or your own notes when you have them.
+- **Keep each opportunity together.** Save a job title and company, then add location, work arrangement, employment type, compensation, source, a posting link, description, or notes. Star jobs for easy recognition.
+- **Know what needs attention.** Schedule a follow-up with a comment, reschedule or clear it, and see overdue follow-ups and upcoming application deadlines on Dashboard.
 - **Remember what happened.** Record applications, prescreens, interviews, offers, outcomes, and general notes in a dated history. You can correct a mistaken update later.
 - **See where things stand.** The Dashboard shows active jobs, recent activity, upcoming dated updates, and how many jobs reached each step. The Jobs list starts with active jobs; **All** also shows dismissed, accepted, and rejected jobs.
 - **Focus on the jobs you still want.** Dismiss an opportunity you are no longer pursuing and reopen it if things change.
@@ -78,7 +79,7 @@ Automatic backups are optional: choose an interval of 1–168 hours and keep 1�
 
 Saturday includes a local MCP connection so an assistant can use the same job records you see in the browser. In short: open **Settings → Connect an assistant**, copy the configuration into your assistant app's MCP settings, reconnect, and ask it to list your jobs. The assistant's app starts the connection itself; you do not need to run another server. The web app and the assistant share one database, so changes from either appear in both. Refresh the browser to see an assistant's latest changes.
 
-An assistant can find and read jobs, create a job, and add a dated update. Its records are labeled **Added by assistant**. It can also create/list backups, configure automatic backups, and preview/confirm a restore. Ask it to show the restore preview before authorizing replacement. Editing or removing updates, dismissing jobs, and reopening jobs remain in the browser. The web app does not need an AI account or API key. Keep the generated configuration private because it contains paths on your computer.
+An assistant can find and read jobs, create or edit job details, schedule follow-ups, and add a dated update. It can also set a numeric assessment and explanation, which are read-only in the UI. Its records are labeled **Added by assistant**. It can also create/list backups, configure automatic backups, and preview/confirm a restore. Ask it to show the restore preview before authorizing replacement. Editing or removing updates, dismissing jobs, and reopening jobs remain in the browser. The web app does not need an AI account or API key. Keep the generated configuration private because it contains paths on your computer.
 
 See [Connect your assistant](docs/assistant-guide.md) for the full steps, an example configuration, and troubleshooting.
 

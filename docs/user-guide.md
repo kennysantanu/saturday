@@ -5,7 +5,7 @@ Saturday keeps your job search in a SQLite file on your computer. You can track 
 ## Add and find jobs
 
 1. Open **Dashboard** or **Jobs** and choose **Add job**.
-2. Enter a **Job title** and **Company**. Under **More details**, you can add a posting link, paste the job description, and write your own notes.
+2. Enter a **Job title** and **Company**. The main form also has an optional posting link, description, notes, and a star checkbox. Under **More details**, you can add employment type, work arrangement, location, compensation, source, an application deadline, and a follow-up date/comment.
 3. Save the job to open its detail page. Use **Edit** there to correct its information later.
 
 **Jobs → Active** shows jobs you are still pursuing. **All** also shows dismissed jobs and jobs made inactive by an accepted offer or employer rejection. Open a row to see its details and history. A new job can have no updates.
@@ -26,11 +26,17 @@ To fix an ordinary update, use its **Edit** action. To remove one, choose **Remo
 
 Select a progress count to see the jobs behind it. **Recently updated** links to jobs with recent activity. **Coming up** appears when active jobs have future dated updates.
 
+## Follow-ups, starred jobs, and assessments
+
+Use **Star** on a job to mark it for attention; starred jobs show a star in lists. In the **Follow-up** card, schedule one date with an optional comment, reschedule it, or clear it. This does not add history or change the job status. Dashboard shows active-job follow-ups, earliest first, including overdue dates, alongside upcoming application deadlines. Inactive jobs keep their follow-up but hide it from Dashboard until reopened. Dates use your local calendar.
+
+**Assistant assessment** displays a numeric score and plain-text explanation managed through MCP. You can read both in the UI but cannot edit them there. There is no fixed scoring scale; ask your assistant to use a consistent scale and explain its criteria. An empty score means unscored; zero is a valid score.
+
 ## Data and assistant connection
 
 **Settings** displays the database file's location. The default is `data/saturday.db` in the repository. Use the Backup and restore section to save or recover your data, as described below.
 
-To connect a local assistant, build Saturday and follow **Settings → Connect an assistant**. Its generated configuration uses paths for your installation and the same database file as the web app. After reconnecting the client, ask it to list your jobs to confirm access. The assistant can list and read jobs, create a job, and add a dated update. Job edits, update corrections and removals, dismissal, and reopening remain in the web app. The [assistant guide](assistant-guide.md) has the full connection steps and troubleshooting. An assistant installing Saturday for you can follow the [agent setup guide](agent-guide.md).
+To connect a local assistant, build Saturday and follow **Settings → Connect an assistant**. Its generated configuration uses paths for your installation and the same database file as the web app. After reconnecting the client, ask it to list your jobs to confirm access. The assistant can list and read jobs, create a job, and add a dated update. The assistant can also edit job details, schedule follow-ups, and set an assessment score with an explanation. Update corrections and removals, dismissal, and reopening remain in the web app. The [assistant guide](assistant-guide.md) has the full connection steps and troubleshooting. An assistant installing Saturday for you can follow the [agent setup guide](agent-guide.md).
 
 ## Backup and restore
 
@@ -38,7 +44,7 @@ In **Settings → Backup and restore**, select **Download backup** to save one p
 
 To restore, upload a SQLite backup (up to 100 MiB), or select a saved backup. An uploaded file takes priority. Choose **Preview restore**, review current and incoming counts, then **Restore this backup** and confirm replacement. Restoring replaces all current jobs/updates rather than merging them. It preserves IDs, dates, history, and assistant attribution and keeps a recovery backup of the records it replaces. No restart is needed. Refresh other open tabs to see restored data.
 
-Previews expire after ten minutes and become invalid if records change. Prepare again if this happens. A restore ID can be attempted only once, including failed attempts. If a response is interrupted, inspect your records and saved recovery backups before preparing another restore. A corrupt active database needs offline recovery; the in-app workflow requires a healthy installation. Backups from newer app schemas are rejected until you upgrade Saturday.
+Previews expire after ten minutes and become invalid if records change. Prepare again if this happens. A restore ID can be attempted only once, including failed attempts. If a response is interrupted, inspect your records and saved recovery backups before preparing another restore. A corrupt active database needs offline recovery; the in-app workflow requires a healthy installation. Backups from newer app schemas are rejected until you upgrade Saturday. Backups from the original schema remain restorable; fields added later start empty (and stars start off). Current backups include all job details and assessments.
 
 ### Automatic backups
 
