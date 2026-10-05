@@ -1,3 +1,12 @@
+import {
+	createBackup,
+	listBackups,
+	prepareRestore,
+	restoreBackup,
+	getBackupSettings,
+	setBackupSettings,
+	publicBackupError
+} from './backups.js';
 import { McpServer } from '@modelcontextprotocol/server';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
@@ -177,6 +186,101 @@ server.registerTool(
 		}
 	}
 );
+
+// Backup tools intentionally accept managed IDs rather than arbitrary filesystem paths.
+const backupTools = [
+	[
+		'create_backup',
+		'Create a local Saturday backup. Contains private career data; returns an ID, not file contents.',
+		z.object({}),
+		() => createBackup(),
+		false,
+		false
+	],
+	[
+		'list_backups',
+		'List managed local backups, including automatic and recovery backups.',
+		z.object({
+			limit: z.number().int().min(1).max(50).optional(),
+			offset: z.number().int().min(0).optional()
+		}),
+		(input) => listBackups(input),
+		true,
+		false
+	],
+	[
+		'prepare_restore',
+		'Preview replacement of all current jobs and updates from a backup. Show current/incoming counts to the user and obtain explicit authorization before restore_backup. Preview expires after ten minutes.',
+		z.object({ backup_id: z.string().uuid() }),
+		({ backup_id }) => prepareRestore(backup_id),
+		false,
+		false
+	],
+	[
+		'restore_backup',
+		'DESTRUCTIVE: replace current records using a prepared restore. Call only after showing the preview and obtaining explicit user authorization. Creates a recovery backup first. Never automatically retry.',
+		z.object({ restore_id: z.string().uuid(), confirm: z.literal(true) }),
+		({ restore_id, confirm }) => restoreBackup(restore_id, confirm),
+		false,
+		true
+	],
+	[
+		'get_backup_settings',
+		'Read automatic backup settings and status. Automatic backups run only while the web app runs through npm start or npm run dev.',
+		z.object({}),
+		() => getBackupSettings(),
+		true,
+		false
+	],
+	[
+		'set_backup_settings',
+		'Configure automatic backups. Enabling authorizes deletion of older automatic backups beyond keep_count. Manual and recovery backups are preserved. Obtain user authorization for this policy before changing it.',
+		z
+			.object({
+				enabled: z.boolean().optional(),
+				interval_hours: z.number().int().min(1).max(168).optional(),
+				keep_count: z.number().int().min(1).max(100).optional()
+			})
+			.refine((input) => Object.keys(input).length > 0, 'Provide at least one setting.'),
+		(input) => setBackupSettings(input),
+		false,
+		true
+	]
+];
+for (const [
+	name,
+	description,
+	inputSchema,
+	operation,
+	readOnlyHint,
+	destructiveHint
+] of backupTools) {
+	server.registerTool(
+		name,
+		{
+			description,
+			inputSchema,
+			annotations: {
+				readOnlyHint,
+				destructiveHint,
+				idempotentHint: readOnlyHint || name === 'set_backup_settings',
+				openWorldHint: false
+			}
+		},
+		async (input) => {
+			try {
+				return toolResult({ ok: true, ...operation(input) });
+			} catch (error) {
+				return {
+					content: [
+						{ type: 'text', text: JSON.stringify({ ok: false, error: publicBackupError(error) }) }
+					],
+					isError: true
+				};
+			}
+		}
+	);
+}
 
 const transport = new StdioServerTransport();
 server.connect(transport).catch((error) => {

@@ -28,6 +28,24 @@ Select a progress count to see the jobs behind it. **Recently updated** links to
 
 ## Data and assistant connection
 
-**Settings** displays the database file's location. The default is `data/saturday.db` in the repository. Saturday currently has no in-app backup or restore command. Stop the app before copying the database file for a backup.
+**Settings** displays the database file's location. The default is `data/saturday.db` in the repository. Use the Backup and restore section to save or recover your data, as described below.
 
 To connect a local assistant, build Saturday and follow **Settings → Connect an assistant**. Its generated configuration uses paths for your installation and the same database file as the web app. After reconnecting the client, ask it to list your jobs to confirm access. The assistant can list and read jobs, create a job, and add a dated update. Job edits, update corrections and removals, dismissal, and reopening remain in the web app. The [assistant guide](assistant-guide.md) has the full connection steps and troubleshooting. An assistant installing Saturday for you can follow the [agent setup guide](agent-guide.md).
+
+## Backup and restore
+
+In **Settings → Backup and restore**, select **Download backup** to save one portable `.sqlite` file containing your jobs and history. The app keeps a local managed copy too. Files are not encrypted and contain private career information; copy important backups to another device or location if you need protection against loss of this computer.
+
+To restore, upload a SQLite backup (up to 100 MiB), or select a saved backup. An uploaded file takes priority. Choose **Preview restore**, review current and incoming counts, then **Restore this backup** and confirm replacement. Restoring replaces all current jobs/updates rather than merging them. It preserves IDs, dates, history, and assistant attribution and keeps a recovery backup of the records it replaces. No restart is needed. Refresh other open tabs to see restored data.
+
+Previews expire after ten minutes and become invalid if records change. Prepare again if this happens. A restore ID can be attempted only once, including failed attempts. If a response is interrupted, inspect your records and saved recovery backups before preparing another restore. A corrupt active database needs offline recovery; the in-app workflow requires a healthy installation. Backups from newer app schemas are rejected until you upgrade Saturday.
+
+### Automatic backups
+
+Enable **Automatic backups**, set **Every N hours** (1–168), and **Keep N automatic backups** (1–100), then save. Defaults are off, every 24 hours, and keep 10. Enabling makes the first backup due immediately; the worker checks once per minute. View the last successful backup, next due time, and errors in Settings; refresh to see changes.
+
+Automatic backups run only while the web app runs through `npm run start` or `npm run dev` and your computer is awake. After downtime, the app makes one catch-up backup. A failed attempt retries after at least five minutes. Running MCP alone, `npm run preview`, or the built web entry directly does not start this worker.
+
+After a successful automatic backup, older automatic files beyond the configured count are deleted. Manual, imported, recovery backups, and files used by pending restores are preserved. Reducing the count applies after the next successful automatic backup. The count can temporarily be exceeded by protected files or cleanup errors. Ten automatic backups may occupy up to about 1 GiB under the 100 MiB file limit, plus other backups and staging; this is not a total disk quota.
+
+Backup files and schedule settings live in `<database-path>.backups/`; temporary restore data lives in `<database-path>.restore/`. Restoring job records leaves your current schedule settings intact. There is no general deletion button in this version; manage retained manual/recovery files locally if needed, preserving copies you still need.

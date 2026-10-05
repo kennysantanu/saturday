@@ -42,6 +42,13 @@ If **Settings** says the MCP entry point is missing, run `npm run build` and rel
 | `create_job`     | Adds a job with a title, company, and optional details   | Yes          |
 | `add_job_update` | Records a dated progress step or note on an existing job | Yes          |
 
+| `create_backup` | Saves a local backup and returns its ID | Creates a file |
+| `list_backups` | Lists backups, including recovery backups | No |
+| `prepare_restore` | Validates a backup ID and previews replacement | Creates temporary staging |
+| `restore_backup` | Replaces records using the prepared ID and explicit confirmation | Yes |
+| `get_backup_settings` | Reads automatic backup settings/status | No |
+| `set_backup_settings` | Configures enablement, interval, and retained automatic-file count | Yes; authorizes retention |
+
 Records created this way are labeled **Added by assistant**. Editing or removing updates, editing jobs, dismissing jobs, and reopening jobs stay in the web app. Your assistant app may ask you to approve changes before it makes them.
 
 Example requests:
@@ -62,3 +69,11 @@ Saturday stores your data on your computer and does not collect or send it anywh
 - **It stopped working after moving the Saturday folder or upgrading Node.js.** The configuration stores absolute paths. Copy a fresh configuration from **Settings**.
 - **Jobs from the assistant do not match the browser.** Both must use the same database. Compare the database path in the configuration with the one shown in **Settings**, and make sure `SATURDAY_DB_PATH` is set the same way everywhere.
 - **The assistant reports a missing file.** Run `npm run build`.
+
+## Backups with your assistant
+
+Ask “Back up Saturday” to create a managed local snapshot, or ask it to list backups and their dates/counts. To restore, the assistant calls `prepare_restore` with a backup ID, shows current versus incoming counts and the replacement warning, and waits for your explicit authorization before `restore_backup` with `confirm: true`. The preview expires after ten minutes and is rejected if current records change. Confirmation flags and tool hints alone are not evidence of your consent; the assistant must obtain it in the conversation. Never automatically retry a restore after an interrupted response.
+
+To enable automatic backups, specify the interval and retained file count, for example “Enable daily automatic backups and keep 10.” This authorizes deletion of older automatic files after new snapshots succeed. Manual and recovery backups stay. The worker runs with the web app, not the MCP process. Configuration can be changed through MCP while the web app is stopped, but backups wait until it runs.
+
+MCP accepts managed IDs rather than filesystem paths and returns no backup bytes or raw database paths. Upload a downloaded backup in Settings or import it through the CLI before asking the assistant to restore it. See [Backup and restore](user-guide.md#backup-and-restore) for privacy, limits, and recovery details.
