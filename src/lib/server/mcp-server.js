@@ -17,10 +17,15 @@ import {
 	setJobScore,
 	setJobFollowUp,
 	getJob,
-	listJobs
+	searchJobs
 } from './services.js';
 import { jobForMcp } from '../job-fields.js';
-import { jobMcpInputShape, followUpMcpSchema, assessmentSchema } from './validation.js';
+import {
+	jobSearchShape,
+	jobMcpInputShape,
+	followUpMcpSchema,
+	assessmentSchema
+} from './validation.js';
 import { ServiceError, ValidationError } from './validation.js';
 
 const server = new McpServer({ name: 'saturday', version: '0.1.0' });
@@ -71,22 +76,19 @@ server.registerTool(
 	'list_jobs',
 	{
 		description:
-			'Find jobs by title or company before recording progress. Results are limited to 50 and include active and inactive jobs with stable IDs. An empty query lists the most recently updated jobs.',
-		inputSchema: z.object({
-			query: z
-				.string()
-				.trim()
-				.max(200)
-				.optional()
-				.describe('Optional title or company search text.')
-		})
+			'Find jobs with AND across filters and OR within category selections. Legacy query matches title or company. Defaults to all jobs, 50 per page, recently updated. Historical step filters always include inactive jobs. Dates use the local calendar; score has no fixed scale. Returns total and pagination metadata.',
+		inputSchema: z.object({ ...jobSearchShape, view: jobSearchShape.view.default('all') })
 	},
-	async ({ query }) => {
+	async (input) => {
 		try {
-			const jobs = listJobs({ includeInactive: true, query: query ?? '', limit: 50 }).map(
-				(job) => ({ ...jobForMcp(job, { list: true }), status: job.status.label })
-			);
-			return toolResult({ jobs });
+			const { jobs, total, page, limit, totalPages } = searchJobs(input);
+			return toolResult({
+				jobs: jobs.map((job) => ({ ...jobForMcp(job, { list: true }), status: job.status.label })),
+				total,
+				page,
+				limit,
+				totalPages
+			});
 		} catch (error) {
 			return toolError(error);
 		}

@@ -9,6 +9,8 @@ import {
 import { EVENT_LABELS } from '../event-labels.js';
 import { inTransaction, withDatabase } from './database.js';
 import {
+	jobSearchSchema,
+	parseSchema,
 	parseAssessment,
 	parseEventDate,
 	parseJobInput,
@@ -37,18 +39,22 @@ function readUpdates(db, jobId) {
 			 FROM job_updates WHERE job_id = ? ORDER BY event_date DESC, recorded_order DESC`
 		)
 		.all(jobId)
-		.map((row) => ({
-			recordedOrder: Number(row.recorded_order),
-			id: row.id,
-			jobId: row.job_id,
-			eventType: row.event_type,
-			date: row.event_date,
-			note: row.note,
-			createdVia: row.created_via,
-			createdAt: row.created_at,
-			updatedAt: row.updated_at,
-			label: row.event_type ? EVENT_LABELS[row.event_type] : 'Note'
-		}));
+		.map(updateFromRow);
+}
+
+function updateFromRow(row) {
+	return {
+		recordedOrder: Number(row.recorded_order),
+		id: row.id,
+		jobId: row.job_id,
+		eventType: row.event_type,
+		date: row.event_date,
+		note: row.note,
+		createdVia: row.created_via,
+		createdAt: row.created_at,
+		updatedAt: row.updated_at,
+		label: row.event_type ? EVENT_LABELS[row.event_type] : 'Note'
+	};
 }
 
 function statusFor(isActive, updates) {
@@ -59,22 +65,26 @@ function statusFor(isActive, updates) {
 	for (const update of stateHistory) latestState = update.eventType;
 
 	if (!isActive) {
-		if (latestState === 'accepted') return { label: 'Accepted', tone: 'success' };
-		if (latestState === 'rejected') return { label: 'Rejected', tone: 'danger' };
-		return { label: 'Dismissed', tone: 'muted' };
+		if (latestState === 'accepted') return { key: 'accepted', label: 'Accepted', tone: 'success' };
+		if (latestState === 'rejected') return { key: 'rejected', label: 'Rejected', tone: 'danger' };
+		return { key: 'dismissed', label: 'Dismissed', tone: 'muted' };
 	}
 
 	const reached = updates.reduce(
 		(furthest, update) => Math.max(furthest, milestoneRank[update.eventType] ?? 0),
 		0
 	);
-	if (reached === 5) return { label: 'Offer', tone: 'success' };
+	if (reached === 5) return { key: 'offer', label: 'Offer', tone: 'success' };
 	if (reached >= 2) {
 		const furthestType = Object.keys(milestoneRank).find((key) => milestoneRank[key] === reached);
-		return { label: `In process · ${EVENT_LABELS[furthestType]}`, tone: 'progress' };
+		return {
+			key: furthestType,
+			label: `In process · ${EVENT_LABELS[furthestType]}`,
+			tone: 'progress'
+		};
 	}
-	if (reached === 1) return { label: 'Applied', tone: 'info' };
-	return { label: 'New', tone: 'neutral' };
+	if (reached === 1) return { key: 'applied', label: 'Applied', tone: 'info' };
+	return { key: 'new', label: 'New', tone: 'neutral' };
 }
 
 function jobFromRow(row, updates = []) {
@@ -260,6 +270,150 @@ export function listJobs({
 				latestUpdate: latest ? `${latest.label} · ${shortDate(latest.date)}` : 'No updates yet'
 			};
 		});
+	});
+}
+
+/** Paginated, read-only search. Status rules are shared with job detail and legacy lists. */
+export function searchJobs(input = {}) {
+	const filters = parseSchema(jobSearchSchema, input);
+	return withDatabase((db) => {
+		// Keep history, records, and counts on one read snapshot while MCP may write.
+		db.exec('BEGIN');
+		const clauses = [];
+		const args = [];
+		if (filters.view !== 'all') {
+			clauses.push('j.is_active = ?');
+			args.push(filters.view === 'active' ? 1 : 0);
+		}
+		const contains = (value) => `%${value.replace(/[\\%_]/g, '\\$&')}%`;
+		for (const [key, column] of Object.entries({
+			title: 'job_title',
+			company: 'company_name',
+			location: 'location',
+			source: 'source'
+		})) {
+			if (filters[key]) {
+				clauses.push(`j.${column} LIKE ? ESCAPE '\\'`);
+				args.push(contains(filters[key]));
+			}
+		}
+		if (filters.query) {
+			clauses.push("(j.job_title LIKE ? ESCAPE '\\' OR j.company_name LIKE ? ESCAPE '\\')");
+			args.push(contains(filters.query), contains(filters.query));
+		}
+		if (filters.starred !== 'all') {
+			clauses.push('j.is_starred = ?');
+			args.push(filters.starred === 'starred' ? 1 : 0);
+		}
+		for (const key of ['work_arrangement', 'employment_type', 'created_via']) {
+			if (!filters[key].length) continue;
+			const specified = filters[key].filter((value) => value !== 'unset');
+			const alternatives = [];
+			if (specified.length) {
+				alternatives.push(`j.${key} IN (${specified.map(() => '?').join(',')})`);
+				args.push(...specified);
+			}
+			if (filters[key].includes('unset')) alternatives.push(`j.${key} IS NULL`);
+			clauses.push(`(${alternatives.join(' OR ')})`);
+		}
+		if (filters.step.length) {
+			clauses.push(
+				`EXISTS (SELECT 1 FROM job_updates u WHERE u.job_id = j.id AND u.event_type IN (${filters.step.map(() => '?').join(',')}))`
+			);
+			args.push(...filters.step);
+		}
+		const now = new Date();
+		const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+		for (const [key, column] of [
+			['follow_up', 'follow_up_date'],
+			['deadline', 'application_deadline']
+		]) {
+			const mode = filters[key];
+			if (mode === 'unset' || mode === 'set')
+				clauses.push(`j.${column} IS ${mode === 'set' ? 'NOT ' : ''}NULL`);
+			if (['overdue', 'today', 'upcoming'].includes(mode)) {
+				clauses.push(`j.${column} ${mode === 'overdue' ? '<' : mode === 'upcoming' ? '>' : '='} ?`);
+				args.push(today);
+			}
+			if (mode === 'range') {
+				clauses.push(`j.${column} IS NOT NULL`);
+				if (filters[`${key}_from`]) {
+					clauses.push(`j.${column} >= ?`);
+					args.push(filters[`${key}_from`]);
+				}
+				if (filters[`${key}_to`]) {
+					clauses.push(`j.${column} <= ?`);
+					args.push(filters[`${key}_to`]);
+				}
+			}
+		}
+		for (const key of ['created', 'updated']) {
+			for (const bound of ['from', 'to']) {
+				const value = filters[`${key}_${bound}`];
+				if (!value) continue;
+				const date = new Date(`${value}T00:00:00`);
+				if (bound === 'to') date.setDate(date.getDate() + 1);
+				clauses.push(`j.${key}_at ${bound === 'from' ? '>=' : '<'} ?`);
+				args.push(date.toISOString());
+			}
+		}
+		if (filters.score !== 'any')
+			clauses.push(`j.score IS ${filters.score === 'scored' ? 'NOT ' : ''}NULL`);
+		if (filters.score_min !== undefined) {
+			clauses.push('j.score >= ?');
+			args.push(filters.score_min);
+		}
+		if (filters.score_max !== undefined) {
+			clauses.push('j.score <= ?');
+			args.push(filters.score_max);
+		}
+		const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+		const sorting = {
+			updated: 'j.updated_at DESC, j.created_at DESC',
+			created: 'j.created_at DESC, j.updated_at DESC',
+			score: 'j.score IS NULL, j.score DESC, j.updated_at DESC',
+			follow_up: 'j.follow_up_date IS NULL, j.follow_up_date ASC, j.updated_at DESC',
+			deadline: 'j.application_deadline IS NULL, j.application_deadline ASC, j.updated_at DESC'
+		};
+		// Batch history for candidates rather than one query per job; status is computed before slicing.
+		const histories = new Map();
+		for (const row of db
+			.prepare(
+				`SELECT u.* FROM job_updates u JOIN jobs j ON j.id = u.job_id ${where} ORDER BY u.event_date DESC, u.recorded_order DESC`
+			)
+			.all(...args)) {
+			if (!histories.has(row.job_id)) histories.set(row.job_id, []);
+			histories.get(row.job_id).push(updateFromRow(row));
+		}
+		const matches = db
+			.prepare(`SELECT j.* FROM jobs j ${where} ORDER BY ${sorting[filters.sort]}, j.id ASC`)
+			.all(...args)
+			.map((row) => jobFromRow(row, histories.get(row.id) ?? []))
+			.filter((job) => !filters.status.length || filters.status.includes(job.status.key));
+		const total = matches.length;
+		const totalPages = Math.max(1, Math.ceil(total / filters.limit));
+		const page = Math.min(filters.page, totalPages);
+		const jobs = matches.slice((page - 1) * filters.limit, page * filters.limit).map((job) => {
+			const latest = job.updates.reduce(
+				(last, update) => (!last || update.recordedOrder > last.recordedOrder ? update : last),
+				null
+			);
+			return {
+				...job,
+				updates: undefined,
+				latestUpdate: latest ? `${latest.label} · ${shortDate(latest.date)}` : 'No updates yet'
+			};
+		});
+		const result = {
+			jobs,
+			total,
+			page,
+			limit: filters.limit,
+			totalPages,
+			totalJobs: Number(db.prepare('SELECT COUNT(*) AS count FROM jobs').get().count)
+		};
+		db.exec('COMMIT');
+		return result;
 	});
 }
 

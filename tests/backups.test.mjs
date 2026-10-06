@@ -461,10 +461,44 @@ test('built MCP exposes thirteen tools and complete backup/restore workflow with
 		assert.equal(assessed.score_comment, 'Relevant experience');
 		assert.equal(assessed.score, 8.25);
 		assert.equal(assessed.updates.length, 0);
+
+		const legacyList = await call('list_jobs', { query: 'Example' });
+		assert.equal(legacyList.jobs[0].id, job.id);
+		assert.equal(legacyList.total, 1);
+		assert.equal(legacyList.limit, 50);
+		const filteredList = await call('list_jobs', {
+			title: 'engineer',
+			company: 'example',
+			location: 'remote',
+			starred: 'starred',
+			score_min: 8,
+			score_max: 9,
+			status: ['new'],
+			created_via: ['mcp'],
+			limit: 1
+		});
+		assert.equal(filteredList.total, 1);
+		assert.equal(filteredList.page, 1);
+		assert.equal(filteredList.totalPages, 1);
+		assert.equal(filteredList.jobs[0].score, 8.25);
+		assert.equal((await call('list_jobs', { company: 'Other' })).total, 0);
+		const invalidSearch = await request('tools/call', {
+			name: 'list_jobs',
+			arguments: { score_min: 10, score_max: 0 }
+		});
+		assert.equal(invalidSearch.isError, true);
 		await call('edit_job', { job_id: job.id, source: 'Referral' });
 		assert.equal((await call('get_job', { job_id: job.id })).follow_up_date, '2026-11-01');
 		await call('set_job_follow_up', { job_id: job.id, follow_up_date: null });
 		assert.equal((await call('get_job', { job_id: job.id })).follow_up_comment, null);
+		await call('add_job_update', {
+			job_id: job.id,
+			event_type: 'accepted',
+			event_date: '2026-10-01'
+		});
+		assert.equal((await call('list_jobs', { query: 'Example' })).total, 1);
+		assert.equal((await call('list_jobs', { query: 'Example', view: 'active' })).total, 0);
+		assert.equal((await call('list_jobs', { step: ['accepted'], view: 'active' })).total, 1);
 		const b = await call('create_backup');
 		assert.ok(b.backup_id);
 		const p = await call('prepare_restore', { backup_id: b.backup_id });

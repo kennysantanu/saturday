@@ -172,9 +172,8 @@ the tab bar. In Tailwind, write `rounded-[var(--r-group)]`; do not use
   an assistive “opens in a new tab” cue.
 - The Dashboard groups the active count, upcoming items, the progress funnel,
   and recent jobs. Progress counts still overlap and retain their meaning.
-- The Active/All control retains its URL-based state; the step filter implies All.
-- Forms, error notices, and local assistant setup retain their existing data
-  contracts. No database schema, MCP tool, or server-action contract changes.
+- Jobs filters use a GET form with explicit Apply, URL state, removable chips, and pagination. Activity offers Active/Inactive/All; historical step filters imply All and disable the activity control. Advanced controls use an opaque disclosure and labeled checkbox groups.
+- Job writes, error notices, and local assistant setup retain their existing data contracts. Search adds optional MCP query inputs and pagination metadata without a database schema change.
 
 ## Icons
 

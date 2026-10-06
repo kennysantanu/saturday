@@ -35,15 +35,15 @@ If **Settings** says the MCP entry point is missing, run `npm run build` and rel
 
 ## What your assistant can do
 
-| Tool                | What it does                                                  | Changes data |
-| ------------------- | ------------------------------------------------------------- | ------------ |
-| `list_jobs`         | Finds jobs by title or company (up to 50 per search)          | No           |
-| `get_job`           | Reads one job with its notes and dated update history         | No           |
-| `create_job`        | Adds a job with a title, company, and optional details        | Yes          |
-| `edit_job`          | Updates job details; omitted fields are preserved             | Yes          |
-| `set_job_follow_up` | Sets/reschedules one follow-up, or clears it with a null date | Yes          |
-| `set_job_score`     | Sets assistant score and its explanation, read-only in the UI | Yes          |
-| `add_job_update`    | Records a dated progress step or note on an existing job      | Yes          |
+| Tool                | What it does                                                               | Changes data |
+| ------------------- | -------------------------------------------------------------------------- | ------------ |
+| `list_jobs`         | Filters and sorts jobs with counts and pagination (50 per page by default) | No           |
+| `get_job`           | Reads one job with its notes and dated update history                      | No           |
+| `create_job`        | Adds a job with a title, company, and optional details                     | Yes          |
+| `edit_job`          | Updates job details; omitted fields are preserved                          | Yes          |
+| `set_job_follow_up` | Sets/reschedules one follow-up, or clears it with a null date              | Yes          |
+| `set_job_score`     | Sets assistant score and its explanation, read-only in the UI              | Yes          |
+| `add_job_update`    | Records a dated progress step or note on an existing job                   | Yes          |
 
 | `create_backup` | Saves a local backup and returns its ID | Creates a file |
 | `list_backups` | Lists backups, including recovery backups | No |
@@ -57,6 +57,30 @@ Records created this way are labeled **Added by assistant**. Editing or removing
 Optional job fields include `location`, `work_arrangement` (`remote`, `hybrid`, `on-site`), `employment_type` (`full-time`, `part-time`, `contract`, `internship`, `temporary`), `compensation`, `source`, `application_deadline`, `follow_up_date`, `follow_up_comment`, and `is_starred`. Dates must be real `YYYY-MM-DD` calendar dates; a follow-up comment requires a date. Empty/null optional values clear them; clearing the date clears its comment. `edit_job` preserves omitted fields and never writes assessment fields.
 
 `create_job` can include `score` and `score_comment`. For an existing job use `set_job_score` with a required finite numeric `score` (decimals allowed, no fixed range) or null for unscored, plus an optional `score_comment` (up to 10,000 characters). This replaces the assessment; omitting the comment clears the previous one. Explain the scoring criteria and keep a consistent scale. Follow-up writes do not create history or change status; inactive follow-ups remain stored and are hidden from Dashboard.
+
+### Searching and filtering jobs
+
+`list_jobs` defaults to **all** active and inactive jobs, 50 per page, recently updated. Existing `query` searches title **or** company. Use separate `title`, `company`, `location`, and `source` contains filters to narrow results. All filters combine with AND; arrays match any selected choice. Text searches escape literal `%`, `_`, and backslash.
+
+| Input                                                            | Values                                                                                                               |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `view`                                                           | `active`, `inactive`, `all`                                                                                          |
+| `status`                                                         | Array of `new`, `applied`, `prescreened`, `interview_1`, `interview_2`, `offer`, `accepted`, `rejected`, `dismissed` |
+| `step`                                                           | Array of historical event types above except `new`; forces `view: all`                                               |
+| `starred`                                                        | `all`, `starred`, `not_starred`                                                                                      |
+| `work_arrangement`, `employment_type`                            | Arrays of existing job-field options, plus `unset` for missing values                                                |
+| `created_via`                                                    | Array of `manual`, `mcp`                                                                                             |
+| `follow_up`, `deadline`                                          | `any`, `unset`, `set`, `overdue`, `today`, `upcoming`, `range`                                                       |
+| `follow_up_from`, `follow_up_to`, `deadline_from`, `deadline_to` | Inclusive `YYYY-MM-DD` bounds, used only in `range` mode                                                             |
+| `score`                                                          | `any`, `scored`, `unscored`                                                                                          |
+| `score_min`, `score_max`                                         | Optional finite numeric bounds, no fixed scale; ignored for `unscored`                                               |
+| `created_from`, `created_to`, `updated_from`, `updated_to`       | Inclusive local-calendar date bounds                                                                                 |
+| `sort`                                                           | `updated`, `created`, `score`, `follow_up`, `deadline`                                                               |
+| `page`, `limit`                                                  | Positive integers; default page 1 and limit 50; limit at most 100                                                    |
+
+Responses retain `jobs` and add `total`, `page`, `limit`, and `totalPages`. Advance pages to inspect all matches; an out-of-range page clamps to the last available page. Dates use the computer running Saturday’s local calendar. Upcoming means strictly after today; overdue means strictly before today. Current status follows recorded state changes and furthest milestones, independently of event dates. Missing values sort last for scores and dates. No filter changes data.
+
+For example, `{ "title": "Engineer", "company": "Acme", "work_arrangement": ["remote", "hybrid"], "starred": "starred" }` finds starred Engineer jobs at Acme that are remote or hybrid.
 
 Example requests:
 
