@@ -1,4 +1,12 @@
 import { z } from 'zod';
+import {
+	statusOptions,
+	stepOptions,
+	workOptions,
+	employmentOptions,
+	sortOptions,
+	dateModes
+} from '../job-search.js';
 import { editableJobFields, assessmentJobFields } from '../job-fields.js';
 
 export class ValidationError extends Error {
@@ -183,3 +191,96 @@ export function parseEventDate(input) {
 }
 
 export { ordinaryEventTypes, validDate };
+
+const multiple = (options) =>
+	z
+		.array(z.enum(options))
+		.default([])
+		.transform((values) => [...new Set(values)]);
+const text = z.string().trim().max(200, 'Enter 200 characters or fewer.').default('');
+const date = z
+	.string()
+	.trim()
+	.default('')
+	.refine((value) => !value || validDate(value), 'Enter a real date in YYYY-MM-DD format.');
+const number = z.preprocess(
+	(value) =>
+		value === '' || value == null ? undefined : typeof value === 'string' ? Number(value) : value,
+	z.number().finite().optional()
+);
+const integer = (fallback, max) =>
+	z.preprocess(
+		(value) =>
+			value === '' || value == null ? fallback : typeof value === 'string' ? Number(value) : value,
+		z.number().int().min(1).max(max)
+	);
+
+// The same names are used by URL controls, shared queries, and MCP.
+export const jobSearchShape = {
+	query: text,
+	title: text,
+	company: text,
+	location: text,
+	source: text,
+	view: z.enum(['active', 'inactive', 'all']).default('active'),
+	status: multiple(statusOptions.map((option) => option.value)),
+	step: multiple(stepOptions.map((option) => option.value)),
+	starred: z.enum(['all', 'starred', 'not_starred']).default('all'),
+	work_arrangement: multiple([...workOptions, 'unset']),
+	employment_type: multiple([...employmentOptions, 'unset']),
+	created_via: multiple(['manual', 'mcp']),
+	follow_up: z.enum(dateModes).default('any'),
+	follow_up_from: date,
+	follow_up_to: date,
+	deadline: z.enum(dateModes).default('any'),
+	deadline_from: date,
+	deadline_to: date,
+	score: z.enum(['any', 'scored', 'unscored']).default('any'),
+	score_min: number,
+	score_max: number,
+	created_from: date,
+	created_to: date,
+	updated_from: date,
+	updated_to: date,
+	sort: z.enum(sortOptions.map((option) => option.value)).default('updated'),
+	page: integer(1, Number.MAX_SAFE_INTEGER),
+	limit: integer(50, 100)
+};
+export const jobSearchSchema = z
+	.object(jobSearchShape)
+	.superRefine((values, ctx) => {
+		for (const prefix of ['follow_up', 'deadline', 'created', 'updated']) {
+			if (['follow_up', 'deadline'].includes(prefix) && values[prefix] !== 'range') continue;
+			if (
+				values[`${prefix}_from`] &&
+				values[`${prefix}_to`] &&
+				values[`${prefix}_from`] > values[`${prefix}_to`]
+			)
+				ctx.addIssue({
+					code: 'custom',
+					path: [`${prefix}_to`],
+					message: 'End date must be on or after the start date.'
+				});
+		}
+		if (
+			values.score !== 'unscored' &&
+			values.score_min !== undefined &&
+			values.score_max !== undefined &&
+			values.score_min > values.score_max
+		)
+			ctx.addIssue({
+				code: 'custom',
+				path: ['score_max'],
+				message: 'Maximum score must be at least the minimum.'
+			});
+	})
+	.transform((values) => ({
+		...values,
+		view: values.step.length ? 'all' : values.view,
+		follow_up_from: values.follow_up === 'range' ? values.follow_up_from : '',
+		follow_up_to: values.follow_up === 'range' ? values.follow_up_to : '',
+		deadline_from: values.deadline === 'range' ? values.deadline_from : '',
+		deadline_to: values.deadline === 'range' ? values.deadline_to : '',
+		score_min: values.score === 'unscored' ? undefined : values.score_min,
+		score_max: values.score === 'unscored' ? undefined : values.score_max
+	}));

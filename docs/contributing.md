@@ -19,7 +19,7 @@ You need Node.js 22.13 or newer and npm 10 or newer. Run `npm ci`, then `npm run
 | `npm run lint`      | Check formatting with Prettier                                |
 | `npm run format`    | Format project files                                          |
 
-Additional commands: `npm run backup` creates a managed snapshot, `npm run restore -- <file> --inspect` prepares a restore, and `npm test` builds MCP and runs job-detail, migration, backup/restore, and MCP integration tests using temporary databases. `npm run test:web` builds the app and tests production job forms, Settings actions, and worker supervision on localhost. See the [agent guide](agent-guide.md#backup-and-recovery-commands) for confirmation and scheduling commands.
+Additional commands: `npm run backup` creates a managed snapshot, `npm run restore -- <file> --inspect` prepares a restore, and `npm test` builds MCP and runs job-detail/search, migration, backup/restore, and MCP integration tests using temporary databases. `npm run test:web` builds the app and tests production job forms/search, Settings actions, and worker supervision on localhost. See the [agent guide](agent-guide.md#backup-and-recovery-commands) for confirmation and scheduling commands.
 
 ## Project layout
 
@@ -48,3 +48,9 @@ Migration 2 adds nullable context, deadline/follow-up, and assistant assessment 
 Backup validation uses an exact schema signature for each supported migration version. Restore copies validated historical rows into a fresh database at their original schema version, migrates that staging copy forward, and restores normalized current rows. Original backups are never migrated in place. Include all new fields in dataset fingerprints so any detail or assessment change invalidates a prepared restore. When adding another migration, extend historical compatibility and test upgrades/restores.
 
 When adding a stored job field, add it to `jobFields` with `since` set to its migration version, write an explicit migration, and add inline form controls as needed. System fields are generated/maintained by services; assistant fields are excluded from manual input. `info` controls the Job information card, and `list` controls MCP list summaries. Keep existing names, mappings, and historical `since` values stable. Removing a field from the UI/input does not mean deleting its historical definition or data; handle permanent column removal and historical backup compatibility in an explicit migration. Computed status and history remain service behavior, not jobs columns.
+
+## Jobs search and filters
+
+`src/lib/job-search.js` owns browser-safe filter choices, defaults, URL encoding, and chips. Search schemas live in server validation; `searchJobs` applies bound SQL predicates and shared status rules within a read snapshot before counting/pagination. Candidate history is fetched in a batch. Jobs uses an inline GET form; MCP uses the same service with All as its default activity. Keep `listJobs` backward compatible for existing callers.
+
+When adding a filter, update its validation, URL handling/chip behavior, inline control, service predicate, MCP documentation, and meaningful tests. Keep AND across categories, OR within categories, historical steps including inactive jobs, local calendar date boundaries, and stable sort tie-breakers. A query filter needs no migration unless it also introduces stored data. Tests must use temporary databases.

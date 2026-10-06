@@ -23,7 +23,7 @@ You do not need AI to use Saturday. The app works fully on its own, and connecti
 - **Keep each opportunity together.** Save a job title and company, then add location, work arrangement, employment type, compensation, source, a posting link, description, or notes. Star jobs for easy recognition.
 - **Know what needs attention.** Schedule a follow-up with a comment, reschedule or clear it, and see overdue follow-ups and upcoming application deadlines on Dashboard.
 - **Remember what happened.** Record applications, prescreens, interviews, offers, outcomes, and general notes in a dated history. You can correct a mistaken update later.
-- **See where things stand.** The Dashboard shows active jobs, recent activity, upcoming dated updates, and how many jobs reached each step. The Jobs list starts with active jobs; **All** also shows dismissed, accepted, and rejected jobs.
+- **See where things stand.** The Dashboard shows active jobs, recent activity, upcoming dated updates, and how many jobs reached each step. The Jobs list starts with active jobs; Activity → All also shows dismissed, accepted, and rejected jobs. Search title/company/location separately, combine advanced filters, sort results, and page through all matches.
 - **Focus on the jobs you still want.** Dismiss an opportunity you are no longer pursuing and reopen it if things change.
 - **Work with your assistant.** Give an assistant on your computer access to your job records so it can find an opportunity, add one, or record progress when you ask. Its changes appear in the app for you to review.
 

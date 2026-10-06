@@ -1,19 +1,37 @@
-import { listJobs } from '$lib/server/services.js';
-import { DASHBOARD_CARDS } from '$lib/status.js';
-
-const STEPS = new Map(
-	DASHBOARD_CARDS.filter((card) => card.group === 'history').map((card) => [card.key, card.label])
-);
+import { redirect } from '@sveltejs/kit';
+import { searchJobs, ValidationError } from '$lib/server/services.js';
+import { parseSchema, jobSearchSchema } from '$lib/server/validation.js';
+import { searchFromUrl, filterChips, searchUrl } from '$lib/job-search.js';
 
 export function load({ url }) {
-	// A step filter counts every job that reached the step, so it always includes inactive jobs.
-	const requestedStep = url.searchParams.get('step');
-	const step = requestedStep && STEPS.has(requestedStep) ? requestedStep : null;
-	const showAll = step !== null || url.searchParams.get('view') === 'all';
-	return {
-		jobs: listJobs({ includeInactive: showAll, reached: step }),
-		showAll,
-		step,
-		stepLabel: step ? STEPS.get(step) : null
-	};
+	const input = searchFromUrl(url.searchParams);
+	try {
+		const filters = parseSchema(jobSearchSchema, { ...input, limit: 50 });
+		const result = searchJobs(filters);
+		const canonical = searchUrl(filters, result.page);
+		if (`${url.pathname}${url.search}` !== canonical) redirect(303, canonical);
+		return {
+			...result,
+			filters,
+			errors: {},
+			chips: filterChips(filters),
+			previous: result.page > 1 ? searchUrl(filters, result.page - 1) : null,
+			next: result.page < result.totalPages ? searchUrl(filters, result.page + 1) : null
+		};
+	} catch (error) {
+		if (!(error instanceof ValidationError)) throw error;
+		return {
+			jobs: [],
+			total: 0,
+			totalJobs: 0,
+			page: 1,
+			totalPages: 1,
+			limit: 50,
+			filters: { ...jobSearchSchema.parse({}), ...input },
+			errors: error.fieldErrors,
+			chips: [],
+			previous: null,
+			next: null
+		};
+	}
 }

@@ -8,7 +8,15 @@ Saturday keeps your job search in a SQLite file on your computer. You can track 
 2. Enter a **Job title** and **Company**. The main form also has an optional posting link, description, notes, and a star checkbox. Under **More details**, you can add employment type, work arrangement, location, compensation, source, an application deadline, and a follow-up date/comment.
 3. Save the job to open its detail page. Use **Edit** there to correct its information later.
 
-**Jobs → Active** shows jobs you are still pursuing. **All** also shows dismissed jobs and jobs made inactive by an accepted offer or employer rejection. Open a row to see its details and history. A new job can have no updates.
+**Jobs** starts with active jobs you are still pursuing. Change **Activity** to Inactive or All to include dismissed jobs and jobs made inactive by an accepted offer or employer rejection. Open a row to see its details and history. A new job can have no updates.
+
+Enter separate **Title contains**, **Company contains**, and **Location contains** searches, choose current statuses or Starred, then select **Apply filters**. Every filter must match; multiple choices in one category match either choice. Text searches treat `%`, `_`, and backslash literally. Filters are saved in the URL, so refresh, Back/Forward, and shared links preserve the applied selection. Remove individual chips or choose **Clear filters** to return to active jobs.
+
+**Advanced filters** includes steps a job **ever reached**, work arrangement, employment type, source, manual/MCP origin, follow-up dates, application deadlines, assistant score, and created/updated dates. Ever reached always includes active and inactive jobs; you can still narrow those results by current status. Not specified finds missing optional category values. Score bounds accept decimals and zero, with no fixed scale; Unscored clears the bounds.
+
+For follow-ups and deadlines, Overdue means before today and Upcoming means after today. Choose **Date range** to use From/Through; either bound can be left empty. Date ranges are inclusive. Today and created/updated date boundaries use the computer running Saturday’s local calendar. Search date filters do not hide inactive records unless Activity is Active.
+
+Sort by recent updates or creation, highest score, earliest follow-up, or earliest deadline. Missing scores/dates appear last. Results show the full matching count, with 50 jobs per page and Previous/Next controls. Applying or removing filters starts at page one. These views never change stored jobs, Dashboard counts, or backups.
 
 ## Record progress and notes
 

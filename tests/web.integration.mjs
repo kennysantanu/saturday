@@ -139,6 +139,31 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 		assert.ok(detail.includes('Strong relevant skills'));
 		assert.ok(detail.includes('Starred'));
 		assert.ok(!detail.includes('name="score"'));
+
+		const jobsPage = await (
+			await fetch(
+				`${base}/jobs?title=UI&company=Example&location=Seattle&starred=starred&score_min=8`
+			)
+		).text();
+		assert.ok(jobsPage.includes('method="GET"'));
+		assert.ok(jobsPage.includes('Apply filters'));
+		assert.ok(jobsPage.includes('Advanced filters'));
+		assert.ok(jobsPage.includes(`href="/jobs/${newId}"`));
+		assert.ok(
+			jobsPage
+				.replace(/<!--[\s\S]*?-->/g, '')
+				.replace(/\s+/g, ' ')
+				.includes('1 job matching filters')
+		);
+		assert.ok(jobsPage.includes('Remove Company contains: Example'));
+		assert.ok(jobsPage.includes('value="Seattle"'));
+		const noMatch = await (await fetch(`${base}/jobs?company=Missing`)).text();
+		assert.ok(noMatch.includes('No matching jobs'));
+		assert.ok(noMatch.includes('Clear filters'));
+		const invalidSearch = await (await fetch(`${base}/jobs?created_from=2026-02-30`)).text();
+		assert.ok(invalidSearch.includes('Check the filters'));
+		assert.ok(invalidSearch.includes('aria-invalid="true"'));
+		assert.ok(invalidSearch.includes('open'));
 		const dashboard = await (await fetch(base)).text();
 		assert.ok(dashboard.includes('Follow-ups'));
 		assert.ok(dashboard.includes('Send email'));
