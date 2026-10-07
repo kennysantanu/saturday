@@ -1,3 +1,4 @@
+import { listDocuments } from '$lib/server/files/documents.js';
 import { error, fail, redirect } from '@sveltejs/kit';
 import {
 	setJobFollowUp,
@@ -31,10 +32,20 @@ function actionError(error, values, action) {
 	});
 }
 
-export function load({ params }) {
+export async function load({ params }) {
 	const job = getJob(params.id);
 	if (!job) error(404, 'Job not found');
-	return { job, today: todayIso() };
+	let documents = [],
+		documentCount = 0,
+		documentsError = null;
+	try {
+		const listing = await listDocuments({ scope: params.id, limit: 50 });
+		documents = listing.documents;
+		documentCount = listing.total;
+	} catch (e) {
+		documentsError = e.code ? e.message : 'Document store unavailable.';
+	}
+	return { job, today: todayIso(), documents, documentCount, documentsError };
 }
 
 export const actions = {

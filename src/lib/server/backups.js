@@ -1,3 +1,4 @@
+import { assertDatabaseAvailable } from './database.js';
 import {
 	chmodSync,
 	mkdirSync,
@@ -19,7 +20,7 @@ import {
 import { resolve, join, dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { getDatabasePath, inTransaction } from './database.js';
+import { getDatabasePath, getProjectRoot, inTransaction } from './database.js';
 import { applyMigrations, assertMigrationHistory, schemaVersion } from './migrations.js';
 import { parseJobInput, parseAssessment, validDate, ordinaryEventTypes } from './validation.js';
 import { jobColumns, jobFields } from '../job-fields.js';
@@ -70,6 +71,7 @@ export function publicBackupError(error) {
 }
 function safe(operation) {
 	try {
+		assertDatabaseAvailable();
 		return operation();
 	} catch (error) {
 		const result = publicBackupError(error);
@@ -490,6 +492,7 @@ export function prepareRestore(backupId, { now = Date.now() } = {}) {
 				inTransaction(stage, () => insertData(stage, dataset(incoming)));
 				applyMigrations(stage);
 				const incomingSummary = validate(stage);
+				const unmatchedJobFolders = fileFolderImpact(stage);
 				stage.close();
 				stage = null;
 				chmodSync(stagePath, 0o600);
@@ -499,6 +502,7 @@ export function prepareRestore(backupId, { now = Date.now() } = {}) {
 					backup_id: backupId,
 					expires_at: new Date(now + 600000).toISOString(),
 					current: summary(db),
+					unmatched_job_folders: unmatchedJobFolders,
 					incoming: incomingSummary,
 					requires_confirmation: true,
 					warning:
@@ -723,4 +727,82 @@ export function exportBackup(backupId, destination) {
 		}
 		return target;
 	});
+}
+
+// The database write gate remains held while the file half is published. Unlike
+// inTransaction, this explicitly awaits the coordinated file work before COMMIT.
+export async function restoreDatabaseWithFiles(restoreId, fileOperation) {
+	const p = storage();
+	id(restoreId);
+	const recordPath = join(p.restore, `${restoreId}.json`);
+	const record = json(recordPath);
+	const stagePath = join(p.restore, `${restoreId}.sqlite`);
+	if (
+		Date.parse(record.expires_at) <= Date.now() ||
+		record.target !== root() ||
+		digest(stagePath) !== record.sha256
+	)
+		fail('restore_stale', 'Prepare the coordinated restore again.');
+	const claim = join(p.restore, `${restoreId}.claim`);
+	try {
+		mkdirSync(claim, { mode: 0o700 });
+	} catch {
+		fail('restore_consumed', 'This restore has already been attempted.');
+	}
+	const stage = connect(stagePath);
+	const db = connect(p.database, false);
+	let committed = false;
+	try {
+		validate(stage);
+		db.exec('BEGIN IMMEDIATE');
+		validate(db);
+		if (fingerprint(db) !== record.fingerprint)
+			fail('restore_stale', 'Current records changed. Prepare again.');
+		const recovery = snapshot('recovery');
+		const files = await fileOperation(recovery);
+		db.exec('DELETE FROM job_updates; DELETE FROM jobs;');
+		insertData(db, dataset(stage));
+		validate(db);
+		if (dataHash(db) !== dataHash(stage)) fail('invalid_backup', 'Database verification failed.');
+		db.exec('COMMIT');
+		committed = true;
+		const result = {
+			restore_id: restoreId,
+			...summary(db),
+			recovery_backup_id: recovery.backup_id
+		};
+		try {
+			atomicJSON(recordPath, { ...record, status: 'completed', result });
+			rmSync(stagePath, { force: true });
+		} catch {}
+		return { database: result, files };
+	} finally {
+		if (!committed) {
+			try {
+				db.exec('ROLLBACK');
+			} catch {}
+		}
+		db.close();
+		stage.close();
+	}
+}
+
+function fileFolderImpact(incoming) {
+	try {
+		const root = resolve(getProjectRoot(), process.env.SATURDAY_FILES_PATH || 'data/files');
+		const m = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
+		const ids = new Set(
+			incoming
+				.prepare('SELECT id FROM jobs')
+				.all()
+				.map((j) => j.id)
+		);
+		return [
+			...new Set(
+				m.documents.filter((d) => d.key.startsWith('jobs/')).map((d) => d.key.split('/')[1])
+			)
+		].filter((id) => !ids.has(id));
+	} catch {
+		return null;
+	}
 }

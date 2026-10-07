@@ -1,5 +1,5 @@
 import { migrations, applyMigrations, assertMigrationHistory } from './migrations.js';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, existsSync } from 'node:fs';
 import { dirname, isAbsolute, resolve, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -20,7 +20,28 @@ export function getDatabasePath() {
 	return isAbsolute(configuredPath) ? configuredPath : resolve(projectRoot, configuredPath);
 }
 
+let recoveringFiles = false;
+export function withDatabaseRecovery(operation) {
+	recoveringFiles = true;
+	try {
+		return operation();
+	} finally {
+		recoveringFiles = false;
+	}
+}
+export function assertDatabaseAvailable() {
+	const filesRoot = resolve(getProjectRoot(), process.env.SATURDAY_FILES_PATH || 'data/files');
+	if (!recoveringFiles && existsSync(`${filesRoot}.state/pair-session.json`))
+		throw Object.assign(
+			new Error(
+				'An interrupted coordinated restore requires offline recovery: npm run files -- recover-pair'
+			),
+			{ code: 'RECOVERY_REQUIRED' }
+		);
+}
+
 export function openDatabase({ migrate = true } = {}) {
+	assertDatabaseAvailable();
 	const path = getDatabasePath();
 	mkdirSync(dirname(path), { recursive: true });
 	const db = new DatabaseSync(path);

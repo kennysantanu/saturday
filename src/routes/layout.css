@@ -808,7 +808,7 @@ html {
 		max-width: 440px;
 		margin: 0 auto;
 		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
+		grid-template-columns: repeat(4, minmax(0, 1fr));
 		gap: 4px;
 		padding: 6px;
 		border-radius: var(--r-shell);
@@ -896,6 +896,10 @@ html {
 		padding: 24px 20px;
 		transform: none;
 		translate: none;
+		--tw-translate-x: 0%;
+		--tw-translate-y: 0%;
+		--tw-enter-translate-x: 0%;
+		--tw-enter-translate-y: 0%;
 		animation: none;
 	}
 	[data-slot='dialog-content'][data-state='open'] {

@@ -7,7 +7,7 @@
 		"node": ">=22.13.0"
 	},
 	"scripts": {
-		"setup": "npm ci && npm run build && npm run migrate",
+		"setup": "npm ci && npm run setup:pdf && npm run build && npm run migrate",
 		"dev": "node scripts/dev.mjs",
 		"build": "vite build && npm run build:mcp",
 		"build:mcp": "node scripts/build-mcp.mjs",
@@ -23,7 +23,9 @@
 		"backup": "node scripts/backup.mjs",
 		"restore": "node scripts/restore.mjs",
 		"test": "npm run build:mcp && node --test tests/*.test.mjs",
-		"test:web": "npm run build && node --test tests/web.integration.mjs"
+		"test:web": "npm run build && node --test tests/web.integration.mjs",
+		"files": "node scripts/files.mjs",
+		"setup:pdf": "puppeteer browsers install chrome"
 	},
 	"devDependencies": {
 		"@internationalized/date": "^3.12.4",
@@ -50,6 +52,13 @@
 	},
 	"dependencies": {
 		"@modelcontextprotocol/server": "^2.2.0",
+		"@tiptap/core": "^3.31.4",
+		"@tiptap/markdown": "^3.31.4",
+		"@tiptap/pm": "^3.31.4",
+		"@tiptap/starter-kit": "^3.31.4",
+		"puppeteer": "^25.12.0",
+		"yauzl": "^3.4.0",
+		"yazl": "^3.3.1",
 		"zod": "^4.6.5"
 	}
 }
