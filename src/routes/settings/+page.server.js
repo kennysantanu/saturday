@@ -1,3 +1,19 @@
+import {
+	getFileBackupSettings,
+	setFileBackupSettings,
+	createFileBackup,
+	listFileBackups,
+	prepareFileRestore,
+	restoreFiles
+} from '$lib/server/files/backups.js';
+import { storageSummary } from '$lib/server/files/documents.js';
+import { filePaths } from '$lib/server/files/store.js';
+import { pdfReadiness } from '$lib/server/files/pdf.js';
+import {
+	createBackupPair,
+	prepareBackupPairRestore,
+	restoreBackupPair
+} from '$lib/server/files/pairs.js';
 import { fail, redirect } from '@sveltejs/kit';
 import {
 	createBackup,
@@ -15,7 +31,19 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDatabasePath, getProjectRoot } from '$lib/server/database.js';
 
-export function load() {
+export async function load() {
+	let filesError = null,
+		fileSummary = null,
+		fileBackups = [];
+	/** @type {Awaited<ReturnType<typeof getFileBackupSettings>>} */
+	let fileSettings = { enabled: false, interval_hours: 24, keep_count: 10 };
+	try {
+		fileSummary = await storageSummary();
+		fileBackups = (await listFileBackups()).backups;
+		fileSettings = await getFileBackupSettings();
+	} catch (e) {
+		filesError = e.code ? e.message : 'File store unavailable.';
+	}
 	const databasePath = getDatabasePath();
 	const nodePath = process.execPath;
 	const mcpPath = join(getProjectRoot(), 'build', 'mcp', 'index.js');
@@ -24,12 +52,17 @@ export function load() {
 			saturday: {
 				command: nodePath,
 				args: [mcpPath],
-				env: { SATURDAY_DB_PATH: databasePath }
+				env: { SATURDAY_DB_PATH: databasePath, SATURDAY_FILES_PATH: filePaths().root }
 			}
 		}
 	};
 	return {
 		databasePath,
+		filesError,
+		fileSummary,
+		fileBackups,
+		fileSettings,
+		pdfStatus: await pdfReadiness(),
 		mcpPath,
 		mcpReady: existsSync(mcpPath),
 		configuration: JSON.stringify(config, null, 2),
@@ -68,6 +101,92 @@ async function boundedForm(request) {
 	}).formData();
 }
 export const actions = {
+	filePairPrepare: async ({ request }) => {
+		try {
+			const v = await request.formData();
+			return {
+				filePairPreview: await prepareBackupPairRestore({
+					file_backup_id: String(v.get('file_backup_id'))
+				})
+			};
+		} catch (e) {
+			return fail(400, { fileError: e.code ? e.message : 'Coordinated preview failed.' });
+		}
+	},
+	filePairRestore: async ({ request }) => {
+		try {
+			const v = await request.formData();
+			await restoreBackupPair({
+				restore_id: String(v.get('restore_id')),
+				confirm: v.get('confirm') === 'true'
+			});
+		} catch (e) {
+			return fail(400, {
+				fileError: e.code
+					? e.message
+					: 'Coordinated restore failed. Inspect recovery state before retrying.'
+			});
+		}
+		redirect(303, '/settings?saved=restored');
+	},
+	fileBackup: async () => {
+		try {
+			await createFileBackup();
+		} catch (e) {
+			return fail(400, { fileError: e.code ? e.message : 'File backup failed. Check disk space.' });
+		}
+		redirect(303, '/settings?saved=file-backup');
+	},
+	pairBackup: async () => {
+		try {
+			await createBackupPair();
+		} catch (e) {
+			return fail(400, { fileError: e.code ? e.message : 'Paired backup failed.' });
+		}
+		redirect(303, '/settings?saved=file-backup');
+	},
+	fileSchedule: async ({ request }) => {
+		try {
+			const v = await request.formData();
+			await setFileBackupSettings({
+				enabled: v.get('enabled') === 'on',
+				interval_hours: Number(v.get('interval_hours')),
+				keep_count: Number(v.get('keep_count'))
+			});
+		} catch (e) {
+			return fail(400, { fileError: e.code ? e.message : 'Could not save file settings.' });
+		}
+		redirect(303, '/settings?saved=file-settings');
+	},
+	filePrepare: async ({ request }) => {
+		try {
+			const v = await request.formData();
+			return {
+				filePreview: await prepareFileRestore({
+					backup_id: String(v.get('backup_id')),
+					mode: String(v.get('mode'))
+				})
+			};
+		} catch (e) {
+			return fail(400, { fileError: e.code ? e.message : 'File restore preview failed.' });
+		}
+	},
+	fileRestore: async ({ request }) => {
+		try {
+			const v = await request.formData();
+			await restoreFiles({
+				restore_id: String(v.get('restore_id')),
+				confirm: v.get('confirm') === 'true'
+			});
+		} catch (e) {
+			return fail(400, {
+				fileError: e.code
+					? e.message
+					: 'File restore failed. Inspect recovery state before retrying.'
+			});
+		}
+		redirect(303, '/settings?saved=restored');
+	},
 	download: () => {
 		let backup;
 		try {

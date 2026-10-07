@@ -29,13 +29,17 @@ import * as backups from '../src/lib/server/backups.js';
 import { schemaVersion } from '../src/lib/server/migrations.js';
 let scratch;
 const initialPath = process.env.SATURDAY_DB_PATH;
+const initialFiles = process.env.SATURDAY_FILES_PATH;
 beforeEach(() => {
 	scratch = mkdtempSync(join(tmpdir(), 'saturday-backup-test-'));
 	process.env.SATURDAY_DB_PATH = join(scratch, 'career data.db');
+	process.env.SATURDAY_FILES_PATH = join(scratch, 'files');
 	migrateDatabase();
 });
 afterEach(() => {
 	rmSync(scratch, { recursive: true, force: true });
+	if (initialFiles === undefined) delete process.env.SATURDAY_FILES_PATH;
+	else process.env.SATURDAY_FILES_PATH = initialFiles;
 	if (initialPath === undefined) delete process.env.SATURDAY_DB_PATH;
 	else process.env.SATURDAY_DB_PATH = initialPath;
 });
@@ -381,7 +385,7 @@ test('CLI exports, previews, confirms and emits structured errors', () => {
 	assert.equal(settings.status, 0);
 	assert.equal(JSON.parse(settings.stdout).enabled, true);
 });
-test('built MCP exposes thirteen tools and complete backup/restore workflow without private paths', async () => {
+test('built MCP preserves legacy tools and exposes document tools and complete backup/restore workflow without private paths', async () => {
 	const child = spawn(process.execPath, ['build/mcp/index.js'], {
 		env: { ...process.env },
 		stdio: ['pipe', 'pipe', 'pipe']
@@ -425,7 +429,25 @@ test('built MCP exposes thirteen tools and complete backup/restore workflow with
 			JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n'
 		);
 		const listing = await request('tools/list', {});
-		assert.equal(listing.tools.length, 13);
+		for (const name of [
+			'create_job',
+			'list_jobs',
+			'restore_backup',
+			'list_documents',
+			'get_document',
+			'generate_document_pdf',
+			'restore_backup_pair'
+		])
+			assert.ok(listing.tools.some((t) => t.name === name));
+		for (const [name, fields] of [
+			['list_documents', ['scope', 'query', 'page', 'limit', 'catalog_token']],
+			['create_document', ['scope', 'filename', 'content']],
+			['edit_document', ['id', 'scope', 'token', 'filename', 'content']]
+		])
+			assert.deepEqual(
+				Object.keys(listing.tools.find((t) => t.name === name).inputSchema.properties).sort(),
+				fields.sort()
+			);
 		const job = await call('create_job', {
 			job_title: 'Engineer',
 			company_name: 'Example',
@@ -509,6 +531,44 @@ test('built MCP exposes thirteen tools and complete backup/restore workflow with
 		assert.equal(replay.error.code, 'restore_consumed');
 		const settings = await call('set_backup_settings', { enabled: true, keep_count: 2 });
 		assert.equal(settings.keep_count, 2);
+		const doc = await call('create_document', { filename: 'master.md', content: '# Career' });
+		assert.equal(doc.created_via, 'mcp');
+		const catalog = await call('list_documents');
+		await call('set_master_document', {
+			id: doc.id,
+			token: doc.token,
+			catalog_token: catalog.catalog_token
+		});
+		assert.equal(
+			(await call('get_document', { designation: 'master_cv', include_content: true })).content,
+			'# Career'
+		);
+		const copied = await call('copy_document', {
+			id: doc.id,
+			token: doc.token,
+			destination_scope: job.id,
+			filename: 'tailored.md'
+		});
+		assert.equal(copied.designation, null);
+		assert.equal(
+			(await call('get_document', { id: copied.id, scope: job.id, include_content: true })).content,
+			'# Career'
+		);
+		assert.equal((await call('get_document', { id: copied.id })).error.code, 'NOT_FOUND');
+		const fileSettings = await call('set_backup_settings', {
+			kind: 'files',
+			enabled: true,
+			interval_hours: 3,
+			keep_count: 4
+		});
+		assert.equal(fileSettings.keep_count, 4);
+		assert.equal((await call('get_backup_settings')).keep_count, 2);
+		const fileBackup = await call('create_file_backup');
+		const filePreview = await call('prepare_file_restore', { backup_id: fileBackup.backup_id });
+		assert.ok(
+			(await call('restore_files', { restore_id: filePreview.restore_id, confirm: true }))
+				.recovery_backup_id
+		);
 	} finally {
 		lines.close();
 		child.kill();

@@ -20,7 +20,7 @@ Apple's native Liquid Glass renderer, adaptive lensing, or system vibrancy.
 - [Toolbars — Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines/toolbars)
   and [Tab bars](https://developer.apple.com/design/human-interface-guidelines/tab-bars):
   separate text actions, retain explicit labels, and give the primary action a
-  distinct tint. Persistent navigation contains only Dashboard, Jobs, and
+  distinct tint. Persistent navigation contains Dashboard, Jobs, Documents, and
   Settings; page-specific actions stay on their page. Flat top-level
   destinations use a tab bar on narrow screens.
 - [Meet Liquid Glass — WWDC25, session 219](https://developer.apple.com/videos/play/wwdc2025/219/):
@@ -74,7 +74,7 @@ the tab bar. In Tailwind, write `rounded-[var(--r-group)]`; do not use
 
 ### Navigation
 
-- Three destinations: Dashboard, Jobs, Settings, always with the same icons.
+- Four destinations: Dashboard, Jobs, Documents, Settings, always with the same icons.
 - At 48rem and wider, they are in the sticky glass top bar
   (`.desktop-navigation`), with a soft blurred scroll edge (`.scroll-edge`)
   above scrolling content.

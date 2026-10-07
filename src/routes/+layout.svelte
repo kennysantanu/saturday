@@ -9,6 +9,7 @@
 	import { SAVED_MESSAGES, toast } from '$lib/toast.svelte';
 	import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard';
 	import Briefcase from '@lucide/svelte/icons/briefcase';
+	import Folder from '@lucide/svelte/icons/folder';
 	import Settings from '@lucide/svelte/icons/settings';
 
 	let { children } = $props();
@@ -19,6 +20,7 @@
 	const links = [
 		{ href: '/', label: 'Dashboard', icon: LayoutDashboard },
 		{ href: '/jobs', label: 'Jobs', icon: Briefcase },
+		{ href: '/documents', label: 'Documents', icon: Folder },
 		{ href: '/settings', label: 'Settings', icon: Settings }
 	];
 
@@ -92,7 +94,7 @@
 	<footer class="app-footer">Saturday keeps your job search on this computer.</footer>
 </div>
 
-<!-- Below 48rem the same three destinations move to a floating tab bar. -->
+<!-- Below 48rem the same destinations move to a floating tab bar. -->
 <nav aria-label="Primary" class="tab-bar glass-surface">
 	{#each links as link (link.href)}
 		<a href={link.href} aria-current={isCurrent(link.href) ? 'page' : undefined} class="tab-item">

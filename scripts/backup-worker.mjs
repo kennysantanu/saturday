@@ -1,3 +1,4 @@
+import { runScheduledFileBackup } from '../src/lib/server/files/backups.js';
 import {
 	runScheduledBackup,
 	getBackupSettings,
@@ -5,7 +6,7 @@ import {
 } from '../src/lib/server/backups.js';
 let stopping = false;
 let timer;
-function tick() {
+async function tick() {
 	if (stopping) return;
 	try {
 		// Most ticks only read local schedule state; do not lock the database unnecessarily.
@@ -21,6 +22,12 @@ function tick() {
 		}
 	} catch (error) {
 		console.error(`Automatic backup: ${publicBackupError(error).message}`);
+	}
+	try {
+		const result = await runScheduledFileBackup();
+		if (result?.error) console.error(`Automatic file backup: ${result.error.message}`);
+	} catch (error) {
+		console.error(`Automatic file backup: ${error.message}`);
 	}
 	if (!stopping) timer = setTimeout(tick, 60000);
 }

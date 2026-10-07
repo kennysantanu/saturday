@@ -13,6 +13,8 @@ import { setBackupSettings, listBackups } from '../src/lib/server/backups.js';
 test('production Settings download/upload/preview/confirm and supervised worker lifecycle', async () => {
 	const scratch = mkdtempSync(join(tmpdir(), 'saturday-web-backup-'));
 	const previous = process.env.SATURDAY_DB_PATH;
+	const previousFiles = process.env.SATURDAY_FILES_PATH;
+	process.env.SATURDAY_FILES_PATH = join(scratch, 'files');
 	process.env.SATURDAY_DB_PATH = join(scratch, 'career.sqlite');
 	migrateDatabase();
 	const job = createJob({ job_title: 'Backup QA', company_name: 'Example' });
@@ -200,6 +202,44 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 		assert.equal((await postJob(`/jobs/${newId}?/clearFollowUp`, {})).type, 'redirect');
 		assert.equal(getJob(newId).followUpDate, null);
 		assert.equal(getJob(newId).followUpComment, null);
+		assert.ok((await (await fetch(`${base}/documents`)).text()).includes('Select Master CV'));
+		const createdDocument = await postJob('/documents/new?/save', {
+			filename: 'web-cv',
+			content: '# Web career'
+		});
+		assert.equal(createdDocument.type, 'redirect');
+		const docId = createdDocument.location.split('/').at(-1).split('?')[0];
+		const listing = await (await fetch(`${base}/api/documents`)).json();
+		assert.equal(listing.total, 1);
+		const downloaded = await fetch(`${base}/api/files/${docId}`);
+		assert.equal(await downloaded.text(), '# Web career');
+		const docPage = await (await fetch(`${base}/documents/${docId}`)).text();
+		assert.ok(docPage.includes('web-cv.md'));
+		const rawUpload = await fetch(`${base}/api/files/upload?filename=upload.txt`, {
+			method: 'POST',
+			headers: { origin: base, 'content-type': 'application/octet-stream' },
+			body: 'Streamed upload'
+		});
+		assert.equal(rawUpload.status, 200);
+		const crossOrigin = await fetch(`${base}/api/files/upload?filename=evil.txt`, {
+			method: 'POST',
+			headers: { origin: 'https://evil.example', 'content-type': 'application/octet-stream' },
+			body: 'bad'
+		});
+		assert.equal(crossOrigin.status, 403);
+		const fileBackup = await post('fileBackup', new FormData());
+		assert.equal(fileBackup.type, 'redirect');
+		const { listFileBackups } = await import('../src/lib/server/files/backups.js');
+		const fileArtifact = (await listFileBackups()).backups[0];
+		const zipDownload = await fetch(`${base}/settings/files/${fileArtifact.backup_id}`);
+		assert.equal(zipDownload.status, 200);
+		assert.equal(
+			Buffer.from(await zipDownload.arrayBuffer())
+				.subarray(0, 2)
+				.toString(),
+			'PK'
+		);
+
 		const childExit = new Promise((r) => child.on('close', r));
 		child.kill('SIGTERM');
 		await childExit;
@@ -211,6 +251,8 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 			await exited;
 		}
 		rmSync(scratch, { recursive: true, force: true });
+		if (previousFiles === undefined) delete process.env.SATURDAY_FILES_PATH;
+		else process.env.SATURDAY_FILES_PATH = previousFiles;
 		if (previous === undefined) delete process.env.SATURDAY_DB_PATH;
 		else process.env.SATURDAY_DB_PATH = previous;
 	}

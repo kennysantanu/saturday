@@ -1,4 +1,7 @@
 <script lang="ts">
+	import NativeSelect from '$lib/components/app/native-select.svelte';
+	import { invalidateAll } from '$app/navigation';
+	import { toast } from '$lib/toast.svelte';
 	import { enhance } from '$app/forms';
 	import { enhanceWithFocus } from '$lib/forms';
 	import { page } from '$app/state';
@@ -24,6 +27,31 @@
 			setTimeout(() => (copied = null), 2000);
 		} catch {
 			copyError = 'Select the text and copy it manually.';
+		}
+	}
+	let pairConfirm = $state(false);
+	let confirm = $state(false),
+		uploading = $state(false),
+		uploadError = $state('');
+	async function importArchive(e: Event) {
+		const file = (e.currentTarget as HTMLInputElement).files?.[0];
+		if (!file) return;
+		uploading = true;
+		uploadError = '';
+		try {
+			const r = await fetch('/settings/files/import', {
+				method: 'POST',
+				headers: { 'content-type': 'application/zip' },
+				body: file
+			});
+			const body = await r.json();
+			if (!r.ok) throw new Error(body.error);
+			toast.show('File backup imported. Choose it below to preview restore.');
+			await invalidateAll();
+		} catch (e) {
+			uploadError = (e as Error).message;
+		} finally {
+			uploading = false;
 		}
 	}
 </script>
@@ -165,6 +193,10 @@
 						Backup: {form.preview.incoming.job_count} jobs and {form.preview.incoming.update_count} updates.
 					</p>
 					<p class="text-sm">{form.preview.warning}</p>
+					{#if form.preview.unmatched_job_folders?.length}<p class="text-sm">
+							{form.preview.unmatched_job_folders.length} job document folders will have no matching job
+							after this restore. Their files will be kept.
+						</p>{/if}
 					<p class="text-sm text-muted-foreground">
 						Expires {new Date(form.preview.expires_at).toLocaleTimeString()}. If records change,
 						preview again.
@@ -210,6 +242,223 @@
 		</Card.Content>
 	</Card.Root>
 
+	<Card.Root
+		><Card.Header
+			><Card.Title>File backups</Card.Title><Card.Description
+				>Back up user documents, job attachments and the file manifest separately from SQLite.
+				Archives contain private data and are not encrypted.</Card.Description
+			></Card.Header
+		><Card.Content class="space-y-5">
+			{#if data.filesError || form?.fileError || uploadError}<Notice tone="error"
+					>{data.filesError || form?.fileError || uploadError}</Notice
+				>{/if}
+			{#if data.fileSummary}<p class="text-sm text-muted-foreground">
+					{data.fileSummary.count} files · {(data.fileSummary.bytes / 1024 / 1024).toFixed(1)} MiB
+				</p>
+				<p class="inset-surface p-3 font-mono text-sm break-all">{data.fileSummary.root}</p>{/if}
+			<div class="form-actions">
+				<form method="POST" action="?/fileBackup" use:enhance={enhanceWithFocus}>
+					<Button type="submit" variant="outline">Back up files now</Button>
+				</form>
+				<form method="POST" action="?/pairBackup" use:enhance={enhanceWithFocus}>
+					<Button type="submit" variant="outline">Back up database and files</Button>
+				</form>
+			</div>
+			<form
+				method="POST"
+				action="?/fileSchedule"
+				use:enhance={enhanceWithFocus}
+				class="inset-surface space-y-4 p-4"
+			>
+				<label class="flex items-center gap-3"
+					><input type="checkbox" name="enabled" checked={data.fileSettings.enabled} />Automatic
+					file backups</label
+				>
+				<div class="grid gap-4 sm:grid-cols-2">
+					<label class="space-y-2 text-sm"
+						><span>Backup interval (hours)</span><Input
+							type="number"
+							name="interval_hours"
+							min="1"
+							max="168"
+							step="1"
+							required
+							value={data.fileSettings.interval_hours}
+						/></label
+					><label class="space-y-2 text-sm"
+						><span>Number of automatic backups retained</span><Input
+							type="number"
+							name="keep_count"
+							min="1"
+							max="100"
+							step="1"
+							required
+							value={data.fileSettings.keep_count}
+						/></label
+					>
+				</div>
+				<p class="text-sm text-muted-foreground">
+					Runs while Saturday is running and your computer is awake. Older automatic file backups
+					are removed only after a new one succeeds. Manual and recovery backups stay.
+				</p>
+				<div class="space-y-1 text-sm text-muted-foreground" aria-live="polite">
+					<p>
+						Status: {data.fileSettings.running
+							? 'Running'
+							: data.fileSettings.last_error
+								? 'Failed'
+								: data.fileSettings.enabled
+									? 'Scheduled'
+									: 'Disabled'}
+					</p>
+					<p>
+						Last success: {data.fileSettings.last_success_at
+							? new Date(data.fileSettings.last_success_at).toLocaleString()
+							: 'None yet'}
+					</p>
+					<p>
+						Next run: {data.fileSettings.enabled
+							? data.fileSettings.next_due_at
+								? new Date(data.fileSettings.next_due_at).toLocaleString()
+								: 'Due'
+							: 'Disabled'}
+					</p>
+					{#if data.fileSettings.last_error}<p role="alert">
+							{data.fileSettings.last_error.message}
+						</p>{/if}
+				</div>
+				<div class="form-actions">
+					<Button type="submit" variant="outline">Save file backup settings</Button>
+				</div>
+			</form>
+			<label class="block space-y-2 text-sm"
+				><span>{uploading ? 'Importing and validating archive…' : 'Import a file backup ZIP'}</span
+				><Input type="file" accept=".zip" disabled={uploading} onchange={importArchive} /></label
+			>
+			<form method="POST" action="?/filePrepare" use:enhance={enhanceWithFocus} class="space-y-3">
+				<label class="block space-y-2 text-sm"
+					><span>Saved file backup</span><NativeSelect name="backup_id" required
+						><option value="">Choose a backup</option>{#each data.fileBackups as b}<option
+								value={b.backup_id}
+								>{b.kind} · {new Date(b.created_at).toLocaleString()} · {b.file_count} files</option
+							>{/each}</NativeSelect
+					></label
+				><label class="block space-y-2 text-sm"
+					><span>Restore mode</span><NativeSelect name="mode"
+						><option value="add">Add missing files</option><option value="replace"
+							>Replace entire file collection</option
+						></NativeSelect
+					></label
+				>
+				<div class="form-actions">
+					<Button type="submit" variant="outline">Preview file restore</Button>
+				</div>
+			</form>
+			{#if form?.filePreview}<div class="inset-surface space-y-3 p-4">
+					<h3 class="font-medium">File restore preview</h3>
+					<p>
+						Current: {form.filePreview.current_count} files. Backup: {form.filePreview
+							.incoming_count} files. Result: {form.filePreview.result_count} files. Removed: {form
+							.filePreview.removed}.
+					</p>
+					<p class="text-sm">{form.filePreview.warning}</p>
+					<p class="text-sm">
+						Master CV: {form.filePreview.master_cv_before ?? 'Not selected'} → {form.filePreview
+							.master_cv_after ?? 'Not selected'}
+					</p>
+					<form method="POST" action="?/fileRestore" id="restore-files">
+						<input type="hidden" name="restore_id" value={form.filePreview.restore_id} /><input
+							type="hidden"
+							name="confirm"
+							value="true"
+						/><Button variant="outline" type="button" onclick={() => (confirm = true)}
+							>Restore files</Button
+						>
+					</form>
+					<ConfirmDialog
+						bind:open={confirm}
+						title="Restore file backup?"
+						description="Apply the previewed changes to your files. A complete recovery backup of the current files will be kept."
+						confirmLabel="Restore files"
+						formId="restore-files"
+						destructive
+					/>
+				</div>{/if}
+			{#if form?.filePairPreview}<div class="inset-surface space-y-3 p-4">
+					<h3 class="font-medium">Coordinated restore preview</h3>
+					<p>
+						Database: {form.filePairPreview.database.current.job_count} current jobs → {form
+							.filePairPreview.database.incoming.job_count} incoming jobs.
+					</p>
+					<p>
+						Files: {form.filePairPreview.files.current_count} current → {form.filePairPreview.files
+							.result_count} incoming. Removed: {form.filePairPreview.files.removed}.
+					</p>
+					<p class="text-sm">
+						Both collections will be replaced. Separate recovery artifacts are kept. An interrupted
+						restore requires offline recovery before writes resume.
+					</p>
+					<form method="POST" action="?/filePairRestore" id="restore-file-pair">
+						<input type="hidden" name="restore_id" value={form.filePairPreview.restore_id} /><input
+							type="hidden"
+							name="confirm"
+							value="true"
+						/><Button type="button" variant="outline" onclick={() => (pairConfirm = true)}
+							>Restore database and files</Button
+						>
+					</form>
+					<ConfirmDialog
+						bind:open={pairConfirm}
+						title="Replace database and files?"
+						description="Apply both previewed snapshots. Recovery copies will be kept."
+						confirmLabel="Restore both"
+						formId="restore-file-pair"
+						destructive
+					/>
+				</div>{/if}
+
+			{#if data.fileBackups.length}<ul class="divide-y">
+					{#each data.fileBackups as b}<li
+							class="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"
+						>
+							<span
+								>{b.kind} · {new Date(b.created_at).toLocaleString()} · {b.file_count} files · {(
+									b.bytes /
+									1024 /
+									1024
+								).toFixed(1)} MiB{#if b.backup_set_id}
+									· Paired{/if}</span
+							><a class="underline" href={`/settings/files/${b.backup_id}`}
+								>Download<span class="sr-only"> {b.filename}</span></a
+							>
+							{#if b.backup_set_id}<form
+									method="POST"
+									action="?/filePairPrepare"
+									use:enhance={enhanceWithFocus}
+								>
+									<input type="hidden" name="file_backup_id" value={b.backup_id} /><Button
+										variant="outline"
+										size="sm"
+										type="submit">Preview coordinated restore</Button
+									>
+								</form>{/if}
+							>
+						</li>{/each}
+				</ul>{/if}
+			{#if data.fileSummary?.unmatched.length}<div class="space-y-2">
+					<h3 class="font-medium">Unmatched job folders</h3>
+					<p class="text-sm text-muted-foreground">
+						These files belong to jobs absent from the current database. They are preserved in
+						backups.
+					</p>
+					{#each data.fileSummary.unmatched as id}<a
+							class="block break-all underline"
+							href={`/settings/files/recovery/${id}`}>{id}</a
+						>{/each}
+				</div>{/if}
+			{#if data.pdfStatus}<p class="text-sm text-muted-foreground">{data.pdfStatus.message}</p>{/if}
+		</Card.Content></Card.Root
+	>
 	<Card.Root>
 		<Card.Header>
 			<Card.Title class="text-base">Connect an assistant</Card.Title>

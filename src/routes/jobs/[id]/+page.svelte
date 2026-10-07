@@ -90,6 +90,9 @@
 					{/if}
 				{/snippet}
 				{#snippet actions()}
+					<Button variant="outline" href={`/jobs/${job.id}/documents`}
+						>Documents ({data.documentCount})</Button
+					>
 					<form method="POST" action="?/star" use:enhance={enhanceWithFocus}>
 						<input type="hidden" name="is_starred" value={job.isStarred ? '0' : '1'} />
 						<Button type="submit" variant="outline" aria-pressed={job.isStarred}>
@@ -420,3 +423,30 @@
 	formId="dismiss-form"
 	destructive
 />
+
+<div class="mt-8">
+	<Card.Root
+		><Card.Header
+			><Card.Title>Job documents</Card.Title><Card.Description
+				>{data.documentCount} attachments for this job.</Card.Description
+			></Card.Header
+		><Card.Content class="space-y-4"
+			>{#if data.documentsError}<Notice tone="error">{data.documentsError}</Notice
+				>{/if}{#if data.documents.length}<ul class="divide-y">
+					{#each data.documents.slice(0, 5) as doc}<li
+							class="flex flex-wrap items-center justify-between gap-3 py-3"
+						>
+							<a class="min-w-0 break-all underline" href={`/jobs/${job.id}/documents/${doc.id}`}
+								>{doc.filename}</a
+							><a class="text-sm underline" href={`/api/files/${doc.id}?scope=${job.id}`}
+								>Download<span class="sr-only"> {doc.filename}</span></a
+							>
+						</li>{/each}
+				</ul>{:else}<p class="text-sm text-muted-foreground">
+					Add a tailored resume, cover letter or notes for this job.
+				</p>{/if}<Button variant="outline" href={`/jobs/${job.id}/documents`}
+				>Manage job documents</Button
+			></Card.Content
+		></Card.Root
+	>
+</div>

@@ -63,3 +63,23 @@ Automatic backups run only while the web app runs through `npm run start` or `np
 After a successful automatic backup, older automatic files beyond the configured count are deleted. Manual, imported, recovery backups, and files used by pending restores are preserved. Reducing the count applies after the next successful automatic backup. The count can temporarily be exceeded by protected files or cleanup errors. Ten automatic backups may occupy up to about 1 GiB under the 100 MiB file limit, plus other backups and staging; this is not a total disk quota.
 
 Backup files and schedule settings live in `<database-path>.backups/`; temporary restore data lives in `<database-path>.restore/`. Restoring job records leaves your current schedule settings intact. There is no general deletion button in this version; manage retained manual/recovery files locally if needed, preserving copies you still need.
+
+## Documents and Master CV
+
+Documents holds your reusable files. Click **Upload**, then select a file (up to 25 MiB) to upload immediately or choose **New document** to create Markdown. Search filenames and use Preview, Edit or Download. The three-dot menu contains Rename, Duplicate and permanent Delete. Duplicate creates `name copy.ext`, then numbered copies. There is no Trash or automatic version history.
+
+Markdown uses a basic visual editor with a source fallback. Files with unsupported formatting stay in source mode to preserve it. HTML and TXT use source text editors. Text editing is limited to 1 MiB of valid UTF-8. PDFs have browser preview/download; other formats download only. Explicit Save persists your edits. If an assistant edits the same file, reload/reconcile or save your draft as a separate copy rather than overwriting silently.
+
+Click **Select Master CV**, choose an existing user Markdown file, then **Use selected file**. The file receives a clickable **Master CV** label; its name, location and contents stay the same. Select another file later to change the designation. Click its **Master CV** label, then confirm **Remove designation** to clear the designation and keep the file. Deleting the selected file also clears Master CV. Create/upload your Markdown CV normally before selecting it; PDF/Word conversion is not included.
+
+Each job has its own Documents link and attachment list. Upload/create there or use **Copy to this job** to make an independent copy of a user document. Editing a job copy never edits its source or Master CV. The user Documents page does not browse job folders.
+
+For resumes, your assistant can create a reusable HTML template and a job-tailored HTML file. Review/edit the HTML source, save, then choose **Generate PDF** on its preview. Saturday saves a new PDF beside the HTML automatically. Existing PDFs are preserved with numbered filenames; editing HTML later does not update earlier PDFs. The renderer blocks scripts and external resources, so use self-contained print CSS and installed fonts.
+
+## File backups
+
+Settings has separate **File backups** controls: automatic enablement, interval in hours, and number retained. Defaults are off, 24 hours and 10 automatic backups. The worker runs while Saturday is running; disabling the schedule keeps existing archives. Older automatic file archives are pruned only after a new backup succeeds. Manual, imported and recovery artifacts are protected.
+
+**Back up files now** saves a ZIP containing the file manifest, user documents and job attachments. There is no total archive-size cap; sufficient disk space is required for staging and recovery. Download/import archives in Settings. Preview **Add missing files** or **Replace entire file collection** before restoring; conflicts stop additive restore. A complete recovery archive is kept before changes.
+
+Database backups and file backups are separate. Database restore leaves files in place; unmatched job folders remain available under Settings for download/copy to an existing job. **Back up database and files** captures a coordinated pair; its file artifact offers a preview to restore both. Interrupted coordinated restores block access until offline recovery completes. Backups are private and unencrypted; keep copies on another disk if you need protection from disk failure.

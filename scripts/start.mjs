@@ -27,7 +27,7 @@ const child = spawn(process.execPath, [entry], {
 		HOST: host,
 		PORT: port,
 		ORIGIN: `http://${host}:${port}`,
-		BODY_SIZE_LIMIT: String(101 * 1024 * 1024),
+		BODY_SIZE_LIMIT: 'Infinity',
 		SATURDAY_PROJECT_ROOT: root
 	}
 });

@@ -25,13 +25,14 @@ You do not need AI to use Saturday. The app works fully on its own, and connecti
 - **Remember what happened.** Record applications, prescreens, interviews, offers, outcomes, and general notes in a dated history. You can correct a mistaken update later.
 - **See where things stand.** The Dashboard shows active jobs, recent activity, upcoming dated updates, and how many jobs reached each step. The Jobs list starts with active jobs; Activity → All also shows dismissed, accepted, and rejected jobs. Search title/company/location separately, combine advanced filters, sort results, and page through all matches.
 - **Focus on the jobs you still want.** Dismiss an opportunity you are no longer pursuing and reopen it if things change.
+- **Keep career documents together.** Create/edit Markdown, edit HTML/TXT source, select a Master CV, attach independent files to jobs, and generate PDFs from HTML. Back up files separately from SQLite.
 - **Work with your assistant.** Give an assistant on your computer access to your job records so it can find an opportunity, add one, or record progress when you ask. Its changes appear in the app for you to review.
 
 To get started in the app, choose **Add job**. Only the job title and company are required. Open that job later to add an update or review its history. The [user guide](docs/user-guide.md) explains statuses, counts, and corrections.
 
 ## Install and start
 
-Saturday runs from source with Node.js; a packaged installer is not available yet. You need Node.js 22.13 or newer and npm 10 or newer. Check with `node -v` and `npm -v`. Nothing else is required, such as a separate database. Commands below use macOS and Linux shell syntax.
+Saturday runs from source with Node.js; a packaged installer is not available yet. You need Node.js 22.13 or newer and npm 10 or newer. Check with `node -v` and `npm -v`. No separate database is required. Setup also installs managed Chrome for HTML-to-PDF generation; basic jobs/documents work without Chrome. Commands below use macOS and Linux shell syntax.
 
 ```sh
 git clone https://github.com/kennysantanu/saturday.git

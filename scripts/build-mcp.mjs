@@ -16,6 +16,7 @@ try {
 		format: 'esm',
 		target: 'node22.13',
 		packages: 'bundle',
+		external: ['puppeteer', 'yazl', 'yauzl'],
 		banner: { js: '#!/usr/bin/env node' }
 	});
 	console.log(`Built local MCP server at ${outfile}`);

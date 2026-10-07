@@ -5,6 +5,13 @@
  */
 export const SAVED_MESSAGES: Record<string, string> = {
 	restored: 'Backup restored.',
+	document: 'Document saved.',
+	'document-copy': 'Document copied.',
+	'document-deleted': 'Document deleted.',
+	'document-pdf': 'PDF generated and saved.',
+	'master-cv': 'Master CV selection saved.',
+	'file-backup': 'File backup saved.',
+	'file-settings': 'File backup settings saved.',
 	'backup-settings': 'Automatic backup settings saved.',
 	job: 'Job details saved.',
 	'follow-up': 'Follow-up saved.',
