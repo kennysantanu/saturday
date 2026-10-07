@@ -10,7 +10,7 @@
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
-	import { focusFirstError } from '$lib/forms';
+	import { focusFirstError, withPending } from '$lib/forms';
 	import { UPDATE_CHOICES } from '$lib/status';
 
 	type Entry = {
@@ -53,10 +53,9 @@
 			<Button
 				{...props}
 				variant="ghost"
-				size="icon"
-				class="-my-2 -mr-2 shrink-0 text-muted-foreground"
-				aria-label="Edit update: {entry.label}"
-				title="Edit update"><Pencil class="size-4" /></Button
+				size="sm"
+				class="-my-1 -mr-2 shrink-0 text-muted-foreground"
+				aria-label="Edit update: {entry.label}"><Pencil data-icon="inline-start" />Edit</Button
 			>
 		{/snippet}
 	</Dialog.Trigger>
@@ -65,17 +64,16 @@
 		<form
 			method="POST"
 			action="?/correctUpdate"
-			use:enhance={() =>
-				async ({ result, update }) => {
-					await update();
-					if (result.type === 'redirect') {
-						open = false;
-						return;
-					}
-					confirmingRemove = false;
-					await tick();
-					focusFirstError();
-				}}
+			use:enhance={withPending(() => async ({ result, update }) => {
+				await update();
+				if (result.type === 'redirect') {
+					open = false;
+					return;
+				}
+				confirmingRemove = false;
+				await tick();
+				focusFirstError();
+			})}
 			class="grid gap-5"
 		>
 			<input type="hidden" name="update_id" value={entry.id} />

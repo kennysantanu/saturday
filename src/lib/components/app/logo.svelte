@@ -7,7 +7,7 @@
 <a
 	href="/"
 	aria-label="Saturday Career Dashboard, home"
-	class={cn('group flex items-center gap-3 rounded-lg', className)}
+	class={cn('group flex items-center gap-3 rounded-[var(--r-control)]', className)}
 >
 	<svg
 		viewBox="0 0 40 40"
@@ -31,6 +31,6 @@
 
 	<span class="flex flex-col leading-none">
 		<span class="text-xl font-semibold tracking-tight text-foreground">Saturday</span>
-		<span class="mt-1.5 text-xs font-medium text-muted-foreground">Career Dashboard</span>
+		<span class="meta-text mt-1.5 font-medium text-muted-foreground">Career Dashboard</span>
 	</span>
 </a>

@@ -1,32 +1,35 @@
 <script lang="ts">
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
-	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import { enhance } from '$app/forms';
-	import Field from '$lib/components/app/field.svelte';
-	import NativeSelect from '$lib/components/app/native-select.svelte';
+	import JobFields from '$lib/components/app/job-fields.svelte';
 	import Notice from '$lib/components/app/notice.svelte';
 	import PageHeader from '$lib/components/app/page-header.svelte';
+	import PageShell from '$lib/components/app/page-shell.svelte';
+	import UnsavedGuard from '$lib/components/app/unsaved-guard.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import * as Card from '$lib/components/ui/card/index.js';
-	import { Input } from '$lib/components/ui/input/index.js';
-	import { Textarea } from '$lib/components/ui/textarea/index.js';
-	import { enhanceWithFocus } from '$lib/forms';
+	import { UnsavedChanges } from '$lib/unsaved.svelte';
 
 	let { form } = $props();
 	const errors = $derived(form?.errors ?? {});
 	const values = $derived(form?.values ?? {});
+	const guard = new UnsavedChanges();
+	const detailKeys = [
+		'employment_type',
+		'work_arrangement',
+		'location',
+		'compensation',
+		'source',
+		'application_deadline',
+		'follow_up_date',
+		'follow_up_comment'
+	];
 </script>
 
-<svelte:head><title>Add job · Saturday</title></svelte:head>
-
-<div class="mx-auto max-w-2xl space-y-8">
-	<div class="space-y-4">
-		<a href="/jobs" class="back-link"><ArrowLeft class="size-4" />Back to Jobs</a>
-		<PageHeader
-			title="Add job"
-			description="Start with the title and company. You can add more later."
-		/>
-	</div>
+<PageShell title="Add job" width="form">
+	<PageHeader
+		back={{ href: '/jobs', label: 'Jobs' }}
+		title="Add job"
+		description="Start with the title and company. You can add more later."
+	/>
 
 	{#if errors.form}
 		<Notice tone="error" title="The job was not saved">{errors.form}</Notice>
@@ -34,222 +37,18 @@
 		<Notice tone="error" title="Check the highlighted fields" />
 	{/if}
 
-	<form method="POST" use:enhance={enhanceWithFocus} class="space-y-6">
-		<p class="text-sm text-muted-foreground">
-			<span class="text-destructive" aria-hidden="true">*</span> Required
-		</p>
-		<Card.Root>
-			<Card.Content class="space-y-5 py-2">
-				<Field id="job_title" label="Job title" required error={errors.job_title}>
-					{#snippet control(attrs)}
-						<Input
-							{...attrs}
-							name="job_title"
-							placeholder="Product Designer"
-							autocomplete="off"
-							value={values.job_title ?? ''}
-						/>
-					{/snippet}
-				</Field>
-
-				<Field id="company_name" label="Company" required error={errors.company_name}>
-					{#snippet control(attrs)}
-						<Input
-							{...attrs}
-							name="company_name"
-							placeholder="Northwind Labs"
-							autocomplete="off"
-							value={values.company_name ?? ''}
-						/>
-					{/snippet}
-				</Field>
-				<Field id="posting_url" label="Job posting link" error={errors.posting_url}>
-					{#snippet control(attrs)}
-						<Input
-							{...attrs}
-							name="posting_url"
-							type="url"
-							inputmode="url"
-							placeholder="https://"
-							value={values.posting_url ?? ''}
-						/>
-					{/snippet}
-				</Field>
-
-				<Field
-					id="job_description"
-					label="Job description"
-					hint="Paste the text from the posting. It is stored as plain text."
-					error={errors.job_description}
-				>
-					{#snippet control(attrs)}
-						<Textarea
-							{...attrs}
-							name="job_description"
-							rows={6}
-							value={values.job_description ?? ''}
-						/>
-					{/snippet}
-				</Field>
-
-				<Field
-					id="notes"
-					label="Job notes"
-					hint="Your own notes about this job."
-					error={errors.notes}
-				>
-					{#snippet control(attrs)}
-						<Textarea {...attrs} name="notes" rows={4} value={values.notes ?? ''} />
-					{/snippet}
-				</Field>
-				<input type="hidden" name="is_starred" value="0" />
-				<label class="flex items-center gap-3 text-sm font-medium">
-					<input
-						type="checkbox"
-						name="is_starred"
-						value="1"
-						class="size-4 accent-primary"
-						checked={values.is_starred === '1'}
-					/>
-					Star this job
-				</label>
-			</Card.Content>
-		</Card.Root>
-
-		<details
-			class="disclosure group"
-			open={Boolean(
-				errors.employment_type ||
-				errors.work_arrangement ||
-				errors.location ||
-				errors.compensation ||
-				errors.source ||
-				errors.application_deadline ||
-				errors.follow_up_date ||
-				errors.follow_up_comment
-			)}
-		>
-			<summary class="[&::-webkit-details-marker]:hidden">
-				More details
-				<ChevronDown
-					class="size-4 text-muted-foreground transition-transform group-open:rotate-180"
-				/>
-			</summary>
-			<div class="disclosure-body">
-				<div class="grid gap-5 sm:grid-cols-2">
-					<Field id="employment_type" label="Employment type" error={errors.employment_type}>
-						{#snippet control(attrs)}
-							<NativeSelect {...attrs} name="employment_type" value={values.employment_type ?? ''}>
-								<option value="">Not specified</option>
-								<option value="full-time">Full-time</option>
-								<option value="part-time">Part-time</option>
-								<option value="contract">Contract</option>
-								<option value="internship">Internship</option>
-								<option value="temporary">Temporary</option>
-							</NativeSelect>
-						{/snippet}
-					</Field>
-					<Field id="work_arrangement" label="Work arrangement" error={errors.work_arrangement}>
-						{#snippet control(attrs)}
-							<NativeSelect
-								{...attrs}
-								name="work_arrangement"
-								value={values.work_arrangement ?? ''}
-							>
-								<option value="">Not specified</option>
-								<option value="remote">Remote</option>
-								<option value="hybrid">Hybrid</option>
-								<option value="on-site">On-site</option>
-							</NativeSelect>
-						{/snippet}
-					</Field>
-					<Field id="location" label="Location" error={errors.location}>
-						{#snippet control(attrs)}
-							<Input
-								{...attrs}
-								name="location"
-								type="text"
-								maxlength={200}
-								value={values.location ?? ''}
-							/>
-						{/snippet}
-					</Field>
-					<Field
-						id="compensation"
-						label="Compensation"
-						error={errors.compensation}
-						hint="For example, $120k–$150k/year + equity."
-					>
-						{#snippet control(attrs)}
-							<Input
-								{...attrs}
-								name="compensation"
-								type="text"
-								maxlength={1000}
-								value={values.compensation ?? ''}
-							/>
-						{/snippet}
-					</Field>
-					<Field id="source" label="Source" error={errors.source}>
-						{#snippet control(attrs)}
-							<Input
-								{...attrs}
-								name="source"
-								type="text"
-								maxlength={200}
-								value={values.source ?? ''}
-							/>
-						{/snippet}
-					</Field>
-					<Field
-						id="application_deadline"
-						label="Application deadline"
-						error={errors.application_deadline}
-					>
-						{#snippet control(attrs)}
-							<Input
-								{...attrs}
-								name="application_deadline"
-								type="date"
-								value={values.application_deadline ?? ''}
-							/>
-						{/snippet}
-					</Field>
-					<Field id="follow_up_date" label="Follow-up date" error={errors.follow_up_date}>
-						{#snippet control(attrs)}
-							<Input
-								{...attrs}
-								name="follow_up_date"
-								type="date"
-								value={values.follow_up_date ?? ''}
-							/>
-						{/snippet}
-					</Field>
-					<div class="sm:col-span-2">
-						<Field
-							id="follow_up_comment"
-							label="Follow-up comment"
-							error={errors.follow_up_comment}
-							hint="Set a follow-up date to add a comment. Clear the date to remove the follow-up."
-						>
-							{#snippet control(attrs)}
-								<Textarea
-									{...attrs}
-									name="follow_up_comment"
-									rows={3}
-									maxlength={10000}
-									value={values.follow_up_comment ?? ''}
-								/>
-							{/snippet}
-						</Field>
-					</div>
-				</div>
-			</div>
-		</details>
-
-		<div class="form-actions flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+	<form method="POST" use:enhance={guard.enhance} oninput={guard.markDirty} class="space-y-6">
+		<JobFields
+			value={values}
+			starred={values.is_starred === '1'}
+			{errors}
+			mode="add"
+			detailsOpen={detailKeys.some((key) => errors[key])}
+		/>
+		<div class="form-actions justify-end">
 			<Button href="/jobs" variant="ghost" size="lg">Cancel</Button>
 			<Button type="submit" size="lg">Save job</Button>
 		</div>
 	</form>
-</div>
+</PageShell>
+<UnsavedGuard {guard} />

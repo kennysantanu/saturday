@@ -2,15 +2,13 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import ArrowUpRight from '@lucide/svelte/icons/arrow-up-right';
 	import Briefcase from '@lucide/svelte/icons/briefcase';
-	import CalendarDays from '@lucide/svelte/icons/calendar-days';
-	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import DateRow from '$lib/components/app/date-row.svelte';
 	import PageHeader from '$lib/components/app/page-header.svelte';
+	import PageShell from '$lib/components/app/page-shell.svelte';
 	import EmptyState from '$lib/components/app/empty-state.svelte';
 	import JobRow from '$lib/components/app/job-row.svelte';
-	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Card from '$lib/components/ui/card/index.js';
-	import { relativeDay } from '$lib/format';
 	import { DASHBOARD_CARDS } from '$lib/status';
 	let { data } = $props();
 
@@ -23,9 +21,7 @@
 	const barWidth = (count: number) => (count === 0 ? 0 : Math.max(3, (count / widest) * 100));
 </script>
 
-<svelte:head><title>Dashboard · Saturday</title></svelte:head>
-
-<div class="space-y-10">
+<PageShell title="Dashboard">
 	<PageHeader title="Dashboard" description="Your search, at a glance.">
 		{#snippet actions()}
 			{#if !isEmpty}
@@ -68,27 +64,14 @@
 					<h2 id={section.key + '-heading'} class="section-title">{section.label}</h2>
 					<Card.Root class="gap-0 divide-y divide-border p-0">
 						{#each section.items as item (item.jobId)}
-							<a href="/jobs/{item.jobId}" class="job-row group">
-								<div class="company-mark" aria-hidden="true"><CalendarDays class="size-5" /></div>
-								<div class="job-row-title min-w-0">
-									<p class="font-semibold">{item.title}</p>
-									<p class="mt-1 text-sm text-muted-foreground">{item.company}</p>
-									{#if 'comment' in item && item.comment}<p
-											class="mt-1 text-sm break-words whitespace-pre-wrap text-muted-foreground"
-										>
-											{item.comment}
-										</p>{/if}
-								</div>
-								<div class="job-row-status">
-									<Badge variant={item.date < data.today ? 'destructive' : 'secondary'}
-										>{item.date < data.today ? 'Overdue · ' : ''}{relativeDay(
-											item.date,
-											data.today
-										)}</Badge
-									>
-								</div>
-								<ChevronRight class="size-4 shrink-0 text-muted-foreground" />
-							</a>
+							<DateRow
+								href="/jobs/{item.jobId}"
+								title={item.title}
+								subtitle={item.company}
+								comment={'comment' in item ? item.comment : null}
+								date={item.date}
+								today={data.today}
+							/>
 						{/each}
 					</Card.Root>
 				</section>
@@ -99,20 +82,13 @@
 				<h2 id="upcoming-heading" class="section-title">Coming up</h2>
 				<Card.Root class="gap-0 divide-y divide-border p-0">
 					{#each data.upcoming as item (item.id)}
-						<a href="/jobs/{item.jobId}" class="job-row group">
-							<div class="company-mark" aria-hidden="true"><CalendarDays class="size-5" /></div>
-							<div class="job-row-title min-w-0">
-								<p class="font-semibold">{item.label}</p>
-								<p class="mt-1 text-sm text-muted-foreground">{item.title} · {item.company}</p>
-							</div>
-							<div class="job-row-status">
-								<Badge variant="secondary">{relativeDay(item.date, data.today)}</Badge>
-							</div>
-							<ChevronRight
-								class="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
-								aria-hidden="true"
-							/>
-						</a>
+						<DateRow
+							href="/jobs/{item.jobId}"
+							title={item.label}
+							subtitle="{item.title} · {item.company}"
+							date={item.date}
+							today={data.today}
+						/>
 					{/each}
 				</Card.Root>
 			</section>
@@ -152,7 +128,7 @@
 		<section aria-labelledby="recent-heading" class="space-y-3">
 			<div class="flex flex-wrap items-baseline justify-between gap-3">
 				<h2 id="recent-heading" class="section-title">Recently updated</h2>
-				<a href="/jobs" class="text-sm font-medium text-primary hover:underline">View all jobs</a>
+				<a href="/jobs" class="link text-sm">View all jobs</a>
 			</div>
 			<Card.Root class="gap-0 divide-y divide-border p-0">
 				{#each data.recentJobs as job (job.id)}
@@ -169,4 +145,4 @@
 			</Card.Root>
 		</section>
 	{/if}
-</div>
+</PageShell>

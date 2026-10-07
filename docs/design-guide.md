@@ -88,37 +88,72 @@ the tab bar. In Tailwind, write `rounded-[var(--r-group)]`; do not use
 
 ### Page structure
 
+- Wrap every page in `PageShell` (one `space-y-8` rhythm and the document title
+  `{title} · Saturday`; `width="form"` for add and edit forms). Titles read
+  `Primary · Context`, for example `Ada Lovelace · Network`.
 - Use `PageHeader`: left-aligned title, optional `eyebrow`, `description`,
-  `meta` (status and attribution shown with the title), and `actions`.
+  `meta` (status and attribution shown with the title), `actions`, and `back`
+  (`{href, label}`, shown as an arrow and "Back to {label}"). Do not hand-write
+  back links.
 - Actions: at most one primary per header. If an empty state repeats the same
   primary action, hide it from the header.
 - Attribution, such as “Added by assistant”, appears once at job level as a
   badge. Entries use a small icon with an accessible name.
-- Lists of jobs use `JobRow`. Rows wrap long titles and keep secondary text at
-  13px or larger.
+- Lists are a `Card` of rows on the shared `.list-row` grid: `JobRow`,
+  `PersonRow`, and `DateRow` are whole-row links with a mark, a chevron and a
+  status column; `DocumentRow` is not a link because it has its own actions.
+  Rows wrap long titles and keep secondary text at 13px or larger (`.meta-text`).
+- Follow-up and deadline dates use `DueBadge` everywhere: overdue dates are
+  tinted and say "Overdue", never color alone.
+- Cards on detail pages use `SectionCard` (heading, optional count and
+  description, header actions). `LinkedItem` is one linked record inside such a
+  card. Use `EmptyState` with `size="inline"` for an empty section.
+- Paging uses `Pagination` (both buttons always shown, unavailable ones
+  disabled). Search and filter forms use `FilterBar` (Clear, then Apply) and
+  `FilterChips` for the filters in effect.
+- In-content links use `.link`; do not hand-style underlines.
 
 ### Forms and dialogs
 
-- Use `Field` for label, hint, and error; `NativeSelect` for selects (native
-  menus work best on touch); `Input` and `Textarea` from the ui folder.
+- Use `Field` for every labelled control, including number and file inputs;
+  `NativeSelect` for selects (native menus work best on touch); `Input` and
+  `Textarea` from the ui folder; `Checkbox` and `RadioOption` for choices.
+  Never write a bare `<label>`, `<select>` or `<input type="checkbox">`.
+- Add and Edit forms share one field component (`JobFields`, `PersonFields`) so
+  they cannot drift apart.
 - Mark required fields with `*` and include a “* Required” cue at the top of
   the form.
 - Additional optional fields go in a `.disclosure` with a `.disclosure-body`.
   Add/Edit job keeps the posting link, description, notes, and star checkbox
   alongside title/company; employment and follow-up details use the disclosure.
-- Form footers use `.form-actions` (capsules; primary last).
+- Form footers use `.form-actions` (capsules; primary last). Add and edit
+  pages add `justify-end`.
+- Show progress while a form is sent: wrap custom `use:enhance` callbacks in
+  `withPending` (`enhanceWithFocus` already does). The submit button dims and
+  shows a spinner.
+- Forms with free text warn before leaving with unsaved edits: create an
+  `UnsavedChanges` (`$lib/unsaved.svelte`), use `guard.enhance` and
+  `oninput={guard.markDirty}`, and render `UnsavedGuard`.
 - After a failed save, focus moves to the first invalid field or the error
   `Notice`. Use `enhanceWithFocus` from `$lib/forms` with `use:enhance`, or call
   `focusFirstError()` in a custom callback. Errors for a dialog appear inside it.
 - Explain conditional behavior as a field hint at the moment it applies, not as
   permanent dialog text.
 - Dialogs use a centered glass panel from 48rem and become bottom sheets below
-  it. Always include a title and description.
+  it. Always include a title and description. Width: `sm:max-w-md` for
+  confirmations and short forms, `sm:max-w-lg` for longer forms, `sm:max-w-2xl`
+  for pickers. Cancel is a ghost button and comes first.
 - **Never use `window.confirm`.** Use `ConfirmDialog` for irreversible or
   consequential actions (it submits a form by `formId`), or an inline confirm
   step inside an edit dialog. Reserve `destructive` for the confirming button.
 - Editing an entry uses the same dialog pattern as adding one (see
   `UpdateCorrection`).
+- Per-item actions use `RowActions`: a visible Edit with icon and label, and the
+  rest in `ActionMenu` (icons; Delete is tinted, separated and last). Reserve
+  `destructive` for permanent deletion; reversible actions such as Dismiss use
+  the default confirm button.
+- Pair create, upload and link actions with their icon (`Plus`, `Upload`,
+  `Link2`).
 
 ### Feedback
 
@@ -126,8 +161,8 @@ the tab bar. In Tailwind, write `rounded-[var(--r-group)]`; do not use
   action, redirect with `?saved=<key>` and add the key to `SAVED_MESSAGES` in
   `$lib/toast.svelte.ts`; the root layout shows it once, then removes the
   parameter. On the client, call `toast.show(message)`.
-- Use `Notice` for errors and persistent information. Errors use `role="alert"`
-  and can receive focus.
+- Use `Notice` for errors and persistent information. Errors use `role="alert"`,
+  can receive focus, and always have a title.
 - Empty states (`EmptyState`) explain what to do next and offer one primary
   action. Error pages offer Dashboard and Jobs, plus Try again for non-404 errors.
 
@@ -222,3 +257,66 @@ replace that browser review.
 ## Network patterns
 
 Network uses solid list/cards, inline labeled person fields, GET filters and independent pagination for linked jobs/interactions. Name is the only required person field. List rows keep role/organization, last recorded interaction and follow-up readable on mobile; overdue/today have text cues. Person Notes, Relationship note and Interaction note have distinct labels. Follow-up and interaction editing use existing dialogs/focus handling; permanent interaction deletion uses ConfirmDialog. Linking/unlinking stays separate from person creation and preserves both records. Choosers use explicit selection, paginated search and disabled already-linked options. Five navigation labels must fit at narrow widths and 200% zoom.
+
+## Documents patterns
+
+Documents is a `Card` of `DocumentRow`s under a search `FilterBar`. Upload is the tinted primary; New document
+and Select Master CV are secondary buttons beside it. A row shows the filename (link), a Master CV badge, type,
+size and date, then Edit and a menu (Preview, Download, Rename, Duplicate, Delete). The Select Master CV dialog lists
+Markdown documents with a No Master CV choice, so one dialog both selects and unselects. The Master CV picker and Copy to this job picker fetch in place with a
+skeleton while loading; Network and job pickers keep URL state so they work with
+server validation and survive reloads. The editor toolbar uses icons, reports
+`aria-pressed`, and disables Undo and Redo when unavailable. Unsaved edits show
+a badge beside the title.
+
+## Settings patterns
+
+Settings opens with a section navigation (Assistant, Backups, Files, Storage)
+and one `SectionCard` per section. Backup and file backup sections share
+`SchedulePanel`, `BackupList` and `RestorePreview` (a Current-versus-Backup
+table). Timestamps use `formatDateTime` and sizes use `formatBytes`.
+
+## Building a new page or feature
+
+Before building or changing UI:
+
+1. Read this guide in full.
+2. Find the closest existing page and copy its structure: Jobs for a filtered list, Network detail for a detail
+   page with linked records, Add job for a form, Settings for a long page of sections.
+3. Look in `src/lib/components/app` before writing markup. If a shared component exists, use it. If a pattern
+   appears a second time, extract a component instead of copying markup.
+
+Shared components to use:
+
+| Need                              | Use                                                          |
+| --------------------------------- | ------------------------------------------------------------ |
+| Page frame and document title     | `PageShell`, then `PageHeader` (with `back`)                 |
+| Labelled input, select, textarea  | `Field` with `Input`, `NativeSelect`, `Textarea`             |
+| Checkbox or radio choice          | `Checkbox`, `RadioOption`                                    |
+| List of records                   | `Card` of `JobRow`, `PersonRow`, `DateRow`, `DocumentRow`    |
+| Due dates                         | `DueBadge`                                                   |
+| Titled card on a detail page      | `SectionCard`, `LinkedItem`, `EmptyState size="inline"`      |
+| Search and filters                | `FilterBar`, `FilterChips`                                   |
+| Paging                            | `Pagination`                                                 |
+| Edit and delete one item          | `RowActions`, `ActionMenu`                                   |
+| Irreversible action               | `ConfirmDialog` (never `window.confirm`)                     |
+| Form submit with a failed save    | `enhanceWithFocus` or `withPending` from `$lib/forms`        |
+| Form with free text               | `UnsavedChanges` and `UnsavedGuard`                          |
+| Add and edit forms for one record | One shared fields component (`JobFields`, `PersonFields`)    |
+| Dates, sizes, timestamps          | `formatDate`, `relativeDay`, `formatBytes`, `formatDateTime` |
+
+Use `rounded-[var(--r-…)]` radius tokens, `.link` for in-content links, `.meta-text` for small text, and Lucide
+icons from `@lucide/svelte`. Do not add another icon or component library.
+
+A change is done when:
+
+- `npm run format`, `npm run check` and `npm test` pass. `npm test` includes `tests/ui-conventions.test.mjs`,
+  which fails on hand-built versions of the patterns above (a raw `<select>`, checkbox or `<label>`,
+  `window.confirm`, hand-built pagination, back links or filter chips, small text, Tailwind radius classes, a page
+  without `PageShell`, and `use:enhance` without progress handling). Fix the code, not the rule. Change a rule
+  only when this guide changes in the same commit.
+- New patterns are added to this guide, and user-visible behavior is added to the user guide.
+- New UI has been loaded in a browser at desktop and phone widths and in light and dark appearance, using a
+  temporary database (`SATURDAY_DB_PATH` and `SATURDAY_FILES_PATH`), never the real `data` folder.
+- Every new add or edit flow has required marks and a "* Required" cue, an error `Notice` with a title, focus on
+  the first error, a toast on success (`SAVED_MESSAGES`), and an empty state with one primary action.

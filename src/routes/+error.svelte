@@ -8,7 +8,9 @@
 	const notFound = $derived(page.status === 404);
 </script>
 
-<svelte:head><title>{page.status} · Saturday</title></svelte:head>
+<svelte:head
+	><title>{notFound ? 'Page not found' : 'Something went wrong'} · Saturday</title></svelte:head
+>
 
 <EmptyState
 	title={notFound ? 'We couldn’t find that page' : 'Something went wrong'}

@@ -15,11 +15,26 @@ export function focusFirstError() {
 	target?.focus();
 }
 
-/** Use with `use:enhance` so a failed submit lands focus on the problem. */
-export const enhanceWithFocus: SubmitFunction =
-	() =>
-	async ({ update }) => {
-		await update();
-		await tick();
-		focusFirstError();
+/** Marks the form busy while it is being sent, so its submit button shows progress. */
+export function withPending(handler: SubmitFunction = () => undefined): SubmitFunction {
+	return async (input) => {
+		const { formElement } = input;
+		formElement.setAttribute('aria-busy', 'true');
+		const callback = await handler(input);
+		return async (result) => {
+			try {
+				if (callback) await callback(result);
+				else await result.update();
+			} finally {
+				formElement.removeAttribute('aria-busy');
+			}
+		};
 	};
+}
+
+/** Use with `use:enhance` so a failed submit lands focus on the problem. */
+export const enhanceWithFocus: SubmitFunction = withPending(() => async ({ update }) => {
+	await update();
+	await tick();
+	focusFirstError();
+});

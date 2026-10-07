@@ -29,13 +29,14 @@ Additional commands: `npm run backup` creates a managed snapshot, `npm run resto
 - `scripts` — setup/run commands, backup/restore CLI, and supervised backup worker
 - `tests` — temporary-database service, process, CLI, and MCP integration tests
 - `docs` — user and contributor documentation
-- `plans` — product, architecture, and roadmap planning
 
 ## Conventions
 
 - Follow the [design guide](design-guide.md) for interface, responsive layout, and accessibility.
-- Product direction and architecture are in [plans/PRODUCT.md](../plans/PRODUCT.md), [plans/ARCHITECTURE.md](../plans/ARCHITECTURE.md), and [plans/ROADMAP.md](../plans/ROADMAP.md).
 - Run `npm run format` and `npm run check` before submitting changes.
+- Interface conventions are enforced by `tests/ui-conventions.test.mjs` (part of `npm test`). Use the shared
+  components in `src/lib/components/app`; the [design guide](design-guide.md#building-a-new-page-or-feature) lists
+  them and the checklist for finishing a change.
 
 ## Screenshots in documentation
 

@@ -2,6 +2,7 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Star from '@lucide/svelte/icons/star';
 	import StatusBadge from './status-badge.svelte';
+	import { initialOf } from '$lib/format';
 	import type { StatusInfo } from '$lib/status';
 
 	let {
@@ -23,9 +24,9 @@
 	} = $props();
 </script>
 
-<a {href} class="job-row group">
-	<div class="company-mark" aria-hidden="true">{company.slice(0, 1).toLocaleUpperCase()}</div>
-	<div class="job-row-title min-w-0">
+<a {href} class="list-row group">
+	<div class="row-mark" aria-hidden="true">{initialOf(company)}</div>
+	<div class="list-row-title min-w-0">
 		<p class="font-semibold">
 			{#if isStarred}<Star class="mr-1 inline size-4 fill-current text-primary" /><span
 					class="sr-only"
@@ -34,12 +35,11 @@
 		</p>
 		<p class="mt-1 text-sm text-muted-foreground">{company}</p>
 	</div>
-	<div class="job-row-status">
+	<div class="list-row-status">
 		<StatusBadge {status} />
-		{#if score !== null}<span class="text-[0.8125rem] text-muted-foreground"
-				>Assistant score: {score}</span
+		{#if score !== null}<span class="meta-text text-muted-foreground">Assistant score: {score}</span
 			>{/if}
-		<span class="text-[0.8125rem] text-muted-foreground">{latestUpdate}</span>
+		<span class="meta-text text-muted-foreground">{latestUpdate}</span>
 	</div>
 	<ChevronRight
 		class="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"

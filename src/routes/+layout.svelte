@@ -62,12 +62,12 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-	<title>Saturday: Career Dashboard</title>
+	<title>Saturday</title>
 </svelte:head>
 
 <a
 	href="#main"
-	class="sr-only z-50 rounded-lg bg-card px-3 py-2 text-sm focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
+	class="sr-only z-50 rounded-[var(--r-control)] bg-card px-3 py-2 text-sm focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
 	>Skip to content</a
 >
 
