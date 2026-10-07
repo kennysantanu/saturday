@@ -19,7 +19,7 @@ You need Node.js 22.13 or newer and npm 10 or newer. Run `npm ci`, then `npm run
 | `npm run lint`      | Check formatting with Prettier                                |
 | `npm run format`    | Format project files                                          |
 
-Additional commands: `npm run backup` creates a managed snapshot, `npm run restore -- <file> --inspect` prepares a restore, and `npm test` builds MCP and runs job-detail/search, migration, backup/restore, and MCP integration tests using temporary databases. `npm run test:web` builds the app and tests production job forms/search, Settings actions, and worker supervision on localhost. See the [agent guide](agent-guide.md#backup-and-recovery-commands) for confirmation and scheduling commands.
+Additional commands: `npm run backup` creates a managed snapshot, `npm run restore -- <file> --inspect` prepares a restore, and `npm test` builds MCP and runs job-detail/search, migration, backup/restore, and MCP integration tests using temporary databases. `npm run test:web` builds the app and tests production job/Network forms and search, Settings actions, and worker supervision on localhost. See the [agent guide](agent-guide.md#backup-and-recovery-commands) for confirmation and scheduling commands.
 
 ## Project layout
 
@@ -63,4 +63,12 @@ Manifest version 1 is validated centrally. Keep future migrations pure/sequentia
 
 Tests use temporary file roots and databases. `npm test` includes real Chrome PDF and process/journal/recovery/MCP checks; install Chrome first and permit sandboxed browser startup in CI. `npm run test:web` covers production document forms, scope downloads, streaming uploads/imports and existing job/backup flows. Visually review Documents at mobile/desktop widths, keyboard/dialog focus, light/dark and 200% zoom before release.
 
-Optional extended checks: `node scripts/review-documents.mjs` runs browser workflows with disposable stores and screenshots in the OS temp directory. `node --max-old-space-size=128 --test tests/files.large.integration.mjs` checks a ZIP and expanded collection above 1 GiB; allow several GiB of temporary disk space. Neither command uses your application data.
+Optional extended checks: `node scripts/review-documents.mjs` runs Documents and Network browser workflows with disposable stores and screenshots in the OS temp directory. `node --max-old-space-size=128 --test tests/files.large.integration.mjs` checks a ZIP and expanded collection above 1 GiB; allow several GiB of temporary disk space. Neither command uses your application data.
+
+## Network contracts
+
+`src/lib/server/networks.js` owns people, due follow-ups, job relationships and optional dated interactions. Shared explicit schemas live in `validation.js`; tools stay in the central MCP server. Network route forms and the job Network section stay inline, reusing existing UI primitives; no additional UI components, field registry, dependencies or picker endpoints are needed.
+
+Migration 3 appends `networks`, `job_networks` and `network_updates`; never edit migrations 1/2. Follow-up is independent of interactions. Link/unlink and interaction changes do not update parent detail timestamps or job status/history. Link notes own their timestamp and creation source. Use scoped IDs, bound literal contains queries, whitelisted sorts, a read snapshot for counts/pages, and batched link lookup for pickers. History uses calendar date then insertion order, rejects future dates on writes, and is optional.
+
+Extend every backup table definition, deterministic ordering, field validation, hash, preview count and replacement path for new stored records. Historical backups reconstruct their original schema before staged migration; restore uses child-before-parent deletion and parent-before-child insertion. Both ordinary and coordinated recovery include Network. Tests cover >100 records, literal AND/OR filters, partial/null edits, retry-safe links, scoped history changes, old snapshots, stale previews, malformed data, real MCP and production HTTP/browser flows. Keep full accessibility/platform review as separate release work, not implied by compilation.

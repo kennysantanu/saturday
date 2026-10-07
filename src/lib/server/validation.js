@@ -284,3 +284,89 @@ export const jobSearchSchema = z
 		score_min: values.score === 'unscored' ? undefined : values.score_min,
 		score_max: values.score === 'unscored' ? undefined : values.score_max
 	}));
+
+// Network uses explicit fields; the same validation serves forms, services and MCP.
+export const networkInputShape = {
+	name: z.string().trim().min(1, 'Enter a name.').max(200),
+	role: optionalText(200, 'Role'),
+	organization: optionalText(200, 'Organization'),
+	phone: optionalText(100, 'Phone'),
+	email: optionalText(320, 'Email').refine(
+		(value) => value === null || z.email().safeParse(value).success,
+		'Enter a valid email address.'
+	),
+	link: optionalText(2000, 'Profile or website').refine((value) => {
+		if (value === null) return true;
+		try {
+			const url = new URL(value);
+			return ['http:', 'https:'].includes(url.protocol) && !!url.hostname;
+		} catch {
+			return false;
+		}
+	}, 'Enter an HTTP or HTTPS link.'),
+	notes: optionalText(20000, 'Notes'),
+	follow_up_date: optionalText(10, 'Follow-up date').refine(
+		(value) => value === null || validDate(value),
+		'Enter a real date in YYYY-MM-DD format.'
+	),
+	follow_up_comment: optionalText(2000, 'Follow-up comment')
+};
+export const networkInputSchema = z.object(networkInputShape).superRefine((value, ctx) => {
+	if (value.follow_up_comment && !value.follow_up_date)
+		ctx.addIssue({
+			code: 'custom',
+			path: ['follow_up_comment'],
+			message: 'Schedule a follow-up date first.'
+		});
+});
+export const networkIdSchema = z.string().uuid('Choose a saved person.');
+export const networkPaginationShape = {
+	page: integer(1, Number.MAX_SAFE_INTEGER),
+	limit: integer(50, 100)
+};
+export const networkSearchShape = {
+	query: text,
+	name: text,
+	role: text,
+	organization: text,
+	job_id: z.string().trim().min(1).optional(),
+	follow_up: z.enum(['all', 'overdue', 'today', 'upcoming', 'not_scheduled']).default('all'),
+	sort: z.enum(['name', 'follow_up', 'latest_interaction']).default('name'),
+	...networkPaginationShape
+};
+export const networkLinkShape = {
+	job_id: z.string().trim().min(1, 'Choose a saved job.'),
+	network_id: networkIdSchema,
+	notes: optionalText(2000, 'Relationship note')
+};
+export function localCalendarDate() {
+	const now = new Date();
+	return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+export const networkUpdateShape = {
+	network_id: networkIdSchema,
+	interaction_date: z
+		.string()
+		.trim()
+		.refine(validDate, 'Enter a real date in YYYY-MM-DD format.')
+		.refine(
+			(value) => value <= localCalendarDate(),
+			'Record completed interactions only; use Follow-up for future contact.'
+		),
+	note: z.string().trim().min(1, 'Enter an interaction note.').max(20000)
+};
+export const networkUpdateSearchSchema = z
+	.object({
+		network_id: networkIdSchema,
+		date_from: date,
+		date_to: date,
+		...networkPaginationShape
+	})
+	.superRefine((value, ctx) => {
+		if (value.date_from && value.date_to && value.date_from > value.date_to)
+			ctx.addIssue({
+				code: 'custom',
+				path: ['date_to'],
+				message: 'End date must be on or after the start date.'
+			});
+	});

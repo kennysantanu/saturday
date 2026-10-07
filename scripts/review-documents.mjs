@@ -10,6 +10,7 @@ const scratch = await mkdtemp(join(tmpdir(), 'saturday-documents-ui-'));
 process.env.SATURDAY_FILES_PATH = join(scratch, 'files');
 process.env.SATURDAY_DB_PATH = join(scratch, 'db.sqlite');
 const { createDocument, getDocument } = await import('../src/lib/server/files/documents.js');
+const networks = await import('../src/lib/server/networks.js');
 const { createJob } = await import('../src/lib/server/services.js');
 const cv = await createDocument({
 	filename: 'master-cv.md',
@@ -33,6 +34,7 @@ const child = spawn(process.execPath, ['scripts/start.mjs'], {
 let logs = '';
 child.stderr.on('data', (c) => (logs += c));
 let browser;
+const errors = [];
 try {
 	const base = `http://127.0.0.1:${port}`;
 	for (let i = 0; i < 100; i++) {
@@ -43,7 +45,7 @@ try {
 	}
 	browser = await puppeteer.launch({ headless: true });
 	const page = await browser.newPage();
-	const errors = [];
+
 	page.on('pageerror', (e) => errors.push(e.message));
 	await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
 	await page.setViewport({ width: 1365, height: 900 });
@@ -167,10 +169,206 @@ try {
 		document.body.style.zoom = '2';
 	});
 	await page.screenshot({ path: join(scratch, 'zoom.png'), fullPage: true });
+	const settled = async () => {
+		await page.waitForNetworkIdle({ idleTime: 100 });
+		await page.waitForFunction(() =>
+			document.getAnimations().every((a) => a.playState !== 'running')
+		);
+	};
+	// Network uses the same pages, controls and dialogs, with disposable records.
+	await page.setViewport({ width: 1365, height: 900 });
+	await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
+	await page.goto(`${base}/networks/new`, { waitUntil: 'networkidle0' });
+	await page.locator('button::-p-text(Save person)').click();
+	await page.waitForSelector('#name[aria-invalid="true"]');
+	assert.equal(
+		await page.evaluate(() => document.activeElement.id),
+		'name',
+		'Invalid person field receives focus'
+	);
+	await page.type('#name', 'Alex Example');
+	await page.type('#role', 'Recruiter');
+	await page.type('#organization', 'Acme');
+	await page.locator('button::-p-text(Save person)').click();
+	await page.waitForFunction(() => /\/networks\/[0-9a-f-]+$/.test(location.pathname));
+	const personId = new URL(page.url()).pathname.split('/').at(-1);
+	await page.waitForNetworkIdle();
+	await page.waitForFunction(() =>
+		document.getAnimations().every((a) => a.playState !== 'running')
+	);
+	await page.locator('button::-p-text(Schedule follow-up)').click();
+	await page.waitForSelector('[role=dialog]');
+	await settled();
+	await page.$eval('#follow_up_date', (e) => {
+		e.value = '2000-01-01';
+		e.dispatchEvent(new Event('input', { bubbles: true }));
+	});
+	await page.type('#follow_up_comment', 'Check in');
+	await page.locator('[role=dialog] button::-p-text(Save follow-up)').click();
+	await page.waitForSelector('[role=dialog]', { hidden: true });
+	await settled();
+	await page.locator('button::-p-text(Add interaction)').click();
+	await page.waitForSelector('[role=dialog]');
+	await settled();
+	await page.locator('[role=dialog] button::-p-text(Save interaction)').click();
+	await page.waitForSelector('#interaction_note[aria-invalid="true"]');
+	assert.equal(await page.evaluate(() => document.activeElement.id), 'interaction_note');
+	await page.type('#interaction_note', 'Met at a conference.');
+	await page.locator('[role=dialog] button::-p-text(Save interaction)').click();
+	await page.waitForSelector('[role=dialog]', { hidden: true });
+	await settled();
+	assert.equal(
+		networks.getNetwork(personId).follow_up_comment,
+		'Check in',
+		'Interaction preserves follow-up'
+	);
+	await page.locator('a::-p-text(Link to job)').click();
+	await page.waitForSelector('[role=dialog] input[type=radio]');
+	await settled();
+	await page.click('[role=dialog] input[type=radio]');
+	await page.type('#link_notes', 'Hiring manager');
+	await page.locator('[role=dialog] button::-p-text(Link job)').click();
+	await page.waitForSelector('[role=dialog]', { hidden: true });
+	await settled();
+	assert.equal(networks.listNetworkJobs({ network_id: personId }).total, 1);
+	await page.locator('button::-p-text(Edit link note)').click();
+	await page.waitForSelector('#relationship_notes');
+	await settled();
+	await page.type('#relationship_notes', ' and referrer');
+	await page.locator('[role=dialog] button::-p-text(Save note)').click();
+	await page.waitForSelector('[role=dialog]', { hidden: true });
+	await settled();
+	assert.equal(
+		networks.listNetworkJobs({ network_id: personId }).jobs[0].job_link.notes,
+		'Hiring manager and referrer'
+	);
+	await page.screenshot({ path: join(scratch, 'network-detail-desktop.png'), fullPage: true });
+	await page.locator('button[aria-label^="Delete interaction"]').click();
+	await page.waitForSelector('[role=dialog]');
+	await settled();
+	await page.locator('[role=dialog] button::-p-text(Cancel)').click();
+	assert.equal(networks.getNetwork(personId).interaction_count, 1);
+	await page.locator('button[aria-label^="Delete interaction"]').click();
+	await page.locator('[role=dialog] button::-p-text(Delete interaction)').click();
+	await page.waitForSelector('[role=dialog]', { hidden: true });
+	await settled();
+	assert.equal(networks.getNetwork(personId).interaction_count, 0);
+	await page.goto(`${base}/jobs/${job.id}`, { waitUntil: 'networkidle0' });
+	assert.ok((await page.content()).includes('Hiring manager and referrer'));
+	await page.locator('button::-p-text(Edit link note)').click();
+	await page.waitForSelector('#network_relationship_note');
+	await settled();
+	await page.$eval('#network_relationship_note', (e) => {
+		e.value = '';
+		e.dispatchEvent(new Event('input', { bubbles: true }));
+	});
+	await page.locator('[role=dialog] button::-p-text(Save note)').click();
+	await page.waitForSelector('[role=dialog]', { hidden: true });
+	await settled();
+	assert.equal(networks.listNetworkJobs({ network_id: personId }).jobs[0].job_link.notes, null);
+	await page.locator('button[aria-label="Unlink Alex Example"]').click();
+	await page.waitForFunction(() => document.body.textContent.includes('No linked people yet.'));
+	await settled();
+	await page.locator('a::-p-text(Link person)').click();
+	await page.waitForSelector('[role=dialog]');
+	await settled();
+	await page.locator('[role=dialog] a::-p-text(Add person)').click();
+	await page.waitForSelector('#name');
+	await settled();
+	await page.type('#name', 'Casey Example');
+	await page.locator('button::-p-text(Save person)').click();
+	await page.waitForSelector('[role=dialog] input[type=radio]:checked');
+	await settled();
+	assert.equal(
+		networks.listNetworks({ job_id: job.id }).total,
+		0,
+		'Context creation waits for explicit linking'
+	);
+	await page.locator('[role=dialog] button::-p-text(Link person)').click();
+	await page.waitForSelector('[role=dialog]', { hidden: true });
+	await settled();
+	assert.equal(networks.listNetworks({ job_id: job.id }).total, 1);
+	await page.goto(`${base}/networks?role=recruiter&organization=Acme`, {
+		waitUntil: 'networkidle0'
+	});
+	await page.screenshot({ path: join(scratch, 'network-list-desktop.png'), fullPage: true });
+	await page.setViewport({ width: 320, height: 740 });
+	await page.screenshot({ path: join(scratch, 'network-list-mobile.png'), fullPage: true });
+	assert.ok(
+		await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+		'320px Network list fits'
+	);
+	assert.ok(
+		await page.$$eval('.tab-item span', (labels) =>
+			labels.every((e) => {
+				const a = e.getBoundingClientRect(),
+					b = e.parentElement.getBoundingClientRect();
+				return a.left >= b.left && a.right <= b.right;
+			})
+		),
+		'All five mobile navigation labels fit'
+	);
+	await page.goto(`${base}/networks/${personId}`, { waitUntil: 'networkidle0' });
+	await page.locator('button::-p-text(Add interaction)').click();
+	await page.waitForSelector('[role=dialog]');
+	await settled();
+	await new Promise((r) => setTimeout(r, 300));
+	assert.ok(
+		await page.$eval('[role=dialog]', (e) => {
+			const r = e.getBoundingClientRect();
+			return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight;
+		}),
+		'Network sheet fits narrow viewport'
+	);
+	await page.screenshot({ path: join(scratch, 'network-dialog-mobile.png'), fullPage: true });
+	await page.keyboard.press('Escape');
+	await page.waitForSelector('[role=dialog]', { hidden: true });
+	await settled();
+	await page.emulateMediaFeatures([
+		{ name: 'prefers-color-scheme', value: 'dark' },
+		{ name: 'prefers-reduced-motion', value: 'reduce' }
+	]);
+	await settled();
+	await page.screenshot({ path: join(scratch, 'network-detail-dark.png'), fullPage: true });
+	// Half the CSS viewport with double device scale emulates 200% browser zoom,
+	// including media-query reflow, rather than CSS zoom's mismatched breakpoints.
+	await page.setViewport({ width: 341, height: 450, deviceScaleFactor: 2 });
+	await settled();
+	assert.ok(
+		await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+		'Network detail supports 200% zoom'
+	);
+	assert.ok(
+		await page.$$eval('.tab-item span', (labels) =>
+			labels.every((e) => {
+				const a = e.getBoundingClientRect(),
+					b = e.parentElement.getBoundingClientRect();
+				return a.left >= b.left && a.right <= b.right;
+			})
+		),
+		'Zoomed navigation labels fit'
+	);
+	await page.screenshot({ path: join(scratch, 'network-zoom.png'), fullPage: true });
+	const noJs = await browser.newPage();
+	await noJs.setJavaScriptEnabled(false);
+	await noJs.goto(`${base}/networks?organization=Acme&role=recruiter`, {
+		waitUntil: 'networkidle0'
+	});
+	assert.ok((await noJs.content()).includes('Alex Example'));
+	assert.equal(await noJs.$eval('#role', (e) => e.value), 'recruiter');
+	await noJs.$eval('#organization', (e) => {
+		e.value = 'Missing';
+	});
+	await Promise.all([noJs.waitForNavigation(), noJs.click('button[type=submit]')]);
+	assert.ok(
+		(await noJs.content()).includes('No matching people'),
+		'GET filters work without JavaScript'
+	);
+	await noJs.close();
 	assert.deepEqual(errors, []);
 	console.log(JSON.stringify({ scratch, errors, job_id: job.id }));
 } catch (e) {
-	console.error({ scratch });
+	console.error({ scratch, browserErrors: typeof errors !== 'undefined' ? errors : [] });
 	for (const page of (await browser?.pages()) ?? []) {
 		await writeFile(join(scratch, 'failed.html'), await page.content());
 		await page.screenshot({ path: join(scratch, 'failed.png'), fullPage: true });

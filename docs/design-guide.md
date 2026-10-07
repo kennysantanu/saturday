@@ -20,7 +20,7 @@ Apple's native Liquid Glass renderer, adaptive lensing, or system vibrancy.
 - [Toolbars — Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines/toolbars)
   and [Tab bars](https://developer.apple.com/design/human-interface-guidelines/tab-bars):
   separate text actions, retain explicit labels, and give the primary action a
-  distinct tint. Persistent navigation contains Dashboard, Jobs, Documents, and
+  distinct tint. Persistent navigation contains Dashboard, Jobs, Network, Documents, and
   Settings; page-specific actions stay on their page. Flat top-level
   destinations use a tab bar on narrow screens.
 - [Meet Liquid Glass — WWDC25, session 219](https://developer.apple.com/videos/play/wwdc2025/219/):
@@ -74,7 +74,7 @@ the tab bar. In Tailwind, write `rounded-[var(--r-group)]`; do not use
 
 ### Navigation
 
-- Four destinations: Dashboard, Jobs, Documents, Settings, always with the same icons.
+- Five destinations: Dashboard, Jobs, Network, Documents, Settings, always with the same icons.
 - At 48rem and wider, they are in the sticky glass top bar
   (`.desktop-navigation`), with a soft blurred scroll edge (`.scroll-edge`)
   above scrolling content.
@@ -218,3 +218,7 @@ appearance, keyboard navigation, dialog and sheet focus, the toast, the tab bar
 over a long page, and the accessibility preferences (reduced transparency,
 increased contrast, reduced motion). Compilation and HTTP route checks do not
 replace that browser review.
+
+## Network patterns
+
+Network uses solid list/cards, inline labeled person fields, GET filters and independent pagination for linked jobs/interactions. Name is the only required person field. List rows keep role/organization, last recorded interaction and follow-up readable on mobile; overdue/today have text cues. Person Notes, Relationship note and Interaction note have distinct labels. Follow-up and interaction editing use existing dialogs/focus handling; permanent interaction deletion uses ConfirmDialog. Linking/unlinking stays separate from person creation and preserves both records. Choosers use explicit selection, paginated search and disabled already-linked options. Five navigation labels must fit at narrow widths and 200% zoom.
