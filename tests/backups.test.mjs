@@ -459,6 +459,148 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			score: 7.5,
 			score_comment: 'Initial fit'
 		});
+		assert.equal(listing.tools.length, 40);
+		for (const name of [
+			'list_networks',
+			'get_network',
+			'create_network',
+			'edit_network',
+			'link_job_network',
+			'edit_job_network',
+			'unlink_job_network',
+			'set_network_follow_up',
+			'list_network_updates',
+			'add_network_update',
+			'edit_network_update',
+			'delete_network_update'
+		])
+			assert.ok(listing.tools.some((t) => t.name === name));
+		for (const name of ['list_networks', 'get_network', 'list_network_updates'])
+			assert.equal(listing.tools.find((t) => t.name === name).annotations.readOnlyHint, true);
+		for (const name of ['link_job_network', 'unlink_job_network', 'set_network_follow_up'])
+			assert.equal(listing.tools.find((t) => t.name === name).annotations.idempotentHint, true);
+		assert.equal(
+			listing.tools.find((t) => t.name === 'delete_network_update').annotations.destructiveHint,
+			true
+		);
+		const person = (
+			await call('create_network', {
+				name: 'Alex',
+				role: 'Recruiter',
+				organization: 'Acme',
+				notes: 'General'
+			})
+		).network;
+		assert.equal(person.created_via, 'mcp');
+		assert.equal(person.follow_up_date, null);
+		await call('edit_network', { network_id: person.id, phone: '+1 555 0100' });
+		await call('edit_network', { network_id: person.id, email: null });
+		assert.equal((await call('get_network', { network_id: person.id })).network.email, null);
+		assert.equal((await call('get_network', { network_id: person.id })).network.notes, 'General');
+		const linked = await call('link_job_network', {
+			job_id: job.id,
+			network_id: person.id,
+			notes: 'Referrer'
+		});
+		assert.equal(linked.created, true);
+		assert.equal(
+			(
+				await call('link_job_network', {
+					job_id: job.id,
+					network_id: person.id,
+					notes: 'Keep existing'
+				})
+			).notes,
+			'Referrer'
+		);
+		await call('edit_job_network', {
+			job_id: job.id,
+			network_id: person.id,
+			notes: 'Hiring manager'
+		});
+		const people = await call('list_networks', {
+			role: 'recruiter',
+			organization: 'acme',
+			job_id: job.id
+		});
+		assert.equal(people.total, 1);
+		assert.equal(people.networks[0].job_link.notes, 'Hiring manager');
+		assert.equal(
+			(await call('list_networks', { role: 'engineer', organization: 'acme' })).total,
+			0
+		);
+		const detailed = await call('get_network', { network_id: person.id, jobs_limit: 1 });
+		assert.equal(detailed.linked_jobs.jobs[0].id, job.id);
+		assert.equal(detailed.linked_jobs.limit, 1);
+		await call('set_network_follow_up', {
+			network_id: person.id,
+			follow_up_date: '2000-01-01',
+			follow_up_comment: 'Check in'
+		});
+		assert.equal(
+			(await call('list_networks', { follow_up: 'overdue', sort: 'follow_up' })).networks[0].id,
+			person.id
+		);
+		const interaction = (
+			await call('add_network_update', {
+				network_id: person.id,
+				interaction_date: '2000-01-01',
+				note: 'Met'
+			})
+		).update;
+		assert.equal(interaction.created_via, 'mcp');
+		await call('edit_network_update', {
+			network_id: person.id,
+			update_id: interaction.id,
+			note: 'Introduced'
+		});
+		assert.equal(
+			(
+				await call('list_network_updates', {
+					network_id: person.id,
+					date_from: '2000-01-01',
+					date_to: '2000-01-01'
+				})
+			).updates[0].note,
+			'Introduced'
+		);
+		assert.equal(
+			(await call('get_network', { network_id: person.id })).network.follow_up_comment,
+			'Check in'
+		);
+		const otherPerson = (await call('create_network', { name: 'Casey' })).network;
+		assert.equal(
+			(
+				await call('delete_network_update', {
+					network_id: otherPerson.id,
+					update_id: interaction.id,
+					confirm: true
+				})
+			).error.code,
+			'not_found'
+		);
+		assert.equal(
+			(await call('edit_network', { network_id: person.id })).error.code,
+			'validation_error'
+		);
+		assert.equal(
+			(
+				await call('delete_network_update', {
+					network_id: person.id,
+					update_id: interaction.id,
+					confirm: true
+				})
+			).deleted,
+			true
+		);
+		assert.equal(
+			(await call('unlink_job_network', { job_id: job.id, network_id: person.id })).removed,
+			true
+		);
+		assert.equal(
+			(await call('unlink_job_network', { job_id: job.id, network_id: person.id })).removed,
+			false
+		);
 		await call('edit_job', { job_id: job.id, compensation: '$140k/year' });
 		const edited = await call('get_job', { job_id: job.id });
 		assert.equal(edited.location, 'Remote');

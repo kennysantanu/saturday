@@ -808,7 +808,7 @@ html {
 		max-width: 440px;
 		margin: 0 auto;
 		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
+		grid-template-columns: repeat(5, minmax(0, 1fr));
 		gap: 4px;
 		padding: 6px;
 		border-radius: var(--r-shell);
@@ -922,6 +922,19 @@ html {
 	[data-slot='dialog-close'] {
 		min-width: 44px;
 		min-height: 44px;
+	}
+}
+
+/* Keep all five labels inside their touch targets at narrow phone widths. */
+@media (max-width: 23rem) {
+	.tab-bar {
+		left: max(8px, env(safe-area-inset-left));
+		right: max(8px, env(safe-area-inset-right));
+		gap: 0;
+		padding: 4px;
+	}
+	.tab-item {
+		font-size: 0.625rem;
 	}
 }
 

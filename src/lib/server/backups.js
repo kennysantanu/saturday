@@ -1,3 +1,11 @@
+import { z } from 'zod';
+import {
+	networkInputSchema,
+	networkIdSchema,
+	networkLinkShape,
+	networkUpdateShape,
+	parseSchema
+} from './validation.js';
 import { assertDatabaseAvailable } from './database.js';
 import {
 	chmodSync,
@@ -163,7 +171,47 @@ function databaseVersion(db) {
 	return Number(db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version);
 }
 function columnsFor(version) {
-	return { jobs: jobColumns(version), ...columns };
+	return {
+		jobs: jobColumns(version),
+		...columns,
+		...(version >= 3
+			? {
+					networks: [
+						'id',
+						'name',
+						'role',
+						'organization',
+						'phone',
+						'email',
+						'link',
+						'notes',
+						'follow_up_date',
+						'follow_up_comment',
+						'created_via',
+						'created_at',
+						'updated_at'
+					],
+					job_networks: [
+						'job_id',
+						'network_id',
+						'notes',
+						'created_via',
+						'created_at',
+						'updated_at'
+					],
+					network_updates: [
+						'recorded_order',
+						'id',
+						'network_id',
+						'interaction_date',
+						'note',
+						'created_via',
+						'created_at',
+						'updated_at'
+					]
+				}
+			: {})
+	};
 }
 function dataset(db) {
 	return Object.fromEntries(
@@ -171,7 +219,7 @@ function dataset(db) {
 			table,
 			db
 				.prepare(
-					`SELECT ${fields.join(',')} FROM ${table} ORDER BY ${table === 'jobs' ? 'id' : 'recorded_order'}`
+					`SELECT ${fields.join(',')} FROM ${table} ORDER BY ${{ jobs: 'id', job_updates: 'recorded_order', networks: 'id', job_networks: 'job_id, network_id', network_updates: 'recorded_order' }[table]}`
 				)
 				.all()
 		])
@@ -213,7 +261,19 @@ function summary(db) {
 	return {
 		schema_version: databaseVersion(db),
 		job_count: Number(db.prepare('SELECT COUNT(*) AS n FROM jobs').get().n),
-		update_count: Number(db.prepare('SELECT COUNT(*) AS n FROM job_updates').get().n)
+		update_count: Number(db.prepare('SELECT COUNT(*) AS n FROM job_updates').get().n),
+		...Object.fromEntries(
+			Object.entries({
+				network_count: 'networks',
+				network_link_count: 'job_networks',
+				network_update_count: 'network_updates'
+			}).map(([key, table]) => [
+				key,
+				databaseVersion(db) >= 3
+					? Number(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n)
+					: 0
+			])
+		)
 	};
 }
 function validateSchema(db) {
@@ -285,7 +345,22 @@ function validate(db) {
 				active.set(update.job_id, false);
 			if (update.event_type === 'reopened') active.set(update.job_id, true);
 		}
-		for (const row of [...data.jobs, ...data.job_updates]) {
+		for (const row of data.networks ?? []) {
+			parseSchema(networkIdSchema, row.id);
+			parseSchema(networkInputSchema, row);
+		}
+		for (const row of data.job_networks ?? []) parseSchema(z.object(networkLinkShape), row);
+		for (const row of data.network_updates ?? []) {
+			parseSchema(networkIdSchema, row.id);
+			// Historical records remain recoverable if the host calendar moved backwards.
+			parseSchema(
+				z.object({ ...networkUpdateShape, interaction_date: z.string().refine(validDate) }),
+				row
+			);
+			if (!Number.isSafeInteger(row.recorded_order) || row.recorded_order < 1)
+				throw new Error('recorded_order');
+		}
+		for (const row of Object.values(data).flat()) {
 			if (
 				!['manual', 'mcp'].includes(row.created_via) ||
 				!['created_at', 'updated_at'].every(
@@ -506,7 +581,7 @@ export function prepareRestore(backupId, { now = Date.now() } = {}) {
 					incoming: incomingSummary,
 					requires_confirmation: true,
 					warning:
-						'Restoring replaces all current jobs and updates. A recovery backup will be created first.'
+						'Restoring replaces all current jobs, people, relationships and history. Older backups clear Network data. A complete recovery backup will be created first.'
 				};
 				atomicJSON(join(p.restore, `${restoreId}.json`), {
 					...preview,
@@ -562,7 +637,9 @@ export function restoreBackup(restoreId, confirm, { now = Date.now(), beforeComm
 					if (fingerprint(db) !== record.fingerprint)
 						fail('restore_stale', 'Current records changed after the preview. Prepare again.');
 					const recovery = snapshot('recovery', now);
-					db.exec('DELETE FROM job_updates; DELETE FROM jobs;');
+					db.exec(
+						'DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs;'
+					);
 					insertData(db, incoming);
 					beforeCommit?.();
 					validate(db);
@@ -760,7 +837,9 @@ export async function restoreDatabaseWithFiles(restoreId, fileOperation) {
 			fail('restore_stale', 'Current records changed. Prepare again.');
 		const recovery = snapshot('recovery');
 		const files = await fileOperation(recovery);
-		db.exec('DELETE FROM job_updates; DELETE FROM jobs;');
+		db.exec(
+			'DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs;'
+		);
 		insertData(db, dataset(stage));
 		validate(db);
 		if (dataHash(db) !== dataHash(stage)) fail('invalid_backup', 'Database verification failed.');

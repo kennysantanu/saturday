@@ -40,19 +40,33 @@ Use **Star** on a job to mark it for attention; starred jobs show a star in list
 
 **Assistant assessment** displays a numeric score and plain-text explanation managed through MCP. You can read both in the UI but cannot edit them there. There is no fixed scoring scale; ask your assistant to use a consistent scale and explain its criteria. An empty score means unscored; zero is a valid score.
 
+## Network and job relationships
+
+Open **Network → Add person**. Name is required; role, organization, phone, email, profile/website and general Notes are optional. Save, then use **Edit details** for corrections. Duplicate names/emails are allowed; Saturday does not merge people automatically.
+
+Use separate **Name**, **Role**, and **Organization** filters, optionally choose Follow-up and Sort, then **Apply filters**. Every supplied field must match; text uses literal contains matching, including `%`, `_` and backslash. Filters/pages live in the URL for refresh, sharing and Back/Forward. Clear filters shows everyone. Lists have 50 people per page; sorts are Name, Earliest follow-up, and Latest recorded interaction. Missing dates sort last.
+
+On a person's page, **Link to job** searches existing jobs (including inactive jobs). On a job, its **Network → Link person** chooser searches existing people by name/role/organization. Select a record, optionally enter a **Relationship note**, and explicitly confirm the link. A person can link to many jobs and a job to many people. **Edit link note** and **Unlink** work from either side. Unlink keeps both records and their history. Person **Notes** are general context; **Relationship note** applies only to that job.
+
+From the job chooser, **Add person** opens the normal form and returns to the chooser with the saved person selected. Confirm **Link person** to create the relationship; saving alone does not link. Cancel returns to the job. If the job is unavailable, the person can still be saved in Network.
+
+**Schedule follow-up**, **Reschedule**, and **Clear follow-up** manage one date/comment for that person. Overdue means before today; Upcoming means after today, using the host computer's local calendar. These reminders appear in Network, independently of job reminders. There are no notifications or recurring reminders.
+
+**Interactions** is optional. Add a completed interaction with its date and **Interaction note**; backdated entries are supported, future dates belong in Follow-up. Edit a mistaken date/note or Delete and confirm to permanently remove one entry. Recording an interaction never clears a reminder. History sorts by date, then recording order; paginated history and linked jobs have independent pages. “Last recorded interaction” summarizes notes on file, including unanswered outreach; “None recorded” does not prove you have never contacted someone. Permanent person deletion is outside this version.
+
 ## Data and assistant connection
 
 **Settings** displays the database file's location. The default is `data/saturday.db` in the repository. Use the Backup and restore section to save or recover your data, as described below.
 
-To connect a local assistant, build Saturday and follow **Settings → Connect an assistant**. Its generated configuration uses paths for your installation and the same database file as the web app. After reconnecting the client, ask it to list your jobs to confirm access. The assistant can list and read jobs, create a job, and add a dated update. The assistant can also edit job details, schedule follow-ups, and set an assessment score with an explanation. Update corrections and removals, dismissal, and reopening remain in the web app. The [assistant guide](assistant-guide.md) has the full connection steps and troubleshooting. An assistant installing Saturday for you can follow the [agent setup guide](agent-guide.md).
+To connect a local assistant, build Saturday and follow **Settings → Connect an assistant**. Its generated configuration uses paths for your installation and the same database file as the web app. After reconnecting the client, ask it to list your jobs to confirm access. The assistant can list and read jobs, create a job, and add a dated update. The assistant can also edit job details, schedule follow-ups, and set an assessment score with an explanation. Job update corrections/removals, dismissal, and reopening remain in the web app. Network tools can find/edit people, manage job relationships/follow-ups, and read/add/correct/delete scoped interactions with explicit confirmation for deletion. The [assistant guide](assistant-guide.md) has the full connection steps and troubleshooting. An assistant installing Saturday for you can follow the [agent setup guide](agent-guide.md).
 
 ## Backup and restore
 
-In **Settings → Backup and restore**, select **Download backup** to save one portable `.sqlite` file containing your jobs and history. The app keeps a local managed copy too. Files are not encrypted and contain private career information; copy important backups to another device or location if you need protection against loss of this computer.
+In **Settings → Backup and restore**, select **Download backup** to save one portable `.sqlite` file containing your jobs, people, follow-ups, relationships and history. The app keeps a local managed copy too. Files are not encrypted and contain private career information; copy important backups to another device or location if you need protection against loss of this computer.
 
-To restore, upload a SQLite backup (up to 100 MiB), or select a saved backup. An uploaded file takes priority. Choose **Preview restore**, review current and incoming counts, then **Restore this backup** and confirm replacement. Restoring replaces all current jobs/updates rather than merging them. It preserves IDs, dates, history, and assistant attribution and keeps a recovery backup of the records it replaces. No restart is needed. Refresh other open tabs to see restored data.
+To restore, upload a SQLite backup (up to 100 MiB), or select a saved backup. An uploaded file takes priority. Choose **Preview restore**, review current and incoming counts, then **Restore this backup** and confirm replacement. Restoring replaces all current jobs, people, job relationships and both histories rather than merging them. It preserves IDs, dates, history, and assistant attribution and keeps a recovery backup of the records it replaces. No restart is needed. Refresh other open tabs to see restored data.
 
-Previews expire after ten minutes and become invalid if records change. Prepare again if this happens. A restore ID can be attempted only once, including failed attempts. If a response is interrupted, inspect your records and saved recovery backups before preparing another restore. A corrupt active database needs offline recovery; the in-app workflow requires a healthy installation. Backups from newer app schemas are rejected until you upgrade Saturday. Backups from the original schema remain restorable; fields added later start empty (and stars start off). Current backups include all job details and assessments.
+Previews expire after ten minutes and become invalid if records change. Prepare again if this happens. A restore ID can be attempted only once, including failed attempts. If a response is interrupted, inspect your records and saved recovery backups before preparing another restore. A corrupt active database needs offline recovery; the in-app workflow requires a healthy installation. Backups from newer app schemas are rejected until you upgrade Saturday. Backups from the original schema remain restorable; fields added later start empty (and stars start off). Current schema-3 backups include all job details/assessments and Network details, follow-ups, links and interactions. Schema-1/2 backups restore with empty Network tables, replacing any current Network data; the complete pre-restore recovery snapshot preserves replaced records.
 
 ### Automatic backups
 
@@ -62,7 +76,7 @@ Automatic backups run only while the web app runs through `npm run start` or `np
 
 After a successful automatic backup, older automatic files beyond the configured count are deleted. Manual, imported, recovery backups, and files used by pending restores are preserved. Reducing the count applies after the next successful automatic backup. The count can temporarily be exceeded by protected files or cleanup errors. Ten automatic backups may occupy up to about 1 GiB under the 100 MiB file limit, plus other backups and staging; this is not a total disk quota.
 
-Backup files and schedule settings live in `<database-path>.backups/`; temporary restore data lives in `<database-path>.restore/`. Restoring job records leaves your current schedule settings intact. There is no general deletion button in this version; manage retained manual/recovery files locally if needed, preserving copies you still need.
+Backup files and schedule settings live in `<database-path>.backups/`; temporary restore data lives in `<database-path>.restore/`. Restoring database records leaves your current schedule settings intact. There is no general deletion button in this version; manage retained manual/recovery files locally if needed, preserving copies you still need.
 
 ## Documents and Master CV
 

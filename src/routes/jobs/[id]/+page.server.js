@@ -1,3 +1,4 @@
+import * as networks from '$lib/server/networks.js';
 import { listDocuments } from '$lib/server/files/documents.js';
 import { error, fail, redirect } from '@sveltejs/kit';
 import {
@@ -32,7 +33,7 @@ function actionError(error, values, action) {
 	});
 }
 
-export async function load({ params }) {
+export async function load({ params, url }) {
 	const job = getJob(params.id);
 	if (!job) error(404, 'Job not found');
 	let documents = [],
@@ -45,10 +46,74 @@ export async function load({ params }) {
 	} catch (e) {
 		documentsError = e.code ? e.message : 'Document store unavailable.';
 	}
-	return { job, today: todayIso(), documents, documentCount, documentsError };
+	const networkQuery = Object.fromEntries(url.searchParams);
+	let people,
+		personPicker = null,
+		networkErrors = {};
+	try {
+		people = networks.listNetworks({ job_id: params.id, page: networkQuery.network_page });
+		if (networkQuery.link_person === '1')
+			personPicker = networks.listNetworks({
+				name: networkQuery.person_name,
+				role: networkQuery.person_role,
+				organization: networkQuery.person_organization,
+				page: networkQuery.person_page
+			});
+	} catch (e) {
+		if (!(e instanceof ValidationError)) throw e;
+		networkErrors = e.fieldErrors;
+		people ??= networks.listNetworks({ job_id: params.id });
+		if (networkQuery.link_person === '1') personPicker = networks.listNetworks();
+	}
+	let selectedPerson = null;
+	if (networkQuery.person) {
+		try {
+			selectedPerson = networks.getNetwork(networkQuery.person);
+		} catch (e) {
+			if (!(e instanceof ServiceError || e instanceof ValidationError)) throw e;
+			networkErrors = { ...networkErrors, person: 'The selected person was not found.' };
+		}
+	}
+	return {
+		job,
+		today: todayIso(),
+		documents,
+		documentCount,
+		documentsError,
+		people,
+		personPicker,
+		networkQuery,
+		networkErrors,
+		selectedPerson,
+		linkedPersonIds: personPicker ? networks.networkLinkIds({ job_id: params.id }) : []
+	};
 }
 
+function networkAction(operation, saved) {
+	return async ({ params, request, url }) => {
+		const values = formValues(await request.formData());
+		try {
+			operation({ ...values, job_id: params.id });
+		} catch (e) {
+			return actionError(e, values, saved);
+		}
+		const query = new URLSearchParams(url.searchParams);
+		for (const key of [...query.keys()])
+			if (
+				key.startsWith('/') ||
+				key === 'person' ||
+				key.startsWith('person_') ||
+				key === 'link_person'
+			)
+				query.delete(key);
+		query.set('saved', saved);
+		redirect(303, `${url.pathname}?${query}`);
+	};
+}
 export const actions = {
+	networkLink: networkAction((i) => networks.linkJobNetwork(i, 'manual'), 'network-linked'),
+	networkNote: networkAction(networks.editJobNetwork, 'network-note'),
+	networkUnlink: networkAction(networks.unlinkJobNetwork, 'network-unlinked'),
 	followUp: async ({ params, request }) => {
 		const values = formValues(await request.formData());
 		try {

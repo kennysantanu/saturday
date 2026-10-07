@@ -56,6 +56,41 @@ ALTER TABLE jobs ADD COLUMN score_comment TEXT;
 CREATE INDEX jobs_follow_up ON jobs(follow_up_date) WHERE is_active = 1 AND follow_up_date IS NOT NULL;
 CREATE INDEX jobs_application_deadline ON jobs(application_deadline) WHERE is_active = 1 AND application_deadline IS NOT NULL;
 `
+	},
+	{
+		version: 3,
+		name: 'create_networks_job_links_and_updates',
+		sql: `
+CREATE TABLE networks (
+ id TEXT PRIMARY KEY,
+ name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+ role TEXT, organization TEXT, phone TEXT, email TEXT, link TEXT, notes TEXT,
+ follow_up_date TEXT,
+ follow_up_comment TEXT CHECK (follow_up_comment IS NULL OR follow_up_date IS NOT NULL),
+ created_via TEXT NOT NULL CHECK (created_via IN ('manual', 'mcp')),
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE job_networks (
+ job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE RESTRICT,
+ network_id TEXT NOT NULL REFERENCES networks(id) ON DELETE RESTRICT,
+ notes TEXT,
+ created_via TEXT NOT NULL CHECK (created_via IN ('manual', 'mcp')),
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+ PRIMARY KEY (job_id, network_id)
+);
+CREATE INDEX job_networks_by_person ON job_networks(network_id, job_id);
+CREATE TABLE network_updates (
+ recorded_order INTEGER PRIMARY KEY,
+ id TEXT NOT NULL UNIQUE,
+ network_id TEXT NOT NULL REFERENCES networks(id) ON DELETE RESTRICT,
+ interaction_date TEXT NOT NULL,
+ note TEXT NOT NULL CHECK (length(trim(note)) > 0),
+ created_via TEXT NOT NULL CHECK (created_via IN ('manual', 'mcp')),
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX network_updates_timeline
+ ON network_updates(network_id, interaction_date DESC, recorded_order DESC);
+`
 	}
 ];
 

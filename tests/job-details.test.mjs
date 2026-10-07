@@ -166,7 +166,7 @@ test('new backup roundtrip includes all details and assessment; detail changes i
 	setJobScore(job.id, { score: 0, score_comment: 'Needs experience' });
 	const before = getJob(job.id);
 	const backup = createBackup();
-	assert.equal(backup.schema_version, 2);
+	assert.equal(backup.schema_version, schemaVersion);
 	const stale = prepareRestore(backup.backup_id);
 	setJobScore(job.id, { score: 8.25, score_comment: 'Updated fit' });
 	assert.throws(
@@ -212,7 +212,7 @@ test('version-one backups restore with empty new fields without modifying the or
 	const managedBytes = readFileSync(stored);
 	createJob(details);
 	const preview = prepareRestore(backup.backup_id);
-	assert.equal(preview.incoming.schema_version, 2);
+	assert.equal(preview.incoming.schema_version, schemaVersion);
 	restoreBackup(preview.restore_id, true);
 	const job = getJob('old-id');
 	assert.equal(job.notes, 'Legacy');

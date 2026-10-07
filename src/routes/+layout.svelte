@@ -9,6 +9,7 @@
 	import { SAVED_MESSAGES, toast } from '$lib/toast.svelte';
 	import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard';
 	import Briefcase from '@lucide/svelte/icons/briefcase';
+	import Users from '@lucide/svelte/icons/users';
 	import Folder from '@lucide/svelte/icons/folder';
 	import Settings from '@lucide/svelte/icons/settings';
 
@@ -20,6 +21,7 @@
 	const links = [
 		{ href: '/', label: 'Dashboard', icon: LayoutDashboard },
 		{ href: '/jobs', label: 'Jobs', icon: Briefcase },
+		{ href: '/networks', label: 'Network', icon: Users },
 		{ href: '/documents', label: 'Documents', icon: Folder },
 		{ href: '/settings', label: 'Settings', icon: Settings }
 	];

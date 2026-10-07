@@ -1,3 +1,4 @@
+import * as networks from '../src/lib/server/networks.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
@@ -112,6 +113,118 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 			});
 			return response.json();
 		};
+		const networkPage = await (await fetch(`${base}/networks`)).text();
+		assert.ok(networkPage.includes('No people yet'));
+		assert.ok(networkPage.includes('method="GET"'));
+		const badPerson = await postJob('/networks/new', { name: '', email: 'bad' });
+		assert.equal(badPerson.type, 'failure');
+		assert.ok(parse(badPerson.data).errors.name);
+		const createdPerson = await postJob('/networks/new', {
+			name: 'Alex',
+			role: 'Recruiter',
+			organization: 'Acme',
+			notes: 'General'
+		});
+		assert.equal(createdPerson.type, 'redirect');
+		const personId = createdPerson.location.split('/').at(-1).split('?')[0];
+		const editPerson = await postJob(`/networks/${personId}/edit`, {
+			name: 'Alex Example',
+			role: 'Recruiter',
+			organization: 'Acme'
+		});
+		assert.equal(editPerson.type, 'redirect');
+		const follow = await postJob(`/networks/${personId}?/followUp`, {
+			follow_up_date: '2000-01-01',
+			follow_up_comment: 'Check in'
+		});
+		assert.equal(follow.type, 'redirect');
+		assert.equal(
+			(await postJob(`/networks/${personId}?/link`, { job_id: job.id, notes: 'Referrer' })).type,
+			'redirect'
+		);
+		const personDetails = await (await fetch(`${base}/networks/${personId}`)).text();
+		assert.ok(personDetails.includes('Linked jobs'));
+		assert.ok(personDetails.includes('Referrer'));
+		assert.ok(personDetails.includes('Overdue'));
+		assert.ok(personDetails.includes('No interactions recorded'));
+		const networkSearch = await (
+			await fetch(`${base}/networks?role=recruiter&organization=acme`)
+		).text();
+		assert.ok(networkSearch.includes('Alex Example'));
+		assert.ok(networkSearch.includes('value="recruiter"'));
+		assert.ok(
+			(await (await fetch(`${base}/networks?role=engineer`)).text()).includes('No matching people')
+		);
+		const networkValidation = await (await fetch(`${base}/networks?sort=invalid`)).text();
+		assert.ok(networkValidation.includes('aria-invalid="true"'));
+		const clamped = await fetch(`${base}/networks?page=99`, { redirect: 'manual' });
+		assert.equal(clamped.status, 303);
+		assert.equal(clamped.headers.get('location'), '/networks');
+		assert.equal(
+			(
+				await postJob(`/networks/${personId}?/addInteraction&jobs_page=2&updates_page=3`, {
+					interaction_date: '2000-01-01',
+					note: 'Met Alex'
+				})
+			).type,
+			'redirect'
+		);
+		const interaction = networks.listNetworkUpdates({ network_id: personId }).updates[0];
+		const editInteraction = await postJob(
+			`/networks/${personId}?/editInteraction&jobs_page=2&updates_page=3`,
+			{ update_id: interaction.id, interaction_date: '2000-01-02', note: 'Corrected' }
+		);
+		assert.equal(editInteraction.type, 'redirect');
+		assert.ok(editInteraction.location.includes('jobs_page=2'));
+		assert.ok(editInteraction.location.includes('updates_page=3'));
+		assert.equal(
+			(await postJob(`/networks/${personId}?/deleteInteraction`, { update_id: interaction.id }))
+				.type,
+			'failure'
+		);
+		assert.equal(
+			(
+				await postJob(`/networks/${personId}?/deleteInteraction`, {
+					update_id: interaction.id,
+					confirm: 'true'
+				})
+			).type,
+			'redirect'
+		);
+		assert.equal(
+			(
+				await postJob(`/jobs/${job.id}?/networkNote`, {
+					network_id: personId,
+					notes: 'Hiring manager'
+				})
+			).type,
+			'redirect'
+		);
+		assert.ok((await (await fetch(`${base}/jobs/${job.id}`)).text()).includes('Hiring manager'));
+		assert.equal(
+			(await postJob(`/jobs/${job.id}?/networkUnlink`, { network_id: personId })).type,
+			'redirect'
+		);
+		const contextual = await postJob(`/networks/new?job_id=${job.id}`, { name: 'Context person' });
+		assert.equal(contextual.type, 'redirect');
+		assert.ok(contextual.location.startsWith(`/jobs/${job.id}?link_person=1&person=`));
+		const contextId = new URL(contextual.location, base).searchParams.get('person');
+		assert.equal(
+			networks.listNetworks({ job_id: job.id }).total,
+			0,
+			'Saving does not silently link'
+		);
+		assert.ok(
+			(await (await fetch(`${base}${contextual.location}`)).text()).includes('Context person')
+		);
+		assert.equal(
+			(await postJob(`/jobs/${job.id}?/networkLink`, { network_id: contextId, notes: 'Referral' }))
+				.type,
+			'redirect'
+		);
+		const missingOrigin = await postJob('/networks/new?job_id=missing', { name: 'Kept person' });
+		assert.ok(missingOrigin.location.includes('missing_job=1'));
+		assert.equal((await fetch(`${base}/networks/not-a-person`)).status, 404);
 		const newPage = await (await fetch(`${base}/jobs/new`)).text();
 		assert.ok(newPage.includes('name="work_arrangement"'));
 		assert.ok(newPage.includes('name="follow_up_comment"'));

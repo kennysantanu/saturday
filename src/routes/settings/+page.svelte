@@ -187,10 +187,16 @@
 				<div class="inset-surface space-y-3 p-4" role="status">
 					<h3 class="font-medium">Restore preview</h3>
 					<p>
-						Current: {form.preview.current.job_count} jobs and {form.preview.current.update_count} updates.
+						Current: {form.preview.current.job_count} jobs, {form.preview.current.update_count} job updates,
+						{form.preview.current.network_count ?? 0} people, {form.preview.current
+							.network_link_count ?? 0} relationships and {form.preview.current
+							.network_update_count ?? 0} interactions.
 					</p>
 					<p>
-						Backup: {form.preview.incoming.job_count} jobs and {form.preview.incoming.update_count} updates.
+						Backup: {form.preview.incoming.job_count} jobs, {form.preview.incoming.update_count} job updates,
+						{form.preview.incoming.network_count ?? 0} people, {form.preview.incoming
+							.network_link_count ?? 0} relationships and {form.preview.incoming
+							.network_update_count ?? 0} interactions.
 					</p>
 					<p class="text-sm">{form.preview.warning}</p>
 					{#if form.preview.unmatched_job_folders?.length}<p class="text-sm">
@@ -211,7 +217,7 @@
 					<ConfirmDialog
 						bind:open={confirmRestore}
 						title="Replace current records?"
-						description="All current jobs and updates will be replaced by this backup. A recovery backup of your current data will be kept."
+						description="All current jobs, people, relationships and history will be replaced. Older backups clear Network data. A complete recovery backup will be kept."
 						confirmLabel="Replace records"
 						formId="restore-backup-form"
 						destructive
@@ -388,7 +394,11 @@
 					<h3 class="font-medium">Coordinated restore preview</h3>
 					<p>
 						Database: {form.filePairPreview.database.current.job_count} current jobs → {form
-							.filePairPreview.database.incoming.job_count} incoming jobs.
+							.filePairPreview.database.incoming.job_count} incoming jobs. Network: {form
+							.filePairPreview.database.current.network_count ?? 0} current people → {form
+							.filePairPreview.database.incoming.network_count ?? 0} incoming people; {form
+							.filePairPreview.database.incoming.network_link_count ?? 0} relationships and {form
+							.filePairPreview.database.incoming.network_update_count ?? 0} interactions.
 					</p>
 					<p>
 						Files: {form.filePairPreview.files.current_count} current → {form.filePairPreview.files
@@ -463,7 +473,7 @@
 		<Card.Header>
 			<Card.Title class="text-base">Connect an assistant</Card.Title>
 			<Card.Description
-				>Let ChatGPT Work on this computer add jobs and record updates in Saturday.</Card.Description
+				>Let an assistant on this computer work with your jobs, network and documents in Saturday.</Card.Description
 			>
 		</Card.Header>
 		<Card.Content class="space-y-5">

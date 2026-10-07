@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { SubmitFunction } from '@sveltejs/kit';
+	import { page } from '$app/state';
 	import { tick } from 'svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Bot from '@lucide/svelte/icons/bot';
@@ -72,6 +74,51 @@
 	$effect(() => {
 		selectedType = values.event_type ?? (job.isActive ? 'applied' : 'note');
 	});
+	let personPickerOpen = $state(false);
+	let networkNoteOpen = $state(false);
+	let notePersonId = $state('');
+	let notePersonName = $state('');
+	let networkNote = $state('');
+	const networkErrors = $derived(
+		form?.action?.startsWith('network-') ? errors : data.networkErrors
+	);
+	$effect(() => {
+		personPickerOpen = !!data.personPicker;
+	});
+	$effect(() => {
+		if (!form?.errors) return;
+		if (form.action === 'network-linked') personPickerOpen = true;
+		if (form.action === 'network-note') {
+			networkNoteOpen = true;
+			notePersonId = values.network_id ?? '';
+			networkNote = values.notes ?? '';
+		}
+	});
+	function networkHref(changes: Record<string, string | number | null>) {
+		const query = new URLSearchParams(page.url.searchParams);
+		for (const key of [...query.keys()])
+			if (key.startsWith('/') || key === 'saved') query.delete(key);
+		for (const [key, value] of Object.entries(changes)) {
+			if (value === null || value === '') query.delete(key);
+			else query.set(key, String(value));
+		}
+		return page.url.pathname + (query.size ? '?' + query : '');
+	}
+	function networkAction(name: string) {
+		const query = new URLSearchParams(page.url.searchParams);
+		for (const key of [...query.keys()]) if (key.startsWith('/')) query.delete(key);
+		return '?/' + name + (query.size ? '&' + query : '');
+	}
+	const enhanceNetwork: SubmitFunction =
+		() =>
+		async ({ result, update }) => {
+			if (result.type === 'redirect' || result.type === 'success') {
+				networkNoteOpen = false;
+			}
+			await update();
+			await tick();
+			focusFirstError();
+		};
 </script>
 
 <svelte:head><title>{job.title} · {job.company} · Saturday</title></svelte:head>
@@ -450,3 +497,272 @@
 		></Card.Root
 	>
 </div>
+
+<div class="mt-8">
+	<Card.Root
+		><Card.Header class="flex flex-row flex-wrap items-center justify-between gap-3"
+			><Card.Title
+				>Network <span class="text-muted-foreground">({data.people.total})</span></Card.Title
+			><Button variant="outline" href={networkHref({ link_person: '1', person_page: null })}
+				>Link person</Button
+			></Card.Header
+		><Card.Content class="space-y-4">
+			{#if form?.action === 'network-unlinked' && networkErrors.form}<Notice
+					tone="error"
+					title="Could not unlink">{networkErrors.form}</Notice
+				>{/if}
+			{#if Object.keys(data.networkErrors).length}<Notice
+					tone="error"
+					title="Check the search or page values"
+					>{Object.values(data.networkErrors).join(' ')}</Notice
+				>{/if}
+			{#if !data.people.networks.length}<p class="text-sm text-muted-foreground">
+					No linked people yet.
+				</p>{/if}
+			{#each data.people.networks as person (person.id)}<div
+					class="space-y-3 border-b pb-4 last:border-0 last:pb-0"
+				>
+					<div>
+						<a
+							class="font-medium break-words text-primary hover:underline"
+							href={`/networks/${person.id}`}>{person.name}</a
+						>
+						<p class="text-sm break-words text-muted-foreground">
+							{[person.role, person.organization].filter(Boolean).join(' · ')}
+						</p>
+					</div>
+					{#if person.job_link.notes}<p class="text-sm break-words whitespace-pre-wrap">
+							<span class="text-muted-foreground">Relationship note:</span>{' '}{person.job_link
+								.notes}
+						</p>{/if}
+					<div class="flex flex-wrap gap-2">
+						<Button
+							variant="ghost"
+							size="sm"
+							onclick={() => {
+								notePersonId = person.id;
+								notePersonName = person.name;
+								networkNote = person.job_link.notes ?? '';
+								networkNoteOpen = true;
+							}}>Edit link note</Button
+						>
+						<form
+							method="POST"
+							action={networkAction('networkUnlink')}
+							use:enhance={enhanceNetwork}
+						>
+							<input type="hidden" name="network_id" value={person.id} /><Button
+								type="submit"
+								size="sm"
+								variant="ghost"
+								aria-label={`Unlink ${person.name}`}>Unlink</Button
+							>
+						</form>
+					</div>
+				</div>{/each}
+			{#if data.people.totalPages > 1}<nav
+					aria-label="Linked people pages"
+					class="flex flex-wrap items-center justify-between gap-3"
+				>
+					<Button
+						variant="outline"
+						href={networkHref({ network_page: data.people.page - 1 })}
+						disabled={data.people.page <= 1}>Previous</Button
+					><span class="text-sm">Page {data.people.page} of {data.people.totalPages}</span><Button
+						variant="outline"
+						href={networkHref({ network_page: data.people.page + 1 })}
+						disabled={data.people.page >= data.people.totalPages}>Next</Button
+					>
+				</nav>{/if}
+		</Card.Content></Card.Root
+	>
+</div>
+<Dialog.Root bind:open={networkNoteOpen}
+	><Dialog.Content
+		><Dialog.Header
+			><Dialog.Title>Edit link note</Dialog.Title><Dialog.Description
+				>{notePersonName || 'Linked person'} · {job.title}</Dialog.Description
+			></Dialog.Header
+		>
+		<form
+			method="POST"
+			action={networkAction('networkNote')}
+			use:enhance={enhanceNetwork}
+			class="space-y-5"
+		>
+			<input
+				type="hidden"
+				name="network_id"
+				value={notePersonId}
+			/>{#if form?.action === 'network-note' && networkErrors.form}<Notice
+					tone="error"
+					title="Link note not saved">{networkErrors.form}</Notice
+				>{/if}<Field
+				id="network_relationship_note"
+				label="Relationship note"
+				error={form?.action === 'network-note' ? networkErrors.notes : undefined}
+				>{#snippet control(attrs)}<Textarea
+						{...attrs}
+						name="notes"
+						maxlength={2000}
+						rows={4}
+						bind:value={networkNote}
+					/>{/snippet}</Field
+			><Dialog.Footer
+				><Button variant="ghost" onclick={() => (networkNoteOpen = false)}>Cancel</Button><Button
+					type="submit">Save note</Button
+				></Dialog.Footer
+			>
+		</form></Dialog.Content
+	></Dialog.Root
+>
+<Dialog.Root bind:open={personPickerOpen}
+	><Dialog.Content class="sm:max-w-2xl"
+		><Dialog.Header
+			><Dialog.Title>Link person</Dialog.Title><Dialog.Description
+				>Select someone for {job.title} at {job.company}.</Dialog.Description
+			></Dialog.Header
+		>
+		<form method="GET" action={`/jobs/${job.id}`} class="space-y-4">
+			{#if Object.keys(data.networkErrors).length}<Notice
+					tone="error"
+					title="Check the search or page values"
+					>{Object.values(data.networkErrors).join(' ')}</Notice
+				>{/if}<input
+				type="hidden"
+				name="link_person"
+				value="1"
+			/>{#if data.networkQuery.network_page}<input
+					type="hidden"
+					name="network_page"
+					value={data.networkQuery.network_page}
+				/>{/if}
+			<div class="grid gap-4 sm:grid-cols-3">
+				<Field id="person_name" label="Name"
+					>{#snippet control(attrs)}<Input
+							{...attrs}
+							name="person_name"
+							maxlength={200}
+							value={data.networkQuery.person_name ?? ''}
+						/>{/snippet}</Field
+				><Field id="person_role" label="Role"
+					>{#snippet control(attrs)}<Input
+							{...attrs}
+							name="person_role"
+							maxlength={200}
+							value={data.networkQuery.person_role ?? ''}
+						/>{/snippet}</Field
+				><Field id="person_organization" label="Organization"
+					>{#snippet control(attrs)}<Input
+							{...attrs}
+							name="person_organization"
+							maxlength={200}
+							value={data.networkQuery.person_organization ?? ''}
+						/>{/snippet}</Field
+				>
+			</div>
+			<Button type="submit" variant="outline">Search people</Button>
+		</form>
+		<Button href={`/networks/new?job_id=${job.id}`} variant="ghost">Add person</Button>
+		<form
+			method="POST"
+			action={networkAction('networkLink')}
+			use:enhance={enhanceNetwork}
+			class="space-y-4"
+		>
+			{#if form?.action === 'network-linked' && networkErrors.form}<Notice
+					tone="error"
+					title="Could not link person">{networkErrors.form}</Notice
+				>{/if}
+			<fieldset class="space-y-2">
+				<legend class="mb-2 text-sm font-medium"
+					>Choose a person <span class="text-destructive" aria-hidden="true">*</span></legend
+				>
+				{#if data.selectedPerson && !data.personPicker?.networks.some((person: { id: string }) => person.id === data.selectedPerson.id)}<label
+						class="inset-surface flex items-start gap-3 p-3"
+						><input
+							type="radio"
+							name="network_id"
+							value={data.selectedPerson.id}
+							checked
+							required
+							disabled={data.linkedPersonIds.includes(data.selectedPerson.id)}
+							class="mt-1 size-4 accent-primary"
+						/><span class="text-sm break-words">{data.selectedPerson.name}</span></label
+					>{/if}
+				{#each data.personPicker?.networks ?? [] as person (person.id)}<label
+						class="inset-surface flex items-start gap-3 p-3"
+						><input
+							type="radio"
+							name="network_id"
+							value={person.id}
+							required
+							disabled={data.linkedPersonIds.includes(person.id)}
+							checked={(values.network_id ?? data.selectedPerson?.id) === person.id}
+							class="mt-1 size-4 accent-primary"
+						/><span class="min-w-0 text-sm break-words"
+							>{person.name}<span class="block text-muted-foreground"
+								>{[person.role, person.organization]
+									.filter(Boolean)
+									.join(' · ')}{data.linkedPersonIds.includes(person.id)
+									? ' · Already linked'
+									: ''}</span
+							></span
+						></label
+					>{/each}
+				{#if !data.personPicker?.networks.length && !data.selectedPerson}<p
+						class="text-sm text-muted-foreground"
+					>
+						No matching people. Add a person or change the search.
+					</p>{/if}
+			</fieldset>
+			{#if networkErrors.network_id}<p class="text-sm text-destructive" role="alert" tabindex="-1">
+					{networkErrors.network_id}
+				</p>{/if}
+			{#if data.personPicker && data.personPicker.totalPages > 1}<nav
+					aria-label="Person picker pages"
+					class="flex flex-wrap items-center justify-between gap-3"
+				>
+					<Button
+						variant="outline"
+						href={networkHref({ person_page: data.personPicker.page - 1 })}
+						disabled={data.personPicker.page <= 1}>Previous</Button
+					><span class="text-sm"
+						>Page {data.personPicker.page} of {data.personPicker.totalPages}</span
+					><Button
+						variant="outline"
+						href={networkHref({ person_page: data.personPicker.page + 1 })}
+						disabled={data.personPicker.page >= data.personPicker.totalPages}>Next</Button
+					>
+				</nav>{/if}
+			<Field
+				id="new_network_relationship_note"
+				label="Relationship note"
+				error={form?.action === 'network-linked' ? networkErrors.notes : undefined}
+				>{#snippet control(attrs)}<Textarea
+						{...attrs}
+						name="notes"
+						maxlength={2000}
+						rows={3}
+						value={form?.action === 'network-linked' ? values.notes : ''}
+					/>{/snippet}</Field
+			>
+			<Dialog.Footer
+				><Button
+					variant="ghost"
+					href={networkHref({
+						link_person: null,
+						person: null,
+						person_page: null,
+						person_name: null,
+						person_role: null,
+						person_organization: null
+					})}>Cancel</Button
+				><Button
+					type="submit"
+					disabled={!data.personPicker?.networks.length && !data.selectedPerson}>Link person</Button
+				></Dialog.Footer
+			>
+		</form>
+	</Dialog.Content></Dialog.Root
+>

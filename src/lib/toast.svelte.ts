@@ -5,6 +5,13 @@
  */
 export const SAVED_MESSAGES: Record<string, string> = {
 	restored: 'Backup restored.',
+	person: 'Person saved.',
+	'network-linked': 'Relationship linked.',
+	'network-unlinked': 'Relationship unlinked.',
+	'network-note': 'Relationship note saved.',
+	interaction: 'Interaction recorded.',
+	'interaction-corrected': 'Interaction corrected.',
+	'interaction-deleted': 'Interaction deleted.',
 	document: 'Document saved.',
 	'document-copy': 'Document copied.',
 	'document-deleted': 'Document deleted.',
