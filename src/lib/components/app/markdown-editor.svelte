@@ -3,6 +3,12 @@
 	import { Editor } from '@tiptap/core';
 	import StarterKit from '@tiptap/starter-kit';
 	import { Markdown } from '@tiptap/markdown';
+	import Heading2 from '@lucide/svelte/icons/heading-2';
+	import Bold from '@lucide/svelte/icons/bold';
+	import Italic from '@lucide/svelte/icons/italic';
+	import List from '@lucide/svelte/icons/list';
+	import Undo2 from '@lucide/svelte/icons/undo-2';
+	import Redo2 from '@lucide/svelte/icons/redo-2';
 	import { Button } from '$lib/components/ui/button';
 	let {
 		value = '',
@@ -11,6 +17,47 @@
 	} = $props<{ value?: string; readonly?: boolean; onchange?: (value: string) => void }>();
 	let element: HTMLDivElement;
 	let editor = $state<Editor | null>(null);
+	// Bumped on every editor transaction so pressed and disabled states stay current.
+	let version = $state(0);
+	const track = () => version;
+	const tools = [
+		{
+			label: 'Heading',
+			icon: Heading2,
+			run: () => editor?.chain().focus().toggleHeading({ level: 2 }).run(),
+			active: () => (track(), editor?.isActive('heading', { level: 2 }) ?? false)
+		},
+		{
+			label: 'Bold',
+			icon: Bold,
+			run: () => editor?.chain().focus().toggleBold().run(),
+			active: () => (track(), editor?.isActive('bold') ?? false)
+		},
+		{
+			label: 'Italic',
+			icon: Italic,
+			run: () => editor?.chain().focus().toggleItalic().run(),
+			active: () => (track(), editor?.isActive('italic') ?? false)
+		},
+		{
+			label: 'List',
+			icon: List,
+			run: () => editor?.chain().focus().toggleBulletList().run(),
+			active: () => (track(), editor?.isActive('bulletList') ?? false)
+		},
+		{
+			label: 'Undo',
+			icon: Undo2,
+			run: () => editor?.chain().focus().undo().run(),
+			disabled: () => (track(), !editor?.can().undo())
+		},
+		{
+			label: 'Redo',
+			icon: Redo2,
+			run: () => editor?.chain().focus().redo().run(),
+			disabled: () => (track(), !editor?.can().redo())
+		}
+	];
 	onMount(() => {
 		editor = new Editor({
 			element,
@@ -37,7 +84,8 @@
 					'aria-multiline': 'true'
 				}
 			},
-			onUpdate: ({ editor }) => onchange(editor.getMarkdown())
+			onUpdate: ({ editor }) => onchange(editor.getMarkdown()),
+			onTransaction: () => version++
 		});
 		return () => editor?.destroy();
 	});
@@ -51,43 +99,24 @@
 </script>
 
 <div class="markdown-editor rounded-[var(--r-group)] border bg-card">
-	{#if !readonly}<div
-			class="flex flex-wrap gap-1 border-b p-2"
+	{#if !readonly}
+		<div
+			class="editor-toolbar flex flex-wrap gap-1 border-b p-2"
 			role="toolbar"
 			aria-label="Markdown formatting"
 		>
-			<Button
-				type="button"
-				variant="ghost"
-				size="sm"
-				onclick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}>Heading</Button
-			><Button
-				type="button"
-				variant="ghost"
-				size="sm"
-				onclick={() => editor?.chain().focus().toggleBold().run()}>Bold</Button
-			><Button
-				type="button"
-				variant="ghost"
-				size="sm"
-				onclick={() => editor?.chain().focus().toggleItalic().run()}>Italic</Button
-			><Button
-				type="button"
-				variant="ghost"
-				size="sm"
-				onclick={() => editor?.chain().focus().toggleBulletList().run()}>List</Button
-			><Button
-				type="button"
-				variant="ghost"
-				size="sm"
-				onclick={() => editor?.chain().focus().undo().run()}>Undo</Button
-			><Button
-				type="button"
-				variant="ghost"
-				size="sm"
-				onclick={() => editor?.chain().focus().redo().run()}>Redo</Button
-			>
-		</div>{/if}
+			{#each tools as tool (tool.label)}
+				<Button
+					type="button"
+					variant="ghost"
+					size="sm"
+					aria-pressed={tool.active ? tool.active() : undefined}
+					disabled={tool.disabled?.()}
+					onclick={tool.run}><tool.icon data-icon="inline-start" />{tool.label}</Button
+				>
+			{/each}
+		</div>
+	{/if}
 	<div bind:this={element} class="min-h-48 p-4"></div>
 </div>
 

@@ -24,7 +24,7 @@ On a job's detail page, choose **Add update** and enter the date. Select a progr
 
 The date can describe something that happened or a confirmed future interview. Future dated updates appear under **Coming up** on the job and Dashboard. The job's **History** shows its dated updates, including entries added by a connected assistant. Refresh the browser to see changes an assistant made while the page was open.
 
-**Dismiss job** means you stopped pursuing it. **Rejected by employer** means the employer declined. Dismissed jobs can be reopened from their detail page. Accepted and rejected jobs become inactive; if that outcome was entered by mistake, edit or remove the outcome update to correct it. Inactive jobs can still receive notes, but need to be active before receiving another milestone.
+**Dismiss job** (in the job's three-dot menu, next to Add update) means you stopped pursuing it. **Rejected by employer** means the employer declined. Dismissed jobs can be reopened from their detail page. Accepted and rejected jobs become inactive; if that outcome was entered by mistake, edit or remove the outcome update to correct it. Inactive jobs can still receive notes, but need to be active before receiving another milestone.
 
 To fix an ordinary update, use its **Edit** action. To remove one, choose **Remove update** and confirm. The app recalculates the displayed status and Dashboard counts. Dismiss and Reopen entries are reversed through the corresponding job action. Removed updates are not kept in an undo history.
 
@@ -70,7 +70,7 @@ Previews expire after ten minutes and become invalid if records change. Prepare 
 
 ### Automatic backups
 
-Enable **Automatic backups**, set **Every N hours** (1–168), and **Keep N automatic backups** (1–100), then save. Defaults are off, every 24 hours, and keep 10. Enabling makes the first backup due immediately; the worker checks once per minute. View the last successful backup, next due time, and errors in Settings; refresh to see changes.
+Enable **Automatic backups**, set **Back up every (hours)** (1–168) and **Automatic backups to keep** (1–100), then save. Defaults are off, every 24 hours, and keep 10. Enabling makes the first backup due immediately; the worker checks once per minute. View the last successful backup, next due time, and errors in Settings; refresh to see changes.
 
 Automatic backups run only while the web app runs through `npm run start` or `npm run dev` and your computer is awake. After downtime, the app makes one catch-up backup. A failed attempt retries after at least five minutes. Running MCP alone, `npm run preview`, or the built web entry directly does not start this worker.
 
@@ -80,13 +80,13 @@ Backup files and schedule settings live in `<database-path>.backups/`; temporary
 
 ## Documents and Master CV
 
-Documents holds your reusable files. Click **Upload**, then select a file (up to 25 MiB) to upload immediately or choose **New document** to create Markdown. Search filenames and use Preview, Edit or Download. The three-dot menu contains Rename, Duplicate and permanent Delete. Duplicate creates `name copy.ext`, then numbered copies. There is no Trash or automatic version history.
+Documents holds your reusable files. Click **Upload**, then select a file (up to 25 MiB) to upload immediately or choose **New document** to create Markdown. Search filenames and use a row's Edit action. Its three-dot menu contains Preview, Download, Rename, Duplicate and permanent Delete. Duplicate creates `name copy.ext`, then numbered copies. There is no Trash or automatic version history.
 
 Markdown uses a basic visual editor with a source fallback. Files with unsupported formatting stay in source mode to preserve it. HTML and TXT use source text editors. Text editing is limited to 1 MiB of valid UTF-8. PDFs have browser preview/download; other formats download only. Explicit Save persists your edits. If an assistant edits the same file, reload/reconcile or save your draft as a separate copy rather than overwriting silently.
 
-Click **Select Master CV**, choose an existing user Markdown file, then **Use selected file**. The file receives a clickable **Master CV** label; its name, location and contents stay the same. Select another file later to change the designation. Click its **Master CV** label, then confirm **Remove designation** to clear the designation and keep the file. Deleting the selected file also clears Master CV. Create/upload your Markdown CV normally before selecting it; PDF/Word conversion is not included.
+Click **Select Master CV** (next to **New document**), choose an existing user Markdown file, then **Use selected file**. The file shows a **Master CV** label; its name, location and contents stay the same. Open the button again to pick another file, or choose **No Master CV** and **Clear Master CV** to unselect it and keep the file. Deleting the selected file also clears Master CV. Create/upload your Markdown CV normally before selecting it; PDF/Word conversion is not included.
 
-Each job has its own Documents link and attachment list. Upload/create there or use **Copy to this job** to make an independent copy of a user document. Editing a job copy never edits its source or Master CV. The user Documents page does not browse job folders.
+Each job has its own Documents section with a **Manage documents** button. Upload/create there or use **Copy to this job** to make an independent copy of a user document. Editing a job copy never edits its source or Master CV. The user Documents page does not browse job folders.
 
 For resumes, your assistant can create a reusable HTML template and a job-tailored HTML file. Review/edit the HTML source, save, then choose **Generate PDF** on its preview. Saturday saves a new PDF beside the HTML automatically. Existing PDFs are preserved with numbered filenames; editing HTML later does not update earlier PDFs. The renderer blocks scripts and external resources, so use self-contained print CSS and installed fonts.
 

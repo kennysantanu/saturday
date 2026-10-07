@@ -1,23 +1,26 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
-	import { beforeNavigate } from '$app/navigation';
+	import { onMount } from 'svelte';
 	import { enhance } from '$app/forms';
-	import { focusFirstError } from '$lib/forms';
+	import Download from '@lucide/svelte/icons/download';
+	import Pencil from '@lucide/svelte/icons/pencil';
+	import FileOutput from '@lucide/svelte/icons/file-output';
+	import { withPending } from '$lib/forms';
+	import { UnsavedChanges } from '$lib/unsaved.svelte';
 	import { visualMarkdownSupported } from '$lib/file-types';
 	import PageHeader from './page-header.svelte';
+	import PageShell from './page-shell.svelte';
 	import Notice from './notice.svelte';
+	import Field from './field.svelte';
+	import UnsavedGuard from './unsaved-guard.svelte';
+	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
-	import * as Dialog from '$lib/components/ui/dialog';
 	let { data, form } = $props();
+	const guard = new UnsavedChanges();
 	let content = $state(''),
 		name = $state(''),
 		source = $state(false),
-		dirty = $state(false),
-		saving = $state(false),
-		leave = $state(false),
-		leaveTo = $state(''),
 		pdfBusy = $state(false);
 	let MarkdownEditor = $state<any>(null),
 		htmlPreview = $state('');
@@ -27,7 +30,7 @@
 	$effect(() => {
 		content = form?.values?.content ?? data.content;
 		name = form?.values?.filename ?? '';
-		dirty = !!form?.values && Object.hasOwn(form.values, 'content');
+		guard.dirty = !!form?.values && Object.hasOwn(form.values, 'content');
 	});
 	onMount(async () => {
 		MarkdownEditor = (await import('./markdown-editor.svelte')).default;
@@ -48,117 +51,116 @@
 		});
 		htmlPreview = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; form-action 'none'; base-uri 'none'">${template.innerHTML}`;
 	});
-	beforeNavigate((n) => {
-		if (dirty && !saving) {
-			n.cancel();
-			if (n.to) {
-				leaveTo = n.to.url.href;
-				leave = true;
-			}
-		}
-	});
-	function unload(e: BeforeUnloadEvent) {
-		if (dirty) {
-			e.preventDefault();
-			e.returnValue = '';
-		}
-	}
 </script>
 
-<svelte:window onbeforeunload={unload} />
-<svelte:head><title>{doc?.filename ?? 'New document'} · Saturday</title></svelte:head>
-<div class="space-y-6">
-	<a class="back-link" href={data.base}>Back to documents</a><PageHeader
+{#snippet badges()}
+	{#if doc?.designation}<Badge variant="secondary">Master CV</Badge>{/if}
+	{#if guard.dirty}<Badge variant="outline">Unsaved changes</Badge>{/if}
+{/snippet}
+
+<PageShell title={`${doc?.filename ?? 'New document'} · Documents`}>
+	<PageHeader
+		back={{ href: data.base, label: 'documents' }}
 		title={doc?.filename ?? 'New document'}
-		description={doc?.designation ? 'Master CV' : undefined}
+		meta={doc?.designation || guard.dirty ? badges : undefined}
 	>
 		{#snippet actions()}{#if doc}<Button
 					variant="outline"
-					href={`/api/files/${doc.id}?scope=${data.scope}`}>Download</Button
-				>{#if doc.can_edit_text && !data.edit}<Button href={`?edit=1`}>Edit</Button
+					href={`/api/files/${doc.id}?scope=${data.scope}`}
+					><Download data-icon="inline-start" />Download</Button
+				>{#if doc.can_edit_text && !data.edit}<Button href={`?edit=1`}
+						><Pencil data-icon="inline-start" />Edit</Button
 					>{/if}{/if}{/snippet}
 	</PageHeader>
-	{#if form?.fileError}<Notice tone="error">{form.fileError}</Notice
-		>{/if}{#if data.textError}<Notice tone="error">{data.textError}</Notice>{/if}
+	{#if form?.fileError}<Notice tone="error" title="The document was not saved"
+			>{form.fileError}</Notice
+		>{/if}
+	{#if data.textError}<Notice tone="error" title="The document could not be read"
+			>{data.textError}</Notice
+		>{/if}
 	{#if data.edit && (!doc || doc.can_edit_text) && !data.textError}
-		<form
-			method="POST"
-			action="?/save"
-			use:enhance={() => {
-				saving = true;
-				return async ({ update }) => {
-					await update({ reset: false });
-					await tick();
-					focusFirstError();
-					saving = false;
-				};
-			}}
-			class="space-y-5"
-		>
-			<p class="text-sm text-muted-foreground">{dirty ? 'Unsaved changes' : '* Required'}</p>
+		<form method="POST" action="?/save" use:enhance={guard.enhance} class="space-y-5">
+			{#if !doc}
+				<p class="text-sm text-muted-foreground">
+					<span class="text-destructive" aria-hidden="true">*</span> Required
+				</p>
+			{/if}
 			<input type="hidden" name="token" value={doc?.token ?? ''} />
-			{#if !doc}<label class="block space-y-2 text-sm"
-					><span>Document name *</span>
-					<div class="flex items-center gap-2">
-						<Input
-							name="filename"
-							oninput={() => (dirty = true)}
-							bind:value={name}
-							placeholder="Untitled"
-							required
-						/><span>.md</span>
-					</div></label
-				>{/if}
-			{#if isMarkdown}<Button
-					type="button"
-					variant="outline"
-					size="sm"
-					onclick={() => (source = !source)}>{source ? 'Visual editor' : 'Markdown source'}</Button
+			{#if !doc}
+				<Field id="document_name" label="Document name" required>
+					{#snippet control(attrs)}
+						<div class="flex items-center gap-2">
+							<Input
+								{...attrs}
+								name="filename"
+								oninput={guard.markDirty}
+								bind:value={name}
+								placeholder="Untitled"
+								required
+							/><span>.md</span>
+						</div>
+					{/snippet}
+				</Field>
+			{/if}
+			{#if isMarkdown}
+				<Button type="button" variant="outline" size="sm" onclick={() => (source = !source)}
+					>{source ? 'Visual editor' : 'Markdown source'}</Button
 				>{#if !supported}<p class="text-sm text-muted-foreground">
 						This document uses formatting outside the basic visual editor. Edit its Markdown source
 						to preserve it.
-					</p>{/if}{/if}
-			{#if isMarkdown && supported && !source && MarkdownEditor}<MarkdownEditor
+					</p>{/if}
+			{/if}
+			{#if isMarkdown && supported && !source && MarkdownEditor}
+				<MarkdownEditor
 					value={content}
 					onchange={(value: string) => {
 						content = value;
-						dirty = true;
+						guard.markDirty();
 					}}
-				/><input type="hidden" name="content" value={content} />{:else}<label
-					class="block space-y-2 text-sm"
-					><span
-						>{isMarkdown
-							? 'Markdown source'
-							: doc?.format === 'html'
-								? 'HTML source'
-								: 'Text'}</span
-					><Textarea
-						name="content"
-						bind:value={content}
-						oninput={() => (dirty = true)}
-						class="min-h-96 font-mono"
-					/></label
-				>{/if}
-			<div class="form-actions">
-				<Button href={doc ? `${data.base}/${doc.id}` : data.base} variant="ghost">Cancel</Button
-				><Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+				/><input type="hidden" name="content" value={content} />
+			{:else}
+				<Field
+					id="document_content"
+					label={isMarkdown ? 'Markdown source' : doc?.format === 'html' ? 'HTML source' : 'Text'}
+				>
+					{#snippet control(attrs)}<Textarea
+							{...attrs}
+							name="content"
+							bind:value={content}
+							oninput={guard.markDirty}
+							class="min-h-96 font-mono"
+						/>{/snippet}
+				</Field>
+			{/if}
+			<div class="form-actions justify-end">
+				<Button href={doc ? `${data.base}/${doc.id}` : data.base} variant="ghost">Cancel</Button>
+				<Button type="submit" disabled={guard.saving}>{guard.saving ? 'Saving…' : 'Save'}</Button>
 			</div>
 		</form>
-		{#if form?.fileError}<details class="disclosure">
+		{#if form?.fileError}
+			<details class="disclosure">
 				<summary>Save draft as a copy</summary>
-				<form class="disclosure-body space-y-3" method="POST" action="?/saveCopy">
-					<input type="hidden" name="content" value={content} /><label
-						class="block space-y-2 text-sm"
-						><span>New filename *</span><Input
-							name="filename"
-							required
-							value={doc ? `copy-${doc.filename}` : 'draft.md'}
-						/></label
-					><Button type="submit" variant="outline" onclick={() => (saving = true)}
+				<form
+					class="disclosure-body space-y-3"
+					method="POST"
+					action="?/saveCopy"
+					use:enhance={withPending()}
+				>
+					<input type="hidden" name="content" value={content} />
+					<Field id="copy_filename" label="New filename" required>
+						{#snippet control(attrs)}<Input
+								{...attrs}
+								name="filename"
+								required
+								value={doc ? `copy-${doc.filename}` : 'draft.md'}
+							/>{/snippet}
+					</Field>
+					<Button type="submit" variant="outline" onclick={() => (guard.saving = true)}
 						>Save as copy</Button
 					>
 				</form>
-			</details>{/if}
+			</details>
+		{/if}
 	{:else if doc?.format === 'pdf' && doc.can_preview}<iframe
 			title={`Preview of ${doc.filename}`}
 			class="h-[70vh] w-full rounded-[var(--r-group)] border"
@@ -178,18 +180,21 @@
 		<form
 			method="POST"
 			action="?/pdf"
-			use:enhance={() => {
+			use:enhance={withPending(() => {
 				pdfBusy = true;
 				return async ({ update }) => {
 					await update();
 					pdfBusy = false;
 				};
-			}}
+			})}
 		>
 			<input type="hidden" name="token" value={doc.token} /><Button
 				type="submit"
 				variant="outline"
-				disabled={pdfBusy}>{pdfBusy ? 'Generating PDF…' : 'Generate PDF'}</Button
+				disabled={pdfBusy}
+				><FileOutput data-icon="inline-start" />{pdfBusy
+					? 'Generating PDF…'
+					: 'Generate PDF'}</Button
 			>
 		</form>
 	{:else if isMarkdown && doc?.can_read_text && !data.textError}{#if supported && MarkdownEditor}<MarkdownEditor
@@ -201,21 +206,5 @@
 	{:else}<Notice
 			>Preview and editing are unavailable for this file. Download it to view its contents.</Notice
 		>{/if}
-</div>
-<Dialog.Root bind:open={leave}
-	><Dialog.Content
-		><Dialog.Header
-			><Dialog.Title>Discard unsaved changes?</Dialog.Title><Dialog.Description
-				>Your latest edits have not been saved.</Dialog.Description
-			></Dialog.Header
-		><Dialog.Footer
-			><Button variant="ghost" onclick={() => (leave = false)}>Keep editing</Button><Button
-				variant="destructive"
-				onclick={() => {
-					dirty = false;
-					window.location.href = leaveTo;
-				}}>Discard changes</Button
-			></Dialog.Footer
-		></Dialog.Content
-	></Dialog.Root
->
+</PageShell>
+<UnsavedGuard {guard} />
