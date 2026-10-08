@@ -30,8 +30,10 @@ import {
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDatabasePath, getProjectRoot } from '$lib/server/database.js';
+import { buildInfo, storageCompatibility } from '$lib/server/compatibility.js';
 
-export async function load() {
+export async function load({ setHeaders }) {
+	setHeaders({ 'x-saturday-build': buildInfo.id });
 	let filesError = null,
 		fileSummary = null,
 		fileBackups = [];
@@ -57,6 +59,8 @@ export async function load() {
 		}
 	};
 	return {
+		buildInfo,
+		storageCompatibility,
 		databasePath,
 		filesError,
 		fileSummary,

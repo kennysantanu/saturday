@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { createWriteStream } from 'node:fs';
+import { storageCompatibility } from '../src/lib/server/compatibility.js';
 import {
 	filePaths,
 	fs,
@@ -100,7 +101,7 @@ try {
 					async () => {
 						try {
 							const current = JSON.parse(await fs.readFile(join(p.root, 'manifest.json'), 'utf8'));
-							if (current.format_version > 1)
+							if (current.format_version > storageCompatibility.manifest.version)
 								throw new Error('Update Saturday instead of replacing a newer file store.');
 						} catch (e) {
 							if (e.message?.startsWith('Update')) throw e;

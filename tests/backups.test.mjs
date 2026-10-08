@@ -27,6 +27,7 @@ import {
 } from '../src/lib/server/services.js';
 import * as backups from '../src/lib/server/backups.js';
 import { schemaVersion } from '../src/lib/server/migrations.js';
+import { readBuildInfo } from '../scripts/build-info.mjs';
 let scratch;
 const initialPath = process.env.SATURDAY_DB_PATH;
 const initialFiles = process.env.SATURDAY_FILES_PATH;
@@ -385,6 +386,43 @@ test('CLI exports, previews, confirms and emits structured errors', () => {
 	assert.equal(settings.status, 0);
 	assert.equal(JSON.parse(settings.stdout).enabled, true);
 });
+test('development build identity handles clean, dirty and non-Git sources', () => {
+	const source = join(scratch, 'source');
+	mkdirSync(source);
+	assert.deepEqual(readBuildInfo(source), { id: 'development', commit: null, dirty: null });
+	const git = (args) => {
+		const result = spawnSync('git', args, { cwd: source, encoding: 'utf8' });
+		assert.equal(result.status, 0, result.stderr);
+		return result.stdout.trim();
+	};
+	git(['init']);
+	git([
+		'-c',
+		'user.name=Saturday Test',
+		'-c',
+		'user.email=test@example.invalid',
+		'-c',
+		'commit.gpgsign=false',
+		'commit',
+		'--allow-empty',
+		'-m',
+		'Build identity fixture'
+	]);
+	const commit = git(['rev-parse', 'HEAD']);
+	assert.deepEqual(readBuildInfo(source), {
+		id: `dev.${commit.slice(0, 12)}`,
+		commit,
+		dirty: false
+	});
+	writeFileSync(join(source, 'untracked.txt'), 'local change');
+	assert.deepEqual(readBuildInfo(source), {
+		id: `dev.${commit.slice(0, 12)}.dirty`,
+		commit,
+		dirty: true
+	});
+	git(['add', 'untracked.txt']);
+	assert.equal(readBuildInfo(source).dirty, true);
+});
 test('built MCP preserves legacy tools and exposes document tools and complete backup/restore workflow without private paths', async () => {
 	const child = spawn(process.execPath, ['build/mcp/index.js'], {
 		env: { ...process.env },
@@ -420,11 +458,12 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 		return JSON.parse(text);
 	};
 	try {
-		await request('initialize', {
+		const initialized = await request('initialize', {
 			protocolVersion: '2025-06-18',
 			capabilities: {},
 			clientInfo: { name: 'backup-test', version: '1' }
 		});
+		assert.equal(initialized.serverInfo.version, readBuildInfo().id);
 		child.stdin.write(
 			JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n'
 		);

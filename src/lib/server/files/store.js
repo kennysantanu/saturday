@@ -6,6 +6,7 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { getProjectRoot, withDatabase } from '../database.js';
 import { fileType } from '../../file-types.js';
+import { storageCompatibility } from '../compatibility.js';
 
 export const UPLOAD_LIMIT = 25 * 1024 * 1024;
 export const TEXT_LIMIT = 1024 * 1024;
@@ -208,10 +209,10 @@ export class LocalFileStore {
 	}
 }
 export function validateManifest(m) {
-	if (!m || m.format_version !== 1)
+	if (!m || m.format_version !== storageCompatibility.manifest.version)
 		reject(
 			'FORMAT',
-			m?.format_version > 1
+			m?.format_version > storageCompatibility.manifest.version
 				? 'Update Saturday to access this file store.'
 				: 'Invalid file manifest version. Restore a valid file backup offline.'
 		);
@@ -373,7 +374,12 @@ export async function withFileLock(operation, { initialize = true, allowSession 
 			if (e.code !== 'ENOENT') throw e;
 			const names = await fs.readdir(p.root);
 			if (names.length) reject('FORMAT', 'Existing files have no manifest. Use offline recovery.');
-			m = { format_version: 1, token: randomUUID(), documents: [], designations: {} };
+			m = {
+				format_version: storageCompatibility.manifest.version,
+				token: randomUUID(),
+				documents: [],
+				designations: {}
+			};
 			await atomicJson(join(p.root, 'manifest.json'), m);
 		}
 		validateManifest(m);

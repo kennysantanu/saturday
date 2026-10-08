@@ -10,6 +10,7 @@ import { parse } from 'devalue';
 import { migrateDatabase } from '../src/lib/server/database.js';
 import { createJob, getJob, setJobScore } from '../src/lib/server/services.js';
 import { setBackupSettings, listBackups } from '../src/lib/server/backups.js';
+import { readBuildInfo } from '../scripts/build-info.mjs';
 
 test('production Settings download/upload/preview/confirm and supervised worker lifecycle', async () => {
 	const scratch = mkdtempSync(join(tmpdir(), 'saturday-web-backup-'));
@@ -45,7 +46,9 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 			await new Promise((r) => setTimeout(r, 100));
 		}
 		assert.ok(ready, logs);
-		const settings = await (await fetch(`${base}/settings`)).text();
+		const settingsResponse = await fetch(`${base}/settings`);
+		assert.equal(settingsResponse.headers.get('x-saturday-build'), readBuildInfo().id);
+		const settings = await settingsResponse.text();
 		assert.ok(settings.includes('Backup and restore'));
 		assert.ok(settings.replace(/\s+/g, ' ').includes('Automatic backups'));
 		for (let i = 0; i < 30 && !listBackups().backups.some((b) => b.kind === 'scheduled'); i++)
