@@ -1,4 +1,5 @@
 import * as networks from './networks.js';
+import { buildInfo } from './compatibility.js';
 import {
 	networkInputShape,
 	networkIdSchema,
@@ -44,7 +45,7 @@ import {
 } from './validation.js';
 import { ServiceError, ValidationError } from './validation.js';
 
-const server = new McpServer({ name: 'saturday', version: '0.1.0' });
+const server = new McpServer({ name: 'saturday', version: buildInfo.id });
 const milestoneTypes = [
 	'applied',
 	'prescreened',

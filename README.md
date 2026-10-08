@@ -33,6 +33,8 @@ To get started in the app, choose **Add job**. Only the job title and company ar
 
 ## Install and start
 
+Saturday is in unversioned development toward `0.1.0`. Breaking changes may require an explicit data reset; development databases and backups have no cross-build compatibility guarantee. Formal release versioning and supported migrations begin at `0.1.0`. See the [development policy and provisional support matrix](docs/contributing.md#development-toward-010) before testing with important data.
+
 Saturday runs from source with Node.js; a packaged installer is not available yet. You need Node.js 22.13 or newer and npm 10 or newer. Check with `node -v` and `npm -v`. No separate database is required. Setup also installs managed Chrome for HTML-to-PDF generation; basic jobs/documents work without Chrome. Commands below use macOS and Linux shell syntax.
 
 ```sh
@@ -65,7 +67,7 @@ npm run setup
 npm run start
 ```
 
-`npm run setup` is safe to repeat. It applies any pending database changes without removing your jobs.
+`npm run setup` is safe to repeat against compatible storage and never intentionally resets your data. During unversioned development, breaking format changes may instead require a documented explicit reset. Keep backups with the matching build if you need to retain development data.
 
 ## Your data and privacy
 

@@ -29,9 +29,10 @@ import { resolve, join, dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { getDatabasePath, getProjectRoot, inTransaction } from './database.js';
-import { applyMigrations, assertMigrationHistory, schemaVersion } from './migrations.js';
+import { applyMigrations, assertMigrationHistory } from './migrations.js';
 import { parseJobInput, parseAssessment, validDate, ordinaryEventTypes } from './validation.js';
 import { jobColumns, jobFields } from '../job-fields.js';
+import { storageCompatibility } from './compatibility.js';
 
 export const MAX_BACKUP_BYTES = 100 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -280,7 +281,10 @@ function validateSchema(db) {
 	try {
 		assertMigrationHistory(db);
 		const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all();
-		if (versions.length < 1 || versions.length > schemaVersion)
+		if (
+			versions.length < storageCompatibility.database.minimumVersion ||
+			versions.length > storageCompatibility.database.currentVersion
+		)
 			fail(
 				'unsupported_schema',
 				'This backup schema is not supported by this version of Saturday.'

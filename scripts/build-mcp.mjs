@@ -2,6 +2,7 @@ import { build } from 'esbuild';
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readBuildInfo } from './build-info.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const outfile = join(root, 'build', 'mcp', 'index.js');
@@ -15,6 +16,7 @@ try {
 		platform: 'node',
 		format: 'esm',
 		target: 'node22.13',
+		define: { __SATURDAY_BUILD_INFO__: JSON.stringify(readBuildInfo(root)) },
 		packages: 'bundle',
 		external: ['puppeteer', 'yazl', 'yauzl'],
 		banner: { js: '#!/usr/bin/env node' }

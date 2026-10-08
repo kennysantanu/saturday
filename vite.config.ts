@@ -2,8 +2,10 @@ import tailwindcss from '@tailwindcss/vite';
 import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import { readBuildInfo } from './scripts/build-info.mjs';
 
 export default defineConfig({
+	define: { __SATURDAY_BUILD_INFO__: JSON.stringify(readBuildInfo()) },
 	plugins: [
 		tailwindcss(),
 		sveltekit({

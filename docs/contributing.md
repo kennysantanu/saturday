@@ -4,6 +4,36 @@
 
 You need Node.js 22.13 or newer and npm 10 or newer. Run `npm ci`, then `npm run migrate` to create the database and `npm run dev` to start the development server on loopback.
 
+## Development toward 0.1.0
+
+Development is unversioned until the first `0.1.0` release. Leave package/lockfile versions unchanged; do not create numbered beta releases. Breaking APIs and storage changes may require an explicit development-data reset. Setup/startup must never silently reset data. Earlier development backups are not guaranteed compatible with later builds.
+
+The intended first release covers Dashboard, Jobs, Network, Documents, Settings, local MCP and backup/recovery. Cloud hosting/storage, plugins, built-in AI and installers are later work. The initial changelog and formal release tag belong to the final `0.1.0` publication step. After that, released baselines are immutable and supported data changes use migrations independently of app version numbers.
+
+### Build identity and storage contracts
+
+Vite and the MCP builder use `scripts/build-info.mjs` to capture the same Git-based development identity: `dev.<12-character-commit>` with `.dirty` when tracked or untracked source changes exist. Dirty builds are not reproducible references; use a clean commit when sharing a build. Rebuild both artifacts with `npm run build` after source changes. A running dev server captures identity when Vite starts; restart it to refresh the identity.
+
+No Git executable or repository is needed at production runtime. Source archives without Git build with the explicit `development` fallback; direct source CLI commands also have no captured build identity. MCP reports its build identifier in the initialization response. Web Settings responses expose it in `X-Saturday-Build` and their load data; visible Settings diagnostics follow in a later phase.
+
+`src/lib/server/compatibility.js` owns current supported-storage declarations, using the existing migration list for the database version and a shared manifest version for initialization, validation and offline recovery. Exact migration/schema/manifest validators still apply; a version range alone does not establish compatibility. The same module reserves the upcoming numeric baseline identities (`saturday.database.numeric` and `saturday.files.numeric`, both version 1). They do not change or become accepted by the current stores until the numeric schema/file phases implement them. Dataset metadata and checks on every mutation are also later phases.
+
+### Provisional support matrix
+
+These are testing targets, not a beta support claim. Record actual release-candidate results before advertising support.
+
+| Area                | Target / current verification boundary                                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Installation        | Source checkout with npm; no installer                                                                                                |
+| macOS Apple Silicon | Primary development target; complete clean-install, recovery and accessibility checks before release                                  |
+| macOS Intel / Linux | Candidate targets; platform, Chrome/font and workflow verification pending                                                            |
+| Windows             | Support decision pending native installation, path/process and PDF checks; shell examples alone do not establish support              |
+| Runtime             | Node.js 22.13+ and npm 10+ required; test the chosen release Node versions explicitly, rather than assuming every newer version works |
+| Browser             | Modern desktop browser; choose advertised browsers after keyboard, narrow-layout and PDF workflows pass                               |
+| Assistant client    | Local stdio MCP; verify each advertised client's actual connection and workflows separately from protocol tests                       |
+
+Run checks with temporary databases and file stores. Before a development update, stop web, MCP and worker processes and retain backups with the matching source/build if needed. Incompatible-format errors require a compatible build or an explicit scoped reset, never manually altered migration records. This Phase 1 foundation changes neither data nor schema; the existing UUID schema remains in use for now.
+
 ## Commands
 
 | Command             | Purpose                                                       |
