@@ -8,7 +8,7 @@ import { applyMigrations, schemaVersion } from '../src/lib/server/migrations.js'
 import { jobFields, jobColumns, jobForMcp } from '../src/lib/job-fields.js';
 import { jobMcpInputShape, followUpMcpSchema } from '../src/lib/server/validation.js';
 import { z } from 'zod';
-import { migrateDatabase } from '../src/lib/server/database.js';
+import { migrateDatabase, withDatabase, openDatabase } from '../src/lib/server/database.js';
 import {
 	createJob,
 	editJob,
@@ -18,7 +18,9 @@ import {
 	setJobStarred,
 	getDashboardStats,
 	dismissJob,
-	reopenJob
+	reopenJob,
+	addJobUpdate,
+	correctJobUpdate
 } from '../src/lib/server/services.js';
 import {
 	createBackup,
@@ -52,43 +54,95 @@ const details = {
 	follow_up_comment: 'Ask about next steps',
 	is_starred: true
 };
-test('existing schema upgrades without changing old records or history', () => {
+test('UUID development baseline is rejected unchanged even when its version is 1', () => {
 	const legacy = join(scratch, 'legacy.sqlite');
 	const db = new DatabaseSync(legacy);
-	applyMigrations(db, 1);
-	db.prepare('INSERT INTO jobs VALUES (?,?,?,?,?,?,1,?,?,?)').run(
-		'old-id',
-		'Engineer',
-		'Example',
-		null,
-		null,
-		'Keep this',
-		'manual',
-		'2026-10-01T00:00:00Z',
-		'2026-10-01T00:00:00Z'
-	);
-	db.prepare(
-		'INSERT INTO job_updates (id, job_id, event_type, event_date, note, created_via, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)'
-	).run(
-		'old-update',
-		'old-id',
-		'applied',
-		'2026-10-01',
-		null,
-		'mcp',
-		'2026-10-01T00:00:00Z',
-		'2026-10-01T00:00:00Z'
-	);
+	db.exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);
+ INSERT INTO schema_migrations VALUES (1, 'create_jobs_and_job_updates', '2026-10-01');
+ CREATE TABLE jobs (id TEXT PRIMARY KEY, job_title TEXT);
+ INSERT INTO jobs VALUES ('old-id', 'Keep this');`);
 	db.close();
+	const before = readFileSync(legacy);
 	process.env.SATURDAY_DB_PATH = legacy;
+	assert.throws(() => migrateDatabase(), /Unsupported database schema/);
+	assert.deepEqual(readFileSync(legacy), before);
+});
+test('numeric baseline allocates records, retains dataset identity and never reuses deleted update IDs', () => {
+	const job = createJob(details);
+	assert.equal(job.id, 1);
+	assert.equal(createJob(details).id, 2);
+	const first = addJobUpdate({ job_id: job.id, event_date: '2026-01-02', note: 'First' });
+	correctJobUpdate(first.id, { remove: true });
+	const next = addJobUpdate({ job_id: '1', event_date: '2026-01-01', note: 'Second' });
+	assert.equal(first.id, 1);
+	assert.equal(next.id, 2);
+	const state = () =>
+		withDatabase((db) => ({
+			metadata: db.prepare('SELECT * FROM app_metadata').get(),
+			counters: db.prepare('SELECT * FROM sqlite_sequence ORDER BY name').all()
+		}));
+	const before = state();
+	assert.equal(before.metadata.format, 'saturday.database.numeric');
+	assert.match(before.metadata.dataset_id, /^[a-f0-9-]{36}$/);
 	migrateDatabase();
-	const job = getJob('old-id');
-	assert.equal(job.notes, 'Keep this');
-	assert.equal(job.isStarred, false);
-	assert.equal(job.followUpDate, null);
-	assert.equal(job.score, null);
-	assert.equal(job.updates[0].id, 'old-update');
-	assert.equal(job.status.label, 'Applied');
+	assert.deepEqual(state(), before);
+	assert.equal(getJob('1').id, 1);
+	assert.equal(
+		withDatabase((db) => db.prepare('PRAGMA table_info(job_updates)').all()).some(
+			(column) => column.name === 'recorded_order'
+		),
+		false
+	);
+});
+test('IDs reject permissive coercion and unrecognized schemas before writes', () => {
+	createJob(details);
+	for (const id of [
+		0,
+		-1,
+		1.5,
+		NaN,
+		Infinity,
+		Number.MAX_SAFE_INTEGER + 1,
+		'',
+		'01',
+		' 1',
+		'1 ',
+		'+1',
+		'1e0',
+		'1.0',
+		'1x',
+		'9007199254740992',
+		'uuid',
+		true,
+		null,
+		1n
+	]) {
+		assert.throws(
+			() => getJob(id),
+			(error) => error.name === 'ValidationError'
+		);
+		assert.throws(
+			() => editJob(id, { notes: 'Invalid' }),
+			(error) => error.name === 'ValidationError'
+		);
+		assert.throws(
+			() => addJobUpdate({ job_id: id, event_date: '2026-01-01', note: 'Invalid' }),
+			(error) => error.name === 'ValidationError'
+		);
+		assert.throws(
+			() => correctJobUpdate(id, { remove: true }),
+			(error) => error.name === 'ValidationError'
+		);
+	}
+	assert.equal(getJob(1).notes, null);
+	const path = join(scratch, 'unrecognized.sqlite');
+	const db = new DatabaseSync(path);
+	db.exec('CREATE TABLE unrelated (id TEXT)');
+	db.close();
+	const bytes = readFileSync(path);
+	process.env.SATURDAY_DB_PATH = path;
+	assert.throws(() => openDatabase(), /Unsupported database schema/);
+	assert.deepEqual(readFileSync(path), bytes);
 });
 test('manual edits preserve assessment, omitted fields and history, and can clear optional values', () => {
 	const job = createJob({ ...details, score: 100, score_comment: 'Forged' });
@@ -177,53 +231,21 @@ test('new backup roundtrip includes all details and assessment; detail changes i
 	restoreBackup(preview.restore_id, true);
 	assert.deepEqual(getJob(job.id), before);
 });
-test('version-one backups restore with empty new fields without modifying the original backup', () => {
+test('UUID backups are rejected without modifying their source or live records', () => {
 	const legacy = join(scratch, 'legacy.sqlite');
 	const db = new DatabaseSync(legacy);
-	applyMigrations(db, 1);
-	db.prepare('INSERT INTO jobs VALUES (?,?,?,?,?,?,1,?,?,?)').run(
-		'old-id',
-		'Engineer',
-		'Example',
-		null,
-		null,
-		'Legacy',
-		'mcp',
-		'2026-10-01T00:00:00Z',
-		'2026-10-01T00:00:00Z'
-	);
-	db.prepare(
-		'INSERT INTO job_updates (id, job_id, event_type, event_date, note, created_via, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)'
-	).run(
-		'legacy-note',
-		'old-id',
-		null,
-		'2026-10-01',
-		'Preserve history',
-		'mcp',
-		'2026-10-01T00:00:00Z',
-		'2026-10-01T00:00:00Z'
-	);
+	db.exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);
+ INSERT INTO schema_migrations VALUES (1, 'create_jobs_and_job_updates', '2026-10-01');
+ CREATE TABLE jobs (id TEXT PRIMARY KEY); INSERT INTO jobs VALUES ('legacy');`);
 	db.close();
-	const original = readFileSync(legacy);
-	const backup = importBackup(legacy);
-	assert.equal(backup.schema_version, 1);
-	const stored = getBackupFile(backup.backup_id).path;
-	const managedBytes = readFileSync(stored);
-	createJob(details);
-	const preview = prepareRestore(backup.backup_id);
-	assert.equal(preview.incoming.schema_version, schemaVersion);
-	restoreBackup(preview.restore_id, true);
-	const job = getJob('old-id');
-	assert.equal(job.notes, 'Legacy');
-	assert.equal(job.updates[0].id, 'legacy-note');
-	assert.equal(job.updates[0].recordedOrder, 1);
-	assert.equal(job.updates[0].note, 'Preserve history');
-	assert.equal(job.score, null);
-	assert.equal(job.isStarred, false);
-	assert.equal(job.followUpDate, null);
-	assert.deepEqual(readFileSync(legacy), original);
-	assert.deepEqual(readFileSync(stored), managedBytes);
+	const bytes = readFileSync(legacy);
+	const job = createJob(details);
+	assert.throws(
+		() => importBackup(legacy),
+		(error) => error.code === 'unsupported_schema'
+	);
+	assert.deepEqual(readFileSync(legacy), bytes);
+	assert.equal(getJob(job.id).id, job.id);
 });
 
 test('complete field registry matches actual SQLite columns at each supported schema version', () => {

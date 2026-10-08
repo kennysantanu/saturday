@@ -14,7 +14,7 @@
 	import { UPDATE_CHOICES } from '$lib/status';
 
 	type Entry = {
-		id: string;
+		id: number;
 		eventType: string | null;
 		label: string;
 		date: string;
@@ -32,7 +32,7 @@
 	let confirmingRemove = $state(false);
 	let eventType = $state('');
 
-	const isCurrentForm = $derived(values.update_id === entry.id);
+	const isCurrentForm = $derived(values.update_id === String(entry.id));
 	const ownErrors = $derived(isCurrentForm ? errors : {});
 	const fieldValue = (name: string, fallback: string) =>
 		isCurrentForm ? (values[name] ?? fallback) : fallback;

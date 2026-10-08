@@ -228,6 +228,12 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 		const missingOrigin = await postJob('/networks/new?job_id=missing', { name: 'Kept person' });
 		assert.ok(missingOrigin.location.includes('missing_job=1'));
 		assert.equal((await fetch(`${base}/networks/not-a-person`)).status, 404);
+		assert.match(personId, /^[1-9]\d*$/);
+		for (const id of ['01', '1e0', '1.0', 'not-a-job', '9007199254740992']) {
+			assert.equal((await fetch(`${base}/jobs/${id}`)).status, 404);
+			assert.equal((await fetch(`${base}/jobs/${id}/edit`)).status, 404);
+			assert.equal((await fetch(`${base}/networks/${id}`)).status, 404);
+		}
 		const newPage = await (await fetch(`${base}/jobs/new`)).text();
 		assert.ok(newPage.includes('name="work_arrangement"'));
 		assert.ok(newPage.includes('name="follow_up_comment"'));

@@ -53,7 +53,7 @@ function rows() {
 	try {
 		return {
 			jobs: db.prepare('SELECT * FROM jobs ORDER BY id').all(),
-			updates: db.prepare('SELECT * FROM job_updates ORDER BY recorded_order').all()
+			updates: db.prepare('SELECT * FROM job_updates ORDER BY id').all()
 		};
 	} finally {
 		db.close();
@@ -95,7 +95,7 @@ test('populated round-trip preserves records, status, counts, insertion order an
 	assert.deepEqual(db.prepare('SELECT * FROM schema_migrations').all(), migrations);
 	db.close();
 	addJobUpdate({ job_id: job.id, event_type: 'offer', event_date: '2026-10-08' });
-	assert.ok(rows().updates.at(-1).recorded_order > before.updates.at(-1).recorded_order);
+	assert.ok(rows().updates.at(-1).id > before.updates.at(-1).id);
 });
 test('empty backup restores a healthy installation', () => {
 	const b = backups.createBackup();
@@ -217,7 +217,7 @@ test('extra triggers, invalid dates and orphaned relationships are rejected', ()
 	assert.throws(() => backups.importBackup(source), failure('invalid_backup'));
 	db = raw(source);
 	db.exec('PRAGMA foreign_keys=OFF');
-	db.prepare('UPDATE job_updates SET job_id=?').run('missing');
+	db.prepare('UPDATE job_updates SET job_id=?').run(99999);
 	db.close();
 	assert.throws(() => backups.importBackup(source), failure('invalid_backup'));
 });
@@ -298,6 +298,56 @@ function completed(child) {
 		);
 	});
 }
+test('concurrent numeric allocations have distinct IDs and one dataset identity', async () => {
+	const code = `import {createJob,addJobUpdate} from './src/lib/server/services.js';
+ import {createNetwork,addNetworkUpdate} from './src/lib/server/networks.js';
+ import {withDatabase} from './src/lib/server/database.js';
+ const job=createJob({job_title:'Concurrent',company_name:'Writer'});
+ const update=addJobUpdate({job_id:job.id,event_date:'2000-01-01',note:'Concurrent'});
+ const person=createNetwork({name:'Concurrent'});
+ const interaction=addNetworkUpdate({network_id:person.id,interaction_date:'2000-01-01',note:'Concurrent'});
+ console.log(JSON.stringify({job:job.id,update:update.id,person:person.id,interaction:interaction.id,dataset:withDatabase(db=>db.prepare('SELECT dataset_id FROM app_metadata').get().dataset_id)}));`;
+	const results = (
+		await Promise.all(Array.from({ length: 4 }, () => completed(childScript(code))))
+	).map(JSON.parse);
+	for (const key of ['job', 'update', 'person', 'interaction'])
+		assert.deepEqual(
+			results.map((row) => row[key]).sort((a, b) => a - b),
+			[1, 2, 3, 4]
+		);
+	assert.equal(new Set(results.map((row) => row.dataset)).size, 1);
+});
+test('restore preserves deleted allocation counters, dataset identity and stale counter guards', () => {
+	const first = createJob({ job_title: 'First', company_name: 'Example' });
+	const update = addJobUpdate({
+		job_id: first.id,
+		event_date: '2000-01-01',
+		note: 'Delete highest update'
+	});
+	const db = raw();
+	db.prepare('DELETE FROM job_updates WHERE id=?').run(update.id);
+	db.exec(
+		"UPDATE sqlite_sequence SET seq=20 WHERE name='jobs'; UPDATE sqlite_sequence SET seq=40 WHERE name='job_updates'"
+	);
+	const identity = db.prepare('SELECT dataset_id FROM app_metadata').get().dataset_id;
+	db.close();
+	const backup = backups.createBackup();
+	const stale = backups.prepareRestore(backup.backup_id);
+	const changed = raw();
+	changed.exec("UPDATE sqlite_sequence SET seq=30 WHERE name='jobs'");
+	changed.close();
+	assert.throws(() => backups.restoreBackup(stale.restore_id, true), failure('restore_stale'));
+	const preview = backups.prepareRestore(backup.backup_id);
+	backups.restoreBackup(preview.restore_id, true);
+	assert.equal(createJob({ job_title: 'After restore', company_name: 'Example' }).id, 31);
+	assert.equal(
+		addJobUpdate({ job_id: first.id, event_date: '2000-01-01', note: 'Next update' }).id,
+		41
+	);
+	const check = raw();
+	assert.equal(check.prepare('SELECT dataset_id FROM app_metadata').get().dataset_id, identity);
+	check.close();
+});
 test('two processes coordinate one scheduled backup and concurrent migrations', async () => {
 	backups.setBackupSettings({ enabled: true }, { now: 1000 });
 	const code =
@@ -468,6 +518,23 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n'
 		);
 		const listing = await request('tools/list', {});
+		for (const [tool, fields] of [
+			['get_job', ['job_id']],
+			['get_network', ['network_id']],
+			['link_job_network', ['job_id', 'network_id']],
+			['edit_network_update', ['network_id', 'update_id']]
+		]) {
+			const shape = listing.tools.find((entry) => entry.name === tool).inputSchema.properties;
+			for (const field of fields) assert.equal(shape[field].type, 'integer');
+		}
+		for (const [tool, input] of [
+			['get_job', { job_id: '1' }],
+			['get_network', { network_id: '1' }],
+			['get_job', { job_id: 1.5 }]
+		]) {
+			const invalid = await request('tools/call', { name: tool, arguments: input });
+			assert.equal(invalid.isError, true);
+		}
 		for (const name of [
 			'create_job',
 			'list_jobs',
@@ -498,6 +565,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			score: 7.5,
 			score_comment: 'Initial fit'
 		});
+		assert.equal(job.id, 1);
 		assert.equal(listing.tools.length, 40);
 		for (const name of [
 			'list_networks',

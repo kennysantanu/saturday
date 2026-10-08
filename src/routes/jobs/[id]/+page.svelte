@@ -41,9 +41,8 @@
 	import { UPDATE_CHOICES } from '$lib/status';
 
 	type JobUpdate = {
-		id: string;
+		id: number;
 		date: string;
-		recordedOrder: number;
 		eventType: string | null;
 		label: string;
 		note: string | null;
@@ -71,7 +70,7 @@
 	const upcoming = $derived(
 		updates
 			.filter((entry) => entry.date > data.today)
-			.sort((a, b) => a.date.localeCompare(b.date) || a.recordedOrder - b.recordedOrder)
+			.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id)
 	);
 	const history = $derived(updates.filter((entry) => entry.date <= data.today));
 	const canReopen = $derived(!job.isActive && job.status.label === 'Dismissed');
@@ -648,7 +647,7 @@
 				<legend class="mb-2 text-sm font-medium"
 					>Choose a person <span class="text-destructive" aria-hidden="true">*</span></legend
 				>
-				{#if data.selectedPerson && !data.personPicker?.networks.some((person: { id: string }) => person.id === data.selectedPerson.id)}
+				{#if data.selectedPerson && !data.personPicker?.networks.some((person: { id: number }) => person.id === data.selectedPerson.id)}
 					<RadioOption
 						name="network_id"
 						value={data.selectedPerson.id}
@@ -664,7 +663,7 @@
 						value={person.id}
 						required
 						disabled={data.linkedPersonIds.includes(person.id)}
-						checked={(values.network_id ?? data.selectedPerson?.id) === person.id}
+						checked={String(values.network_id ?? data.selectedPerson?.id) === String(person.id)}
 						label={person.name}
 						description={`${[person.role, person.organization].filter(Boolean).join(' · ')}${data.linkedPersonIds.includes(person.id) ? ' · Already linked' : ''}`}
 					/>

@@ -7,7 +7,7 @@
 	import { cn } from '$lib/utils.js';
 
 	type Entry = {
-		id: string;
+		id: number;
 		date: string;
 		eventType: string | null;
 		label: string;

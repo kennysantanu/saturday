@@ -503,7 +503,7 @@
 						value={job.id}
 						required
 						disabled={data.linkedIds.includes(job.id)}
-						checked={values.job_id === job.id}
+						checked={values.job_id === String(job.id)}
 						label={job.title}
 						description={`${job.company}${!job.isActive ? ' · Inactive' : ''}${data.linkedIds.includes(job.id) ? ' · Already linked' : ''}`}
 					/>

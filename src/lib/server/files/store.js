@@ -5,6 +5,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { getProjectRoot, withDatabase } from '../database.js';
+import { parseRecordId, recordIdInputSchema } from '../validation.js';
 import { fileType } from '../../file-types.js';
 import { storageCompatibility } from '../compatibility.js';
 
@@ -49,8 +50,9 @@ export function filename(value) {
 }
 export function scopePrefix(scope = 'documents', checkJob = true) {
 	if (scope === 'documents') return 'documents';
-	if (typeof scope !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(scope))
-		reject('VALIDATION', 'Choose documents or a valid job ID.');
+	const parsed = recordIdInputSchema.safeParse(scope);
+	if (!parsed.success) reject('VALIDATION', 'Choose documents or a positive numeric job ID.');
+	scope = parsed.data;
 	if (checkJob && !withDatabase((db) => db.prepare('SELECT id FROM jobs WHERE id=?').get(scope)))
 		reject('NOT_FOUND', 'Job not found. Use Settings to recover unmatched attachments.');
 	return `jobs/${scope}`;
@@ -462,7 +464,9 @@ export function info(d, m) {
 		updated_at: d.updated_at,
 		token: d.token,
 		filename: basename(d.key),
-		scope: d.key.startsWith('documents/') ? 'documents' : d.key.split('/')[1],
+		scope: d.key.startsWith('documents/')
+			? 'documents'
+			: parseRecordId(d.key.split('/')[1], 'job_id'),
 		designation: m.designations.master_cv === d.id ? 'master_cv' : null,
 		format: kind.type,
 		can_read_text: kind.text && d.size <= TEXT_LIMIT,
