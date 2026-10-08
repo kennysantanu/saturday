@@ -175,7 +175,7 @@ test('pagination counts and status filtering work beyond 100 records and use sta
 			'INSERT INTO job_updates (id,job_id,event_type,event_date,created_via,created_at,updated_at) VALUES (?,?,?,?,?,?,?)'
 		);
 		for (let i = 0; i < 125; i++) {
-			const id = `job-${String(i).padStart(3, '0')}`;
+			const id = i + 1;
 			insert.run(
 				id,
 				'Engineer',
@@ -186,7 +186,7 @@ test('pagination counts and status filtering work beyond 100 records and use sta
 			);
 			if (i >= 110)
 				history.run(
-					`u-${i}`,
+					i + 1,
 					id,
 					'offer',
 					'2026-10-01',
@@ -205,7 +205,7 @@ test('pagination counts and status filtering work beyond 100 records and use sta
 	assert.equal(new Set(pages.flatMap((result) => result.jobs.map((job) => job.id))).size, 125);
 	assert.equal(searchJobs({ page: 999 }).page, 3);
 	assert.equal(searchJobs({ status: ['offer'] }).total, 15);
-	assert.equal(searchJobs({ status: ['offer'], limit: 5, page: 3 }).jobs[0].id, 'job-120');
+	assert.equal(searchJobs({ status: ['offer'], limit: 5, page: 3 }).jobs[0].id, 121);
 	assert.equal(listJobs().length, 100);
 });
 

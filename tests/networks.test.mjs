@@ -4,7 +4,6 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
-import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { filePaths } from '../src/lib/server/files/store.js';
@@ -44,7 +43,7 @@ function contents() {
 				table,
 				db
 					.prepare(
-						`SELECT * FROM ${table} ORDER BY ${table === 'job_networks' ? 'job_id, network_id' : table === 'network_updates' ? 'recorded_order' : 'id'}`
+						`SELECT * FROM ${table} ORDER BY ${table === 'job_networks' ? 'job_id, network_id' : 'id'}`
 					)
 					.all()
 			])
@@ -87,7 +86,7 @@ test('name-only creation, strict validation, partial edits and optional clearing
 	])
 		invalid(() => n.editNetwork(person.id, patch));
 	invalid(() => n.editNetwork(person.id, {}));
-	notFound(() => n.getNetwork(randomUUID()));
+	notFound(() => n.getNetwork(99999));
 	invalid(() => n.createNetwork({ name: 'Alex' }, 'browser'));
 });
 
@@ -114,7 +113,7 @@ test('literal AND fields, OR query, missing values and scoped jobs filter before
 	assert.equal(n.listNetworks({ job_id: j.id }).networks[0].job_link.job_id, j.id);
 	assert.equal(n.listNetworks({ organization: 'acme' }).total, 2);
 	assert.ok(c.id);
-	notFound(() => n.listNetworks({ job_id: 'missing' }));
+	notFound(() => n.listNetworks({ job_id: 99999 }));
 	for (const input of [
 		{ page: 0 },
 		{ page: 'x' },
@@ -225,7 +224,7 @@ test('many-to-many links are retry safe, scoped notes never change parents, inac
 	assert.equal(n.unlinkJobNetwork({ job_id: j.id, network_id: a.id }).removed, true);
 	assert.equal(n.unlinkJobNetwork({ job_id: j.id, network_id: a.id }).removed, false);
 	notFound(() => n.editJobNetwork({ job_id: j.id, network_id: a.id, notes: null }));
-	notFound(() => n.linkJobNetwork({ job_id: 'missing', network_id: a.id }));
+	notFound(() => n.linkJobNetwork({ job_id: 99999, network_id: a.id }));
 	assert.deepEqual(n.getNetwork(a.id), beforePerson);
 	assert.deepEqual(getJob(j.id), beforeJob);
 	assert.deepEqual(n.networkLinkIds({ network_id: a.id }), [other.id]);
@@ -330,7 +329,7 @@ function populated() {
 	);
 	return { person, j, entry };
 }
-test('schema-3 recovery preserves all identities, timestamps, notes, summaries and counts', () => {
+test('numeric baseline recovery preserves all identities, timestamps, notes, summaries and counts', () => {
 	const { person, j } = populated();
 	const before = contents();
 	const backup = b.createBackup();
@@ -377,35 +376,26 @@ test('all same-count Network mutations invalidate a restore preview', () => {
 		);
 	}
 });
-test('historical schema 1/2 backups upgrade in staging and clear Network with complete recovery', () => {
-	for (const version of [1, 2]) {
-		const legacy = join(scratch, `legacy-${version}.sqlite`),
-			db = new DatabaseSync(legacy);
-		applyMigrations(db, version);
-		db.prepare(
-			'INSERT INTO jobs (id,job_title,company_name,created_via,created_at,updated_at) VALUES (?,?,?,?,?,?)'
-		).run(
-			'legacy',
-			'Legacy',
-			'Example',
-			'manual',
-			'2000-01-01T00:00:00.000Z',
-			'2000-01-01T00:00:00.000Z'
-		);
-		db.close();
-		const bytes = readFileSync(legacy);
-		const person = n.createNetwork({ name: `Version ${version}` });
-		const imported = b.importBackup(legacy);
-		assert.equal(imported.network_count, 0);
-		const preview = b.prepareRestore(imported.backup_id);
-		assert.equal(preview.incoming.schema_version, schemaVersion);
-		assert.match(preview.warning, /Network/);
-		const result = b.restoreBackup(preview.restore_id, true);
-		assert.equal(n.listNetworks().total, 0);
-		assert.ok(getJob('legacy'));
-		assert.equal(b.inspectBackup(result.recovery_backup_id).network_count, 1);
-		assert.deepEqual(readFileSync(legacy), bytes);
-		notFound(() => n.getNetwork(person.id));
+test('people and interactions have independent numeric allocation and strict ID validation', () => {
+	const person = n.createNetwork({ name: 'First' });
+	assert.equal(person.id, 1);
+	assert.equal(job().id, 1);
+	const update = n.addNetworkUpdate({
+		network_id: '1',
+		interaction_date: '2000-01-01',
+		note: 'First'
+	});
+	assert.equal(update.id, 1);
+	n.deleteNetworkUpdate({ network_id: '1', update_id: '1', confirm: true });
+	assert.equal(
+		n.addNetworkUpdate({ network_id: person.id, interaction_date: '1999-01-01', note: 'Next' }).id,
+		2
+	);
+	for (const id of ['01', '1x', '1e0', '1.0', ' 1', 0, -1, Infinity, 'uuid']) {
+		invalid(() => n.getNetwork(id));
+		invalid(() => n.listNetworks({ job_id: id }));
+		invalid(() => n.networkLinkIds({ job_id: id }));
+		invalid(() => n.editNetworkUpdate({ network_id: 1, update_id: id, note: 'Invalid' }));
 	}
 });
 test('malformed/orphan Network backups fail without touching live records', () => {
@@ -417,7 +407,7 @@ test('malformed/orphan Network backups fail without touching live records', () =
 		"UPDATE job_networks SET network_id='missing'",
 		"UPDATE job_networks SET notes='" + 'x'.repeat(2001) + "'",
 		"UPDATE network_updates SET interaction_date='bad'",
-		"UPDATE network_updates SET id='invalid'",
+		'UPDATE network_updates SET id=-1',
 		"UPDATE network_updates SET updated_at='invalid'",
 		'CREATE TABLE surprise (id TEXT)'
 	]) {
@@ -425,6 +415,7 @@ test('malformed/orphan Network backups fail without touching live records', () =
 		const path = b.getBackupFile(backup.backup_id).path;
 		const db = new DatabaseSync(path);
 		db.exec('PRAGMA foreign_keys=OFF');
+		db.exec('PRAGMA ignore_check_constraints=ON');
 		db.exec(sql);
 		db.close();
 		assert.throws(

@@ -34,7 +34,13 @@ function actionError(error, values, action) {
 }
 
 export async function load({ params, url }) {
-	const job = getJob(params.id);
+	let job;
+	try {
+		job = getJob(params.id);
+	} catch (e) {
+		if (e instanceof ValidationError) error(404, 'Job not found');
+		throw e;
+	}
 	if (!job) error(404, 'Job not found');
 	let documents = [],
 		documentCount = 0,

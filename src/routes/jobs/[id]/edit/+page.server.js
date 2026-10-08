@@ -2,7 +2,13 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { editJob, getJob, ServiceError, ValidationError } from '$lib/server/services.js';
 
 export function load({ params }) {
-	const job = getJob(params.id);
+	let job;
+	try {
+		job = getJob(params.id);
+	} catch (e) {
+		if (e instanceof ValidationError) error(404, 'Job not found');
+		throw e;
+	}
 	if (!job) error(404, 'Job not found');
 	return { job };
 }

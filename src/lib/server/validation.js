@@ -25,6 +25,20 @@ export class ServiceError extends Error {
 	}
 }
 
+// Strict numeric schema for MCP; canonical form/route strings are parsed only at service boundaries.
+export const recordIdSchema = z
+	.number()
+	.int()
+	.min(1, 'Choose a saved record.')
+	.max(Number.MAX_SAFE_INTEGER, 'Record ID is too large.');
+export const recordIdInputSchema = z.preprocess(
+	(value) => (typeof value === 'string' && /^[1-9]\d*$/.test(value) ? Number(value) : value),
+	recordIdSchema
+);
+export function parseRecordId(value, field = 'id') {
+	return parseSchema(z.object({ [field]: recordIdInputSchema }), { [field]: value })[field];
+}
+
 const optionalText = (max, label) =>
 	z
 		.preprocess(
@@ -96,18 +110,8 @@ export const jobInputShape = Object.fromEntries(
 export const assessmentSchema = z.object(
 	Object.fromEntries(assessmentJobFields.map((field) => [field.name, jobFieldSchema(field)]))
 );
-export function parseAssessment(input, version = Infinity) {
-	const schema =
-		version === Infinity
-			? assessmentSchema
-			: z.object(
-					Object.fromEntries(
-						assessmentJobFields
-							.filter((field) => field.since <= version)
-							.map((field) => [field.name, jobFieldSchema(field)])
-					)
-				);
-	return parseSchema(schema, input);
+export function parseAssessment(input) {
+	return parseSchema(assessmentSchema, input);
 }
 const jobInputSchema = z.object(jobInputShape).superRefine((value, ctx) => {
 	for (const field of editableJobFields) {
@@ -144,7 +148,7 @@ const ordinaryEventTypes = [
 
 const updateSchema = z
 	.object({
-		job_id: z.string().trim().min(1, 'Choose a job.'),
+		job_id: recordIdInputSchema,
 		event_type: z
 			.enum(ordinaryEventTypes)
 			.nullable()
@@ -319,7 +323,7 @@ export const networkInputSchema = z.object(networkInputShape).superRefine((value
 			message: 'Schedule a follow-up date first.'
 		});
 });
-export const networkIdSchema = z.string().uuid('Choose a saved person.');
+export const networkIdSchema = recordIdInputSchema;
 export const networkPaginationShape = {
 	page: integer(1, Number.MAX_SAFE_INTEGER),
 	limit: integer(50, 100)
@@ -329,13 +333,13 @@ export const networkSearchShape = {
 	name: text,
 	role: text,
 	organization: text,
-	job_id: z.string().trim().min(1).optional(),
+	job_id: recordIdInputSchema.optional(),
 	follow_up: z.enum(['all', 'overdue', 'today', 'upcoming', 'not_scheduled']).default('all'),
 	sort: z.enum(['name', 'follow_up', 'latest_interaction']).default('name'),
 	...networkPaginationShape
 };
 export const networkLinkShape = {
-	job_id: z.string().trim().min(1, 'Choose a saved job.'),
+	job_id: recordIdInputSchema,
 	network_id: networkIdSchema,
 	notes: optionalText(2000, 'Relationship note')
 };

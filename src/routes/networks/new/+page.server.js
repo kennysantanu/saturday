@@ -2,9 +2,18 @@ import { fail, redirect } from '@sveltejs/kit';
 import { createNetwork } from '$lib/server/networks.js';
 import { getJob } from '$lib/server/services.js';
 import { ValidationError, ServiceError } from '$lib/server/validation.js';
+function findJob(id) {
+	if (!id) return null;
+	try {
+		return getJob(id);
+	} catch (e) {
+		if (e instanceof ValidationError) return null;
+		throw e;
+	}
+}
 export function load({ url }) {
 	const jobId = url.searchParams.get('job_id');
-	const job = jobId ? getJob(jobId) : null;
+	const job = findJob(jobId);
 	return {
 		job: job ? { id: job.id, title: job.title, company: job.company } : null,
 		missingJob: !!jobId && !job
@@ -31,7 +40,7 @@ export const actions = {
 			});
 		}
 		const jobId = url.searchParams.get('job_id');
-		if (jobId && getJob(jobId))
+		if (jobId && findJob(jobId))
 			redirect(
 				303,
 				`/jobs/${encodeURIComponent(jobId)}?link_person=1&person=${person.id}&saved=person`

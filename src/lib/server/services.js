@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import {
 	editableJobFields,
 	assessmentJobFields,
@@ -10,6 +9,7 @@ import { EVENT_LABELS } from '../event-labels.js';
 import { inTransaction, withDatabase } from './database.js';
 import {
 	jobSearchSchema,
+	parseRecordId,
 	parseSchema,
 	parseAssessment,
 	parseEventDate,
@@ -35,8 +35,8 @@ function shortDate(isoDate) {
 function readUpdates(db, jobId) {
 	return db
 		.prepare(
-			`SELECT recorded_order, id, job_id, event_type, event_date, note, created_via, created_at, updated_at
-			 FROM job_updates WHERE job_id = ? ORDER BY event_date DESC, recorded_order DESC`
+			`SELECT id, job_id, event_type, event_date, note, created_via, created_at, updated_at
+			 FROM job_updates WHERE job_id = ? ORDER BY event_date DESC, id DESC`
 		)
 		.all(jobId)
 		.map(updateFromRow);
@@ -44,7 +44,6 @@ function readUpdates(db, jobId) {
 
 function updateFromRow(row) {
 	return {
-		recordedOrder: Number(row.recorded_order),
 		id: row.id,
 		jobId: row.job_id,
 		eventType: row.event_type,
@@ -60,7 +59,7 @@ function updateFromRow(row) {
 function statusFor(isActive, updates) {
 	const stateHistory = [...updates]
 		.filter((update) => stateEvents.has(update.eventType))
-		.sort((a, b) => a.recordedOrder - b.recordedOrder);
+		.sort((a, b) => a.id - b.id);
 	let latestState = null;
 	for (const update of stateHistory) latestState = update.eventType;
 
@@ -93,16 +92,18 @@ function jobFromRow(row, updates = []) {
 }
 
 function getJobRow(db, id) {
+	id = parseRecordId(id, 'job_id');
 	return db.prepare('SELECT * FROM jobs WHERE id = ?').get(id);
 }
 
 function eventUpdate(db, { jobId, eventType, eventDate, note = null, createdVia }) {
 	const now = timestamp();
-	const id = randomUUID();
-	db.prepare(
-		`INSERT INTO job_updates (id, job_id, event_type, event_date, note, created_via, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-	).run(id, jobId, eventType, eventDate, note, createdVia, now, now);
+	const { lastInsertRowid: id } = db
+		.prepare(
+			`INSERT INTO job_updates (job_id, event_type, event_date, note, created_via, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`
+		)
+		.run(jobId, eventType, eventDate, note, createdVia, now, now);
 	if (eventType === 'accepted' || eventType === 'rejected' || eventType === 'dismissed') {
 		db.prepare('UPDATE jobs SET updated_at = ?, is_active = 0 WHERE id = ?').run(now, jobId);
 	} else if (eventType === 'reopened') {
@@ -118,7 +119,7 @@ function replayActive(db, jobId) {
 		.prepare(
 			`SELECT event_type FROM job_updates
 			 WHERE job_id = ? AND event_type IN ('dismissed', 'reopened', 'accepted', 'rejected')
-			 ORDER BY recorded_order`
+			 ORDER BY id`
 		)
 		.all(jobId);
 	let isActive = true;
@@ -135,7 +136,6 @@ export function createJob(input, createdVia = 'manual') {
 	return withDatabase((db) =>
 		inTransaction(db, () => {
 			const now = timestamp();
-			const id = randomUUID();
 			const assessment =
 				createdVia === 'mcp'
 					? parseAssessment({
@@ -146,16 +146,21 @@ export function createJob(input, createdVia = 'manual') {
 			const record = {
 				...values,
 				...assessment,
-				id,
 				is_active: true,
 				created_via: createdVia,
 				created_at: now,
 				updated_at: now
 			};
-			const columns = jobColumns();
-			db.prepare(
-				`INSERT INTO jobs (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`
-			).run(...jobToStorage(record));
+			const fields = jobColumns().filter((name) => name !== 'id');
+			const { lastInsertRowid: id } = db
+				.prepare(
+					`INSERT INTO jobs (${fields.join(',')}) VALUES (${fields.map(() => '?').join(',')})`
+				)
+				.run(
+					...fields.map((name) =>
+						typeof record[name] === 'boolean' ? Number(record[name]) : record[name]
+					)
+				);
 
 			return jobFromRow(getJobRow(db, id));
 		})
@@ -168,6 +173,7 @@ function saveJobFields(db, id, values, fields) {
 	).run(...jobToStorage(values, fields), timestamp(), id);
 }
 export function editJob(id, input) {
+	id = parseRecordId(id, 'job_id');
 	return withDatabase((db) =>
 		inTransaction(db, () => {
 			const existing = getJobRow(db, id);
@@ -194,6 +200,7 @@ export function editJob(id, input) {
 
 // Assessment writes are exposed through MCP only; normal job editing never changes them.
 export function setJobScore(id, input) {
+	id = parseRecordId(id, 'job_id');
 	const values = parseAssessment(input);
 	return withDatabase((db) =>
 		inTransaction(db, () => {
@@ -211,6 +218,7 @@ export function setJobStarred(id, starred) {
 }
 
 export function getJob(id) {
+	id = parseRecordId(id, 'job_id');
 	return withDatabase((db) => {
 		const row = getJobRow(db, id);
 		if (!row) return null;
@@ -262,7 +270,7 @@ export function listJobs({
 			.all(...args, safeLimit);
 		return rows.map((row) => {
 			const updates = readUpdates(db, row.id);
-			const latest = [...updates].sort((a, b) => b.recordedOrder - a.recordedOrder)[0];
+			const latest = [...updates].sort((a, b) => b.id - a.id)[0];
 			const job = jobFromRow(row, updates);
 			return {
 				...job,
@@ -379,7 +387,7 @@ export function searchJobs(input = {}) {
 		const histories = new Map();
 		for (const row of db
 			.prepare(
-				`SELECT u.* FROM job_updates u JOIN jobs j ON j.id = u.job_id ${where} ORDER BY u.event_date DESC, u.recorded_order DESC`
+				`SELECT u.* FROM job_updates u JOIN jobs j ON j.id = u.job_id ${where} ORDER BY u.event_date DESC, u.id DESC`
 			)
 			.all(...args)) {
 			if (!histories.has(row.job_id)) histories.set(row.job_id, []);
@@ -395,7 +403,7 @@ export function searchJobs(input = {}) {
 		const page = Math.min(filters.page, totalPages);
 		const jobs = matches.slice((page - 1) * filters.limit, page * filters.limit).map((job) => {
 			const latest = job.updates.reduce(
-				(last, update) => (!last || update.recordedOrder > last.recordedOrder ? update : last),
+				(last, update) => (!last || update.id > last.id ? update : last),
 				null
 			);
 			return {
@@ -450,6 +458,7 @@ export function addJobUpdate(input, createdVia = 'manual') {
 }
 
 export function correctJobUpdate(id, correction = {}) {
+	id = parseRecordId(id, 'update_id');
 	return withDatabase((db) =>
 		inTransaction(db, () => {
 			const existing = db.prepare('SELECT * FROM job_updates WHERE id = ?').get(id);
@@ -490,6 +499,8 @@ export function dismissJob(
 	eventDate = new Date().toISOString().slice(0, 10),
 	createdVia = 'manual'
 ) {
+	id = parseRecordId(id, 'job_id');
+	if (!['manual', 'mcp'].includes(createdVia)) throw new ServiceError('Unknown record source.');
 	const date = parseEventDate(eventDate);
 	return withDatabase((db) =>
 		inTransaction(db, () => {
@@ -507,6 +518,8 @@ export function reopenJob(
 	eventDate = new Date().toISOString().slice(0, 10),
 	createdVia = 'manual'
 ) {
+	id = parseRecordId(id, 'job_id');
+	if (!['manual', 'mcp'].includes(createdVia)) throw new ServiceError('Unknown record source.');
 	const date = parseEventDate(eventDate);
 	return withDatabase((db) =>
 		inTransaction(db, () => {
@@ -515,7 +528,7 @@ export function reopenJob(
 			if (job.is_active) throw new ServiceError('This job is already active.');
 			const lastState = db
 				.prepare(
-					"SELECT event_type FROM job_updates WHERE job_id = ? AND event_type IN ('accepted', 'rejected', 'dismissed', 'reopened') ORDER BY recorded_order DESC LIMIT 1"
+					"SELECT event_type FROM job_updates WHERE job_id = ? AND event_type IN ('accepted', 'rejected', 'dismissed', 'reopened') ORDER BY id DESC LIMIT 1"
 				)
 				.get(id)?.event_type;
 			if (lastState !== 'dismissed') {
@@ -559,7 +572,7 @@ export function getDashboardStats({ today = new Date().toISOString().slice(0, 10
 				`SELECT u.id, u.job_id, u.event_type, u.event_date, j.job_title, j.company_name
 				 FROM job_updates u JOIN jobs j ON j.id = u.job_id
 				 WHERE u.event_date > ? AND j.is_active = 1
-				 ORDER BY u.event_date ASC, u.recorded_order ASC LIMIT 5`
+				 ORDER BY u.event_date ASC, u.id ASC LIMIT 5`
 			)
 			.all(today)
 			.map((row) => ({

@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { withDatabase, inTransaction } from './database.js';
 import {
@@ -8,6 +7,8 @@ import {
 	networkInputSchema,
 	networkInputShape,
 	networkIdSchema,
+	parseRecordId,
+	recordIdInputSchema,
 	networkSearchShape,
 	networkPaginationShape,
 	networkLinkShape,
@@ -21,7 +22,7 @@ const missing = (label) => {
 	throw new ServiceError(`${label} was not found.`, 'not_found');
 };
 function person(db, id) {
-	parseSchema(z.object({ network_id: networkIdSchema }), { network_id: id });
+	id = parseRecordId(id, 'network_id');
 	return db.prepare(`${summary} WHERE n.id=?`).get(id) ?? missing('Person');
 }
 function parents(db, input) {
@@ -131,13 +132,12 @@ export function createNetwork(input, createdVia = 'manual') {
 	const values = parseSchema(networkInputSchema, input),
 		created_via = origin(createdVia);
 	return write((db) => {
-		const id = randomUUID(),
-			timestamp = new Date().toISOString();
-		const record = { id, ...values, created_via, created_at: timestamp, updated_at: timestamp };
+		const timestamp = new Date().toISOString();
+		const record = { ...values, created_via, created_at: timestamp, updated_at: timestamp };
 		const keys = Object.keys(record);
-		db.prepare(
-			`INSERT INTO networks (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`
-		).run(...Object.values(record));
+		const { lastInsertRowid: id } = db
+			.prepare(`INSERT INTO networks (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`)
+			.run(...Object.values(record));
 		return person(db, id);
 	});
 }
@@ -265,6 +265,8 @@ export function unlinkJobNetwork(input) {
 }
 // One batched lookup lets pickers disable existing links beyond the displayed page.
 export function networkLinkIds({ job_id, network_id }) {
+	if (job_id !== undefined) job_id = parseRecordId(job_id, 'job_id');
+	else network_id = parseRecordId(network_id, 'network_id');
 	return read((db) => {
 		if (job_id) {
 			if (!db.prepare('SELECT id FROM jobs WHERE id=?').get(job_id)) missing('Job');
@@ -300,7 +302,7 @@ export function listNetworkUpdates(input) {
 			'SELECT COUNT(*) AS total FROM network_updates' + clause,
 			args,
 			values,
-			'interaction_date DESC, recorded_order DESC'
+			'interaction_date DESC, id DESC'
 		);
 		return { updates: rows, ...pagination };
 	});
@@ -310,24 +312,27 @@ export function addNetworkUpdate(input, createdVia = 'manual') {
 		created_via = origin(createdVia);
 	return write((db) => {
 		person(db, values.network_id);
-		const id = randomUUID(),
-			timestamp = new Date().toISOString();
-		db.prepare(
-			'INSERT INTO network_updates (id,network_id,interaction_date,note,created_via,created_at,updated_at) VALUES (?,?,?,?,?,?,?)'
-		).run(
-			id,
-			values.network_id,
-			values.interaction_date,
-			values.note,
-			created_via,
-			timestamp,
-			timestamp
-		);
+		const timestamp = new Date().toISOString();
+		const { lastInsertRowid: id } = db
+			.prepare(
+				'INSERT INTO network_updates (network_id,interaction_date,note,created_via,created_at,updated_at) VALUES (?,?,?,?,?,?)'
+			)
+			.run(
+				values.network_id,
+				values.interaction_date,
+				values.note,
+				created_via,
+				timestamp,
+				timestamp
+			);
 		return db.prepare('SELECT * FROM network_updates WHERE id=?').get(id);
 	});
 }
 function update(db, input) {
-	parseSchema(z.object({ network_id: networkIdSchema, update_id: z.string().uuid() }), input);
+	input = parseSchema(
+		z.object({ network_id: networkIdSchema, update_id: recordIdInputSchema }),
+		input
+	);
 	person(db, input.network_id);
 	return (
 		db

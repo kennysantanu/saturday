@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
 	networkInputSchema,
 	networkIdSchema,
+	recordIdSchema,
 	networkLinkShape,
 	networkUpdateShape,
 	parseSchema
@@ -48,7 +49,6 @@ const defaults = {
 };
 const columns = {
 	job_updates: [
-		'recorded_order',
 		'id',
 		'job_id',
 		'event_type',
@@ -171,96 +171,98 @@ function connect(path, readOnly = true) {
 function databaseVersion(db) {
 	return Number(db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version);
 }
-function columnsFor(version) {
+function columnsFor() {
 	return {
-		jobs: jobColumns(version),
+		app_metadata: ['id', 'format', 'dataset_id'],
+		jobs: jobColumns(),
 		...columns,
-		...(version >= 3
-			? {
-					networks: [
-						'id',
-						'name',
-						'role',
-						'organization',
-						'phone',
-						'email',
-						'link',
-						'notes',
-						'follow_up_date',
-						'follow_up_comment',
-						'created_via',
-						'created_at',
-						'updated_at'
-					],
-					job_networks: [
-						'job_id',
-						'network_id',
-						'notes',
-						'created_via',
-						'created_at',
-						'updated_at'
-					],
-					network_updates: [
-						'recorded_order',
-						'id',
-						'network_id',
-						'interaction_date',
-						'note',
-						'created_via',
-						'created_at',
-						'updated_at'
-					]
-				}
-			: {})
+		networks: [
+			'id',
+			'name',
+			'role',
+			'organization',
+			'phone',
+			'email',
+			'link',
+			'notes',
+			'follow_up_date',
+			'follow_up_comment',
+			'created_via',
+			'created_at',
+			'updated_at'
+		],
+		job_networks: ['job_id', 'network_id', 'notes', 'created_via', 'created_at', 'updated_at'],
+		network_updates: [
+			'id',
+			'network_id',
+			'interaction_date',
+			'note',
+			'created_via',
+			'created_at',
+			'updated_at'
+		]
 	};
 }
-function dataset(db) {
+const allocatedTables = ['jobs', 'job_updates', 'networks', 'network_updates'];
+function allocatorState(db) {
+	const rows = db.prepare('SELECT name, seq FROM sqlite_sequence ORDER BY name').all();
+	const seen = new Set();
+	for (const row of rows) {
+		if (
+			!allocatedTables.includes(row.name) ||
+			seen.has(row.name) ||
+			!Number.isSafeInteger(row.seq) ||
+			row.seq < 0
+		)
+			fail('invalid_backup', 'Invalid record ID allocation state.');
+		seen.add(row.name);
+	}
 	return Object.fromEntries(
-		Object.entries(columnsFor(databaseVersion(db))).map(([table, fields]) => [
-			table,
-			db
-				.prepare(
-					`SELECT ${fields.join(',')} FROM ${table} ORDER BY ${{ jobs: 'id', job_updates: 'recorded_order', networks: 'id', job_networks: 'job_id, network_id', network_updates: 'recorded_order' }[table]}`
-				)
-				.all()
-		])
+		allocatedTables.map((table) => {
+			const seq = rows.find((row) => row.name === table)?.seq ?? 0;
+			const maximum = db.prepare(`SELECT MAX(id) AS maximum FROM ${table}`).get().maximum ?? 0;
+			if (seq < maximum)
+				fail('invalid_backup', 'Record ID allocation state is behind stored records.');
+			return [table, seq];
+		})
 	);
+}
+function dataset(db) {
+	return {
+		...Object.fromEntries(
+			Object.entries(columnsFor()).map(([table, fields]) => [
+				table,
+				db
+					.prepare(
+						`SELECT ${fields.join(',')} FROM ${table} ORDER BY ${table === 'job_networks' ? 'job_id, network_id' : 'id'}`
+					)
+					.all()
+			])
+		),
+		$sequence: allocatorState(db)
+	};
 }
 function dataHash(db) {
 	return createHash('sha256')
-		.update(JSON.stringify(dataset(db)))
+		.update(
+			JSON.stringify(
+				Object.fromEntries(Object.entries(dataset(db)).filter(([key]) => key !== '$sequence'))
+			)
+		)
 		.digest('hex');
 }
 function fingerprint(db) {
 	return createHash('sha256')
 		.update(dataHash(db))
+		.update(JSON.stringify(allocatorState(db)))
 		.update(JSON.stringify(db.prepare('SELECT * FROM schema_migrations ORDER BY version').all()))
 		.digest('hex');
-}
-const expected = new Map();
-function signature(db) {
-	return db
-		.prepare(
-			"SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
-		)
-		.all()
-		.map((row) => ({ ...row, sql: row.sql?.replace(/\s+/g, '').replace(/IFNOTEXISTS/gi, '') }));
-}
-function expectedSchema(version) {
-	if (!expected.has(version)) {
-		const db = new DatabaseSync(':memory:');
-		try {
-			applyMigrations(db, version);
-			expected.set(version, signature(db));
-		} finally {
-			db.close();
-		}
-	}
-	return expected.get(version);
 }
 function summary(db) {
 	return {
 		schema_version: databaseVersion(db),
+		database_format: db.prepare('SELECT format FROM app_metadata WHERE id=1').get().format,
+		dataset_id: db.prepare('SELECT dataset_id FROM app_metadata WHERE id=1').get().dataset_id,
 		job_count: Number(db.prepare('SELECT COUNT(*) AS n FROM jobs').get().n),
 		update_count: Number(db.prepare('SELECT COUNT(*) AS n FROM job_updates').get().n),
 		...Object.fromEntries(
@@ -270,15 +272,19 @@ function summary(db) {
 				network_update_count: 'network_updates'
 			}).map(([key, table]) => [
 				key,
-				databaseVersion(db) >= 3
-					? Number(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n)
-					: 0
+				Number(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n)
 			])
 		)
 	};
 }
 function validateSchema(db) {
 	try {
+		if (
+			!db
+				.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name='schema_migrations'")
+				.get()
+		)
+			fail('invalid_backup', 'The file is not a Saturday database.');
 		assertMigrationHistory(db);
 		const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all();
 		if (
@@ -289,8 +295,6 @@ function validateSchema(db) {
 				'unsupported_schema',
 				'This backup schema is not supported by this version of Saturday.'
 			);
-		if (JSON.stringify(signature(db)) !== JSON.stringify(expectedSchema(versions.length)))
-			fail('unsupported_schema', 'The file does not have the expected Saturday schema.');
 	} catch (error) {
 		if (error instanceof BackupError) throw error;
 		if (String(error.message).includes('Unsupported database schema'))
@@ -308,31 +312,25 @@ function validate(db) {
 			fail('invalid_backup', 'The backup failed database integrity or relationship checks.');
 		const data = dataset(db);
 		const active = new Map();
-		const version = databaseVersion(db);
 		for (const job of data.jobs) {
-			if (typeof job.id !== 'string' || !job.id) throw new Error('job');
+			parseSchema(recordIdSchema, job.id);
 			parseJobInput({
 				...job,
 				...Object.fromEntries(
 					jobFields
-						.filter((field) => field.type === 'boolean' && field.since <= version)
+						.filter((field) => field.type === 'boolean')
 						.map((field) => [field.name, Boolean(job[field.name])])
 				)
 			});
-			for (const field of jobFields.filter(
-				(field) => field.type === 'boolean' && field.since <= version
-			)) {
+			for (const field of jobFields.filter((field) => field.type === 'boolean')) {
 				if (![0, 1].includes(job[field.name])) throw new Error('boolean');
 			}
-			parseAssessment(job, version);
+			parseAssessment(job);
 			active.set(job.id, true);
 		}
 		for (const update of data.job_updates) {
 			if (
-				!Number.isSafeInteger(update.recorded_order) ||
-				update.recorded_order < 1 ||
-				typeof update.id !== 'string' ||
-				!update.id ||
+				!recordIdSchema.safeParse(update.id).success ||
 				!active.has(update.job_id) ||
 				!validDate(update.event_date)
 			)
@@ -361,10 +359,10 @@ function validate(db) {
 				z.object({ ...networkUpdateShape, interaction_date: z.string().refine(validDate) }),
 				row
 			);
-			if (!Number.isSafeInteger(row.recorded_order) || row.recorded_order < 1)
-				throw new Error('recorded_order');
 		}
-		for (const row of Object.values(data).flat()) {
+		for (const row of Object.entries(data)
+			.filter(([table]) => !['app_metadata', '$sequence'].includes(table))
+			.flatMap(([, rows]) => rows)) {
 			if (
 				!['manual', 'mcp'].includes(row.created_via) ||
 				!['created_at', 'updated_at'].every(
@@ -529,13 +527,22 @@ function locked(operation, validateRecords = true) {
 		db.close();
 	}
 }
-function insertData(db, data) {
-	for (const [table, fields] of Object.entries(columnsFor(databaseVersion(db)))) {
+function insertData(db, data, preserveCounters = false) {
+	const sameDataset =
+		db.prepare('SELECT dataset_id FROM app_metadata WHERE id=1').get()?.dataset_id ===
+		data.app_metadata[0].dataset_id;
+	const previous = preserveCounters && sameDataset ? allocatorState(db) : {};
+	db.exec('DELETE FROM app_metadata');
+	for (const [table, fields] of Object.entries(columnsFor())) {
 		const statement = db.prepare(
 			`INSERT INTO ${table} (${fields.join(',')}) VALUES (${fields.map(() => '?').join(',')})`
 		);
 		for (const row of data[table]) statement.run(...fields.map((key) => row[key]));
 	}
+	db.exec('DELETE FROM sqlite_sequence');
+	const sequence = db.prepare('INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)');
+	for (const table of allocatedTables)
+		sequence.run(table, Math.max(data.$sequence[table], previous[table] ?? 0));
 }
 function cleanup(now) {
 	const p = storage();
@@ -569,7 +576,6 @@ export function prepareRestore(backupId, { now = Date.now() } = {}) {
 				stage = connect(stagePath, false);
 				applyMigrations(stage, databaseVersion(incoming));
 				inTransaction(stage, () => insertData(stage, dataset(incoming)));
-				applyMigrations(stage);
 				const incomingSummary = validate(stage);
 				const unmatchedJobFolders = fileFolderImpact(stage);
 				stage.close();
@@ -585,7 +591,7 @@ export function prepareRestore(backupId, { now = Date.now() } = {}) {
 					incoming: incomingSummary,
 					requires_confirmation: true,
 					warning:
-						'Restoring replaces all current jobs, people, relationships and history. Older backups clear Network data. A complete recovery backup will be created first.'
+						'Restoring replaces all current jobs, people, relationships and history. A complete recovery backup will be created first.'
 				};
 				atomicJSON(join(p.restore, `${restoreId}.json`), {
 					...preview,
@@ -644,7 +650,7 @@ export function restoreBackup(restoreId, confirm, { now = Date.now(), beforeComm
 					db.exec(
 						'DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs;'
 					);
-					insertData(db, incoming);
+					insertData(db, incoming, true);
 					beforeCommit?.();
 					validate(db);
 					if (dataHash(db) !== expectedHash)
@@ -844,7 +850,7 @@ export async function restoreDatabaseWithFiles(restoreId, fileOperation) {
 		db.exec(
 			'DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs;'
 		);
-		insertData(db, dataset(stage));
+		insertData(db, dataset(stage), true);
 		validate(db);
 		if (dataHash(db) !== dataHash(stage)) fail('invalid_backup', 'Database verification failed.');
 		db.exec('COMMIT');
@@ -878,7 +884,7 @@ function fileFolderImpact(incoming) {
 			incoming
 				.prepare('SELECT id FROM jobs')
 				.all()
-				.map((j) => j.id)
+				.map((j) => String(j.id))
 		);
 		return [
 			...new Set(

@@ -1,5 +1,5 @@
 // All stored job fields. Forms stay inline; immutable migrations remain the schema source.
-// `since` keeps historical backup column lists stable. `edit` controls input access.
+// All current fields belong to the numeric baseline (schema 1). `edit` controls input access.
 export const jobFields = [
 	{ name: 'id', key: 'id', type: 'id', label: 'Job ID', edit: 'system', since: 1, list: true },
 	{
@@ -97,7 +97,7 @@ export const jobFields = [
 		label: 'Location',
 		max: 200,
 		edit: 'user',
-		since: 2,
+		since: 1,
 		info: true,
 		list: true
 	},
@@ -108,7 +108,7 @@ export const jobFields = [
 		label: 'Work arrangement',
 		options: ['remote', 'hybrid', 'on-site'],
 		edit: 'user',
-		since: 2,
+		since: 1,
 		info: true,
 		list: true
 	},
@@ -119,7 +119,7 @@ export const jobFields = [
 		label: 'Employment type',
 		options: ['full-time', 'part-time', 'contract', 'internship', 'temporary'],
 		edit: 'user',
-		since: 2,
+		since: 1,
 		info: true,
 		list: true
 	},
@@ -130,7 +130,7 @@ export const jobFields = [
 		label: 'Compensation',
 		max: 1000,
 		edit: 'user',
-		since: 2,
+		since: 1,
 		info: true,
 		list: true
 	},
@@ -141,7 +141,7 @@ export const jobFields = [
 		label: 'Source',
 		max: 200,
 		edit: 'user',
-		since: 2,
+		since: 1,
 		info: true,
 		list: true
 	},
@@ -152,7 +152,7 @@ export const jobFields = [
 		label: 'Application deadline',
 		max: 10,
 		edit: 'user',
-		since: 2,
+		since: 1,
 		info: true,
 		list: true
 	},
@@ -163,7 +163,7 @@ export const jobFields = [
 		label: 'Follow-up date',
 		max: 10,
 		edit: 'user',
-		since: 2,
+		since: 1,
 		list: true
 	},
 	{
@@ -175,7 +175,7 @@ export const jobFields = [
 		requires: 'follow_up_date',
 		requiresMessage: 'Set a follow-up date to add a comment.',
 		edit: 'user',
-		since: 2,
+		since: 1,
 		list: true
 	},
 	{
@@ -185,7 +185,7 @@ export const jobFields = [
 		label: 'Starred',
 		default: false,
 		edit: 'user',
-		since: 2,
+		since: 1,
 		list: true
 	},
 	{
@@ -194,7 +194,7 @@ export const jobFields = [
 		type: 'number',
 		label: 'Assistant score',
 		edit: 'assistant',
-		since: 2,
+		since: 1,
 		list: true
 	},
 	{
@@ -204,7 +204,7 @@ export const jobFields = [
 		label: 'Score comment',
 		max: 10000,
 		edit: 'assistant',
-		since: 2,
+		since: 1,
 		list: true
 	}
 ];
