@@ -27,9 +27,8 @@
 	import Eye from '@lucide/svelte/icons/eye';
 	import Download from '@lucide/svelte/icons/download';
 	import Copy from '@lucide/svelte/icons/copy';
-	import StarOff from '@lucide/svelte/icons/star-off';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import BadgeCheck from '@lucide/svelte/icons/badge-check';
+	import UserRound from '@lucide/svelte/icons/user-round';
 	import FileAudio from '@lucide/svelte/icons/file-audio';
 	import FileVideo from '@lucide/svelte/icons/file-video';
 	import FileChartColumn from '@lucide/svelte/icons/file-chart-column';
@@ -39,7 +38,7 @@
 	import FileArchive from '@lucide/svelte/icons/file-archive';
 	import FileSpreadsheet from '@lucide/svelte/icons/file-spreadsheet';
 	import FileIcon from '@lucide/svelte/icons/file';
-	import { fileType } from '$lib/file-types';
+	import { fileType, documentDesignations } from '$lib/file-types';
 	import { formatBytes, formatDateTime } from '$lib/format';
 	import { toast } from '$lib/toast.svelte';
 	let { data, form } = $props();
@@ -49,7 +48,6 @@
 		uploadError = $state('');
 	let uploadInput: HTMLInputElement;
 	let picker = $state(false),
-		copyPicker = $state(false),
 		pickerQuery = $state(''),
 		pickerPage = $state(1),
 		pickerTotal = $state(0),
@@ -101,7 +99,7 @@
 		pickerLoading = true;
 		try {
 			const r = await fetch(
-				`/api/documents?${new URLSearchParams({ query: pickerQuery, page: String(page), ...(copyPicker ? {} : { markdown: '1' }) })}`
+				`/api/documents?${new URLSearchParams({ query: pickerQuery, page: String(page) })}`
 			);
 			const value = await r.json();
 			if (!r.ok) throw new Error(value.error);
@@ -116,15 +114,8 @@
 			pickerLoading = false;
 		}
 	}
-	async function selectMaster() {
-		copyPicker = false;
-		picked = data.master?.id ?? '';
-		pickedToken = data.master?.token ?? '';
-		picker = true;
-		await choices();
-	}
+
 	async function copyToJob() {
-		copyPicker = true;
 		picked = '';
 		pickedToken = '';
 		newName = '';
@@ -227,8 +218,8 @@
 				><FilePlus data-icon="inline-start" />New document</Button
 			>
 			{#if isUserScope}
-				<Button variant="outline" onclick={selectMaster} size="lg"
-					><BadgeCheck data-icon="inline-start" />Select Master CV</Button
+				<Button variant="outline" href="/profile" size="lg"
+					><UserRound data-icon="inline-start" />Profile</Button
 				>
 			{:else}
 				<Button variant="outline" onclick={copyToJob} size="lg"
@@ -310,7 +301,9 @@
 						{#snippet title()}
 							<p class="flex flex-wrap items-center gap-2 font-semibold">
 								<a class="link break-all" href={`${data.base}/${doc.id}`}>{doc.filename}</a
-								>{#if doc.designation}<Badge variant="secondary">Master CV</Badge>{/if}
+								>{#each doc.designations ?? [] as key}<Badge variant="secondary"
+										>{documentDesignations[key].label}</Badge
+									>{/each}
 							</p>
 						{/snippet}
 						{#snippet meta()}
@@ -342,12 +335,8 @@
 <Dialog.Root bind:open={picker}>
 	<Dialog.Content class="sm:max-w-2xl">
 		<Dialog.Header>
-			<Dialog.Title>{copyPicker ? 'Copy to this job' : 'Select Master CV'}</Dialog.Title>
-			<Dialog.Description
-				>{copyPicker
-					? 'Choose a user document to copy. The original is kept.'
-					: 'Choose an existing Markdown document, or No Master CV to clear the selection. Files always stay in Documents.'}</Dialog.Description
-			>
+			<Dialog.Title>Copy to this job</Dialog.Title>
+			<Dialog.Description>Choose a user document to copy. The original is kept.</Dialog.Description>
 		</Dialog.Header>
 		{#if pickerError}<Notice tone="error" title="Documents could not be loaded"
 				>{pickerError}</Notice
@@ -369,12 +358,7 @@
 			</div>
 			<Button variant="outline" type="submit">Search</Button>
 		</form>
-		<form
-			method="POST"
-			action={copyPicker ? '?/copy' : '?/master'}
-			use:enhance={withPending(finishDialog)}
-			class="space-y-4"
-		>
+		<form method="POST" action="?/copy" use:enhance={withPending(finishDialog)} class="space-y-4">
 			<input type="hidden" name="id" value={picked} /><input
 				type="hidden"
 				name="token"
@@ -387,18 +371,6 @@
 						class="h-12 w-full"
 					/>
 				{:else}
-					{#if !copyPicker}
-						<RadioOption
-							name="choice"
-							value=""
-							checked={picked === ''}
-							label="No Master CV"
-							onchange={() => {
-								picked = '';
-								pickedToken = '';
-							}}
-						/>
-					{/if}
 					{#each candidates as doc (doc.id)}
 						<RadioOption
 							name="choice"
@@ -413,22 +385,18 @@
 						/>
 					{/each}
 					{#if !candidates.length}<p class="text-sm text-muted-foreground">
-							{copyPicker
-								? 'No matching documents.'
-								: 'No eligible files on this page. Search another page, or create or upload a Markdown document first.'}
+							No matching documents.
 						</p>{/if}
 				{/if}
 			</fieldset>
-			{#if copyPicker}
-				<Field id="copy_filename" label="Destination filename" required>
-					{#snippet control(attrs)}<Input
-							{...attrs}
-							name="filename"
-							bind:value={newName}
-							required
-						/>{/snippet}
-				</Field>
-			{/if}
+			<Field id="copy_filename" label="Destination filename" required>
+				{#snippet control(attrs)}<Input
+						{...attrs}
+						name="filename"
+						bind:value={newName}
+						required
+					/>{/snippet}
+			</Field>
 			<Pagination
 				label="Available document pages"
 				page={pickerPage}
@@ -438,9 +406,7 @@
 			/>
 			<Dialog.Footer>
 				<Button type="button" variant="ghost" onclick={() => (picker = false)}>Cancel</Button>
-				<Button type="submit" disabled={copyPicker ? !picked : picked === (data.master?.id ?? '')}
-					>{copyPicker ? 'Copy document' : picked ? 'Use selected file' : 'Clear Master CV'}</Button
-				>
+				<Button type="submit" disabled={!picked}>Copy document</Button>
 			</Dialog.Footer>
 		</form>
 	</Dialog.Content>
@@ -497,14 +463,14 @@
 		value={selected?.token}
 	/><input type="hidden" name="catalog_token" value={data.catalog_token} /><input
 		type="hidden"
-		name="clear_master"
+		name="clear_designations"
 		value="true"
 	/><input type="hidden" name="confirm" value="true" />
 </form>
 <ConfirmDialog
 	bind:open={remove}
 	title="Delete document?"
-	description={`Permanently delete ${selected?.filename ?? 'this file'}? There is no Trash.${selected?.designation ? ' This also clears Master CV.' : ''}`}
+	description={`Permanently delete ${selected?.filename ?? 'this file'}? There is no Trash.${selected?.designations?.length ? ` This also clears ${selected.designations.map((key: string) => documentDesignations[key].label).join(', ')}.` : ''}`}
 	confirmLabel="Delete document"
 	formId="delete-document"
 	destructive

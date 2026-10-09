@@ -1,3 +1,4 @@
+import { documentDesignations } from '../../file-types.js';
 import { fail, redirect, error } from '@sveltejs/kit';
 import * as documents from './documents.js';
 import { generateDocumentPdf } from './pdf.js';
@@ -18,14 +19,11 @@ export async function listLoad(event) {
 			query: event.url.searchParams.get('query') ?? '',
 			page: Number(event.url.searchParams.get('page') || 1)
 		});
-		let master = null;
-		if (scope === 'documents' && result.designations.master_cv)
-			master = await documents.getDocument({ id: result.designations.master_cv });
+
 		return {
 			...result,
 			scope,
 			base: listUrl(scope),
-			master,
 			query: event.url.searchParams.get('query') ?? '',
 			fileError: null
 		};
@@ -38,7 +36,6 @@ export async function listLoad(event) {
 			limit: 50,
 			scope,
 			base: listUrl(scope),
-			master: null,
 			catalog_token: '',
 			query: '',
 			fileError: e.code ? e.message : 'File store is unavailable.'
@@ -94,7 +91,8 @@ export const listActions = {
 				token: v.token,
 				confirm: v.confirm === 'true',
 				catalog_token: v.catalog_token,
-				clear_master: v.clear_master === 'true'
+				clear_master: v.clear_master === 'true',
+				clear_designations: v.clear_designations === 'true'
 			});
 		} catch (err) {
 			return fileFailure(err, v);
@@ -108,25 +106,39 @@ export const listActions = {
 			await documents.setMasterDocument({
 				id: v.id || null,
 				token: v.token,
-				catalog_token: v.catalog_token
+				catalog_token: v.catalog_token,
+				designation: v.designation || undefined
 			});
 		} catch (err) {
 			return fileFailure(err, v);
 		}
-		redirect(303, '/documents?saved=master-cv');
+		redirect(303, '/profile?saved=profile');
 	}
 };
 export async function editorLoad(e) {
 	const scope = pageScope(e);
-	if (!e.params.documentId)
+	const designation = e.url.searchParams.get('designation');
+	if (designation && (scope !== 'documents' || !Object.hasOwn(documentDesignations, designation)))
+		error(400, 'Invalid document designation.');
+	const profile =
+		scope === 'documents' && (designation || e.url.searchParams.get('return') === 'profile');
+	if (!e.params.documentId) {
+		const catalog = designation ? await documents.listDocuments() : null;
 		return {
 			scope,
 			base: listUrl(scope),
 			document: null,
 			content: '',
 			edit: true,
-			textError: null
+			textError: null,
+			designation,
+			format: designation ? documentDesignations[designation].format : 'markdown',
+			suggestedName: designation?.replaceAll('_', '-') ?? '',
+			catalog_token: catalog?.catalog_token,
+			returnTo: profile ? '/profile' : null
 		};
+	}
+
 	let d;
 	try {
 		d = await documents.getDocument(
@@ -142,6 +154,7 @@ export async function editorLoad(e) {
 		document: d,
 		content: d.content ?? '',
 		edit: e.url.searchParams.get('edit') === '1',
+		returnTo: profile ? '/profile' : null,
 		textError: null
 	};
 }
@@ -150,6 +163,19 @@ function newMarkdownName(input) {
 	if (/\.(markdown|html?|txt|pdf|docx?|rtf|odt|csv|zip|png|jpe?g)$/i.test(name))
 		reject('VALIDATION', 'New documents use .md. Enter a name without another file extension.');
 	return `${name.replace(/\.md$/i, '')}.md`;
+}
+function profileFilename(input, designation) {
+	if (!designation) return newMarkdownName(input);
+	if (!Object.hasOwn(documentDesignations, designation))
+		reject('VALIDATION', 'Invalid document designation.');
+	const extension = documentDesignations[designation].extension;
+	const name = filename(String(input ?? ''));
+	if (/\.(md|markdown|html?|txt|pdf|docx?|rtf|odt|csv|zip|png|jpe?g)$/i.test(name)) {
+		if (!name.toLowerCase().endsWith(extension))
+			reject('VALIDATION', `This document uses ${extension}.`);
+		return name;
+	}
+	return `${name}${extension}`;
 }
 export const editorActions = {
 	save: async (e) => {
@@ -165,12 +191,16 @@ export const editorActions = {
 					})
 				: await documents.createDocument({
 						scope: pageScope(e),
-						filename: newMarkdownName(v.filename),
-						content: v.content
+						filename: profileFilename(v.filename, v.designation || null),
+						content: v.content,
+						designation: v.designation || undefined,
+						catalog_token: v.catalog_token
 					});
 		} catch (err) {
 			return fileFailure(err, v);
 		}
+		if (pageScope(e) === 'documents' && (v.designation || v.returnTo === '/profile'))
+			redirect(303, '/profile?saved=profile');
 		redirect(303, `${listUrl(pageScope(e))}/${d.id}?saved=document`);
 	},
 	saveCopy: async (e) => {

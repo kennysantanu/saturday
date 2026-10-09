@@ -9,6 +9,8 @@ export async function POST({ request, url }) {
 		const doc = await uploadDocument({
 			scope: url.searchParams.get('scope') ?? 'documents',
 			filename: url.searchParams.get('filename'),
+			designation: url.searchParams.get('designation') ?? undefined,
+			catalog_token: url.searchParams.get('catalog_token') ?? undefined,
 			stream: Readable.fromWeb(request.body)
 		});
 		return json(doc);

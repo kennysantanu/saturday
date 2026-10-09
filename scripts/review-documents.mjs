@@ -65,40 +65,49 @@ try {
 	assert.deepEqual(externalRequests, [], 'HTML preview must not fetch external resources');
 	await page.goto(`${base}/documents`, { waitUntil: 'networkidle0' });
 	await page.screenshot({ path: join(scratch, 'desktop.png'), fullPage: true });
-	await page.locator('button::-p-text(Select Master CV)').click();
-	await page.waitForSelector('input[type=radio]');
-	await page.click(`input[type=radio][value="${cv.id}"]`);
-	await page.locator('button::-p-text(Use selected file)').click();
-	await page.waitForSelector('[data-slot=dialog-overlay]', { hidden: true });
-	await page.waitForFunction(() =>
-		document.getAnimations().every((a) => a.playState !== 'running')
-	);
+	await page.goto(`${base}/profile`, { waitUntil: 'networkidle0' });
+	const selectMaster = async () => {
+		await page.click('a[href="/profile?select=master_cv"]');
+		await page.waitForSelector(`input[type=radio][value="${cv.id}"]`);
+		await settled();
+		await page.locator(`input[type=radio][value="${cv.id}"]`).click();
+		await page.locator('button::-p-text(Use selected file)').click();
+		await page.waitForSelector('[role=dialog]', { hidden: true });
+		await settled();
+	};
+	await selectMaster();
 	assert.equal((await getDocument({ id: cv.id })).designation, 'master_cv');
-	await page.locator('button::-p-text(Select Master CV)').click();
-	await page.waitForSelector('input[type=radio][value=""]');
-	await page.click('input[type=radio][value=""]');
+	await page.click('button[aria-label="More actions for Master CV"]');
+	await page.locator('[role=menuitem]::-p-text(Clear selection)').click();
+	await page.waitForSelector('[role=dialog]');
 	await page.locator('[role=dialog] button::-p-text(Cancel)').click();
-	assert.equal(
-		(await getDocument({ id: cv.id })).designation,
-		'master_cv',
-		'Cancelling preserves designation'
-	);
-	await page.waitForSelector('[role=dialog]', { hidden: true });
 	await settled();
-	await page.locator('button::-p-text(Select Master CV)').click();
-	await page.waitForSelector('input[type=radio][value=""]');
-	await page.click('input[type=radio][value=""]');
-	await page.locator('button::-p-text(Clear Master CV)').click();
+	assert.equal((await getDocument({ id: cv.id })).designation, 'master_cv');
+	await page.click('button[aria-label="More actions for Master CV"]');
+	await page.locator('[role=menuitem]::-p-text(Clear selection)').click();
+	await page.locator('[role=dialog] button::-p-text(Clear selection)').click();
 	await page.waitForSelector('[role=dialog]', { hidden: true });
 	await settled();
 	assert.equal((await getDocument({ id: cv.id })).designation, null);
+	await selectMaster();
+
+	await page.click('a[href="/documents/new?designation=cover_letter_template"]');
+	await page.waitForSelector('textarea[name=content]');
+	await page.type('textarea[name=content]', '<p>Dear hiring team</p>');
 	await settled();
-	await page.locator('button::-p-text(Select Master CV)').click();
-	await page.waitForSelector(`input[type=radio][value="${cv.id}"]`);
-	await page.click(`input[type=radio][value="${cv.id}"]`);
-	await page.locator('button::-p-text(Use selected file)').click();
-	await page.waitForSelector('[role=dialog]', { hidden: true });
+	assert.equal(await page.$eval('form[action="?/save"]', (form) => form.checkValidity()), true);
+	await Promise.all([
+		page.waitForResponse((response) => response.request().method() === 'POST'),
+		page.locator('button::-p-text(Save and select)').click()
+	]);
+	await page.waitForFunction(() => location.pathname === '/profile');
+	assert.equal(
+		(await getDocument({ designation: 'cover_letter_template', include_content: true })).content,
+		'<p>Dear hiring team</p>'
+	);
 	await settled();
+	await page.screenshot({ path: join(scratch, 'profile-desktop.png'), fullPage: true });
+	await page.goto(`${base}/documents`, { waitUntil: 'networkidle0' });
 	const uploaded = join(scratch, 'uploaded.txt');
 	await writeFile(uploaded, 'Uploaded directly from the picker.');
 	const [chooser] = await Promise.all([
@@ -151,7 +160,10 @@ try {
 		await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
 		'Mobile document page must not overflow'
 	);
-	await page.locator('button::-p-text(Select Master CV)').click();
+	await page.goto(`${base}/profile`, { waitUntil: 'networkidle0' });
+	await settled();
+	await page.screenshot({ path: join(scratch, 'profile-mobile.png'), fullPage: true });
+	await page.click('a[href="/profile?select=master_cv"]');
 	await page.waitForSelector('[role=dialog]');
 	await new Promise((r) => setTimeout(r, 400));
 	assert.ok(
@@ -166,7 +178,7 @@ try {
 	await page.waitForSelector('[role=dialog]', { hidden: true });
 	await settled();
 	assert.ok(
-		await page.evaluate(() => document.activeElement.textContent.includes('Select Master CV')),
+		await page.evaluate(() => document.activeElement.textContent.includes('Select document')),
 		'Picker cancellation returns focus to its trigger'
 	);
 	await page.goto(`${base}/settings`, { waitUntil: 'networkidle0' });

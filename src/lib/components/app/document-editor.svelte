@@ -6,7 +6,7 @@
 	import FileOutput from '@lucide/svelte/icons/file-output';
 	import { withPending } from '$lib/forms';
 	import { UnsavedChanges } from '$lib/unsaved.svelte';
-	import { visualMarkdownSupported } from '$lib/file-types';
+	import { visualMarkdownSupported, documentDesignations } from '$lib/file-types';
 	import PageHeader from './page-header.svelte';
 	import PageShell from './page-shell.svelte';
 	import Notice from './notice.svelte';
@@ -25,11 +25,11 @@
 	let MarkdownEditor = $state<any>(null),
 		htmlPreview = $state('');
 	const doc = $derived(data.document);
-	const isMarkdown = $derived(!doc || doc.format === 'markdown');
+	const isMarkdown = $derived((doc?.format ?? data.format ?? 'markdown') === 'markdown');
 	const supported = $derived(visualMarkdownSupported(content));
 	$effect(() => {
 		content = form?.values?.content ?? data.content;
-		name = form?.values?.filename ?? '';
+		name = form?.values?.filename ?? data.suggestedName ?? '';
 		guard.dirty = !!form?.values && Object.hasOwn(form.values, 'content');
 	});
 	onMount(async () => {
@@ -54,13 +54,15 @@
 </script>
 
 {#snippet badges()}
-	{#if doc?.designation}<Badge variant="secondary">Master CV</Badge>{/if}
+	{#each doc?.designations ?? [] as key}<Badge variant="secondary"
+			>{documentDesignations[key].label}</Badge
+		>{/each}
 	{#if guard.dirty}<Badge variant="outline">Unsaved changes</Badge>{/if}
 {/snippet}
 
 <PageShell title={`${doc?.filename ?? 'New document'} · Documents`}>
 	<PageHeader
-		back={{ href: data.base, label: 'documents' }}
+		back={{ href: data.returnTo ?? data.base, label: data.returnTo ? 'profile' : 'documents' }}
 		title={doc?.filename ?? 'New document'}
 		meta={doc?.designation || guard.dirty ? badges : undefined}
 	>
@@ -68,7 +70,8 @@
 					variant="outline"
 					href={`/api/files/${doc.id}?scope=${data.scope}`}
 					><Download data-icon="inline-start" />Download</Button
-				>{#if doc.can_edit_text && !data.edit}<Button href={`?edit=1`}
+				>{#if doc.can_edit_text && !data.edit}<Button
+						href={data.returnTo ? '?edit=1&return=profile' : '?edit=1'}
 						><Pencil data-icon="inline-start" />Edit</Button
 					>{/if}{/if}{/snippet}
 	</PageHeader>
@@ -80,12 +83,18 @@
 		>{/if}
 	{#if data.edit && (!doc || doc.can_edit_text) && !data.textError}
 		<form method="POST" action="?/save" use:enhance={guard.enhance} class="space-y-5">
+			<input type="hidden" name="designation" value={data.designation ?? ''} />
+			<input type="hidden" name="returnTo" value={data.returnTo ?? ''} />
 			{#if !doc}
 				<p class="text-sm text-muted-foreground">
 					<span class="text-destructive" aria-hidden="true">*</span> Required
 				</p>
 			{/if}
-			<input type="hidden" name="token" value={doc?.token ?? ''} />
+			<input type="hidden" name="token" value={doc?.token ?? ''} /><input
+				type="hidden"
+				name="catalog_token"
+				value={data.catalog_token ?? ''}
+			/>
 			{#if !doc}
 				<Field id="document_name" label="Document name" required>
 					{#snippet control(attrs)}
@@ -97,7 +106,7 @@
 								bind:value={name}
 								placeholder="Untitled"
 								required
-							/><span>.md</span>
+							/><span class="shrink-0">{isMarkdown ? '.md' : '.html'}</span>
 						</div>
 					{/snippet}
 				</Field>
@@ -121,7 +130,11 @@
 			{:else}
 				<Field
 					id="document_content"
-					label={isMarkdown ? 'Markdown source' : doc?.format === 'html' ? 'HTML source' : 'Text'}
+					label={isMarkdown
+						? 'Markdown source'
+						: (doc?.format ?? data.format) === 'html'
+							? 'HTML source'
+							: 'Text'}
 				>
 					{#snippet control(attrs)}<Textarea
 							{...attrs}
@@ -133,8 +146,12 @@
 				</Field>
 			{/if}
 			<div class="form-actions justify-end">
-				<Button href={doc ? `${data.base}/${doc.id}` : data.base} variant="ghost">Cancel</Button>
-				<Button type="submit" disabled={guard.saving}>{guard.saving ? 'Saving…' : 'Save'}</Button>
+				<Button href={data.returnTo ?? (doc ? `${data.base}/${doc.id}` : data.base)} variant="ghost"
+					>Cancel</Button
+				>
+				<Button type="submit" disabled={guard.saving}
+					>{guard.saving ? 'Saving…' : data.designation ? 'Save and select' : 'Save'}</Button
+				>
 			</div>
 		</form>
 		{#if form?.fileError}

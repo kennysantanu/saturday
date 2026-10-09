@@ -7,7 +7,7 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { getProjectRoot, withDatabase, databaseIdentity } from '../database.js';
 import { parseRecordId, recordIdInputSchema } from '../validation.js';
-import { fileType } from '../../file-types.js';
+import { fileType, documentDesignations } from '../../file-types.js';
 import { storageCompatibility, assertManifestCompatibility } from '../compatibility.js';
 
 export const UPLOAD_LIMIT = 25 * 1024 * 1024;
@@ -266,21 +266,27 @@ export function validateManifest(m) {
 		ids.add(d.id);
 		keys.add(d.key.toLowerCase());
 	}
-	if (m.designations.master_cv) {
-		const d = m.documents.find((d) => d.id === m.designations.master_cv);
+	for (const [key, id] of Object.entries(m.designations)) {
+		const definition = Object.hasOwn(documentDesignations, key) ? documentDesignations[key] : null;
+		const d = m.documents.find((d) => d.id === id);
 		if (
+			!definition ||
+			(m.format_version === 1 && key !== 'master_cv') ||
 			!d ||
 			!d.key.startsWith('documents/') ||
-			fileType(d.key).type !== 'markdown' ||
+			fileType(d.key).type !== definition.format ||
 			d.size > TEXT_LIMIT
 		)
-			reject('FORMAT', 'Invalid Master CV designation.');
+			reject('FORMAT', 'Invalid document designation.');
 	}
+
 	return m;
 }
-// Version 1 is the first format; future conversions must be pure, sequential and validated.
+// Version 2 adds validated Profile designations; conversions preserve document identity.
 export function migrateManifest(input) {
-	return structuredClone(validateManifest(input));
+	const m = structuredClone(validateManifest(input));
+	m.format_version = storageCompatibility.manifest.version;
+	return validateManifest(m);
 }
 async function recover() {
 	const p = filePaths();
@@ -430,6 +436,12 @@ export async function withFileLock(operation, { initialize = true, allowSession 
 			await atomicJson(join(p.root, 'manifest.json'), m);
 		}
 		validateManifest(m);
+		if (m.format_version !== storageCompatibility.manifest.version) {
+			await atomicJson(join(p.state, 'manifest-v1.json'), m);
+			m = migrateManifest(m);
+			m.token = randomUUID();
+			await atomicJson(join(p.root, 'manifest.json'), m);
+		}
 		databaseIdentity();
 		return await fileSession.run({ manifest: structuredClone(m), hash: manifestHash(m) }, () =>
 			operation(m)
@@ -529,7 +541,13 @@ export function info(d, m) {
 		scope: d.key.startsWith('documents/')
 			? 'documents'
 			: parseRecordId(d.key.split('/')[1], 'job_id'),
-		designation: m.designations.master_cv === d.id ? 'master_cv' : null,
+		designation:
+			m.designations.master_cv === d.id
+				? 'master_cv'
+				: (Object.entries(m.designations).find(([, id]) => id === d.id)?.[0] ?? null),
+		designations: Object.entries(m.designations)
+			.filter(([, id]) => id === d.id)
+			.map(([key]) => key),
 		format: kind.type,
 		can_read_text: kind.text && d.size <= TEXT_LIMIT,
 		can_edit_text: kind.text && d.size <= TEXT_LIMIT,
@@ -561,7 +579,16 @@ export function bytesMetadata(bytes) {
 }
 export async function createEntry(
 	m,
-	{ scope = 'documents', name, origin = 'manual', bytes, path, auto = false }
+	{
+		scope = 'documents',
+		name,
+		origin = 'manual',
+		bytes,
+		path,
+		auto = false,
+		designation,
+		catalog_token
+	}
 ) {
 	const prefix = scopePrefix(scope);
 	name = filename(name);
@@ -579,6 +606,23 @@ export async function createEntry(
 		token: randomUUID(),
 		...(path ? await digest(path) : bytesMetadata(bytes))
 	};
+	if (designation !== undefined) {
+		checkToken(m.token, catalog_token);
+		const def = Object.hasOwn(documentDesignations, designation)
+			? documentDesignations[designation]
+			: null;
+		if (scope !== 'documents' || !def || fileType(name).type !== def.format)
+			reject('VALIDATION', 'Invalid document designation or format.');
+		if (d.size > TEXT_LIMIT) reject('SIZE_LIMIT', 'Special documents are limited to 1 MiB.');
+		if (path) {
+			try {
+				new TextDecoder('utf-8', { fatal: true }).decode(await fs.readFile(path));
+			} catch {
+				reject('ENCODING', 'Text must be valid UTF-8.');
+			}
+		}
+		m.designations[designation] = d.id;
+	}
 	m.documents.push(d);
 	await commitManifest(m, [{ key, bytes, path }]);
 	return info(d, m);

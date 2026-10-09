@@ -297,11 +297,11 @@ test('manifest validation preserves extensions and refuses unknown versions', as
 	const converted = s.migrateManifest(m);
 	assert.deepEqual(converted.custom, m.custom);
 	assert.notEqual(converted, m);
-	assert.throws(() => s.migrateManifest({ ...m, format_version: 2 }), { code: 'FORMAT' });
+	assert.throws(() => s.migrateManifest({ ...m, format_version: 3 }), { code: 'FORMAT' });
 	const stable = await readFile(join(s.filePaths().root, 'manifest.json'), 'utf8');
 	await writeFile(
 		join(s.filePaths().root, 'manifest.json'),
-		JSON.stringify({ ...m, format_version: 2 })
+		JSON.stringify({ ...m, format_version: 3 })
 	);
 	try {
 		await assert.rejects(d.listDocuments(), { code: 'FORMAT' });
@@ -627,7 +627,7 @@ test('mutation boundaries reject a manifest replaced by another process, includi
 		const path = join(s.filePaths().root, 'manifest.json');
 		const original = await readFile(path);
 		const future = JSON.parse(original);
-		future.format_version = 2;
+		future.format_version = 3;
 		await assert.rejects(
 			s.withFileLock(async (m) => {
 				const script = `import {writeFileSync} from 'node:fs';writeFileSync(process.argv[1],process.argv[2]);`;
@@ -717,7 +717,7 @@ test('unsupported archives, pair formats and pending journals are rejected witho
 			code: 'FORMAT'
 		});
 		const manifest = JSON.parse(before);
-		manifest.format_version = 2;
+		manifest.format_version = 3;
 		await s.atomicJson(join(s.filePaths().state, 'journal.json'), {
 			manifest,
 			changes: [{ key: 'documents/safe.md', remove: true }]
@@ -969,5 +969,138 @@ test('process death after byte publication recovers the pending manifest on rest
 		await assert.rejects(s.fs.access(join(s.filePaths().state, 'journal.json')), {
 			code: 'ENOENT'
 		});
+	});
+});
+
+test('Profile assignments are atomic, format checked, protected on deletion and restored', async () => {
+	await isolatedStores(async () => {
+		let catalog = await d.listDocuments();
+		const template = await d.createDocument({
+			filename: 'letter.html',
+			content: '<p>Dear team</p>',
+			designation: 'cover_letter_template',
+			catalog_token: catalog.catalog_token
+		});
+		assert.equal(
+			(await d.getDocument({ designation: 'cover_letter_template', include_content: true }))
+				.content,
+			'<p>Dear team</p>'
+		);
+		const before = await d.listDocuments();
+		await assert.rejects(
+			d.createDocument({
+				filename: 'wrong.md',
+				content: 'Not HTML',
+				designation: 'resume_template',
+				catalog_token: before.catalog_token
+			}),
+			{ code: 'VALIDATION' }
+		);
+		await assert.rejects(
+			d.uploadDocument({
+				filename: 'invalid.html',
+				stream: Readable.from([Buffer.from([255])]),
+				designation: 'resume_template',
+				catalog_token: before.catalog_token
+			}),
+			{ code: 'ENCODING' }
+		);
+		assert.equal((await d.listDocuments()).total, 1);
+		await assert.rejects(
+			d.createDocument({
+				filename: 'stale.html',
+				content: '',
+				designation: 'resume_template',
+				catalog_token: 'stale'
+			}),
+			{ code: 'CONFLICT' }
+		);
+		catalog = await d.listDocuments();
+		await d.setMasterDocument({
+			designation: 'resume_template',
+			id: template.id,
+			token: template.token,
+			catalog_token: catalog.catalog_token
+		});
+		const renamed = await d.editDocument({
+			id: template.id,
+			token: template.token,
+			filename: 'renamed.html'
+		});
+		assert.deepEqual(
+			new Set(renamed.designations),
+			new Set(['cover_letter_template', 'resume_template'])
+		);
+		await assert.rejects(
+			d.editDocument({ id: renamed.id, token: renamed.token, filename: 'wrong.md' }),
+			{ code: 'VALIDATION' }
+		);
+		const copy = await d.copyDocument({ id: renamed.id, token: renamed.token });
+		assert.deepEqual(copy.designations, []);
+		const saved = await b.createFileBackup();
+		catalog = await d.listDocuments();
+		await assert.rejects(
+			d.deleteDocument({
+				id: renamed.id,
+				token: renamed.token,
+				catalog_token: catalog.catalog_token,
+				confirm: true,
+				clear_master: true
+			}),
+			{ code: 'CONFIRMATION' }
+		);
+		await d.deleteDocument({
+			id: renamed.id,
+			token: renamed.token,
+			catalog_token: catalog.catalog_token,
+			confirm: true,
+			clear_designations: true
+		});
+		assert.equal((await d.listDocuments()).designations.resume_template, undefined);
+		const preview = await b.prepareFileRestore({ backup_id: saved.backup_id, mode: 'replace' });
+		await b.restoreFiles({ restore_id: preview.restore_id, confirm: true });
+		assert.equal((await d.getDocument({ designation: 'cover_letter_template' })).id, template.id);
+	});
+});
+
+test('version-1 manifest upgrade preserves original metadata and selections', async () => {
+	await isolatedStores(async () => {
+		const cv = await d.createDocument({ filename: 'cv.md', content: '# Experience' });
+		let catalog = await d.listDocuments();
+		await d.setMasterDocument({ id: cv.id, token: cv.token, catalog_token: catalog.catalog_token });
+		const path = join(s.filePaths().root, 'manifest.json');
+		const original = JSON.parse(await readFile(path, 'utf8'));
+		original.format_version = 1;
+		original.custom = { preserved: true };
+		await writeFile(path, JSON.stringify(original));
+		catalog = await d.listDocuments();
+		assert.equal(catalog.designations.master_cv, cv.id);
+		const upgraded = JSON.parse(await readFile(path, 'utf8'));
+		assert.equal(upgraded.format_version, 2);
+		assert.deepEqual(upgraded.custom, original.custom);
+		assert.deepEqual(
+			JSON.parse(await readFile(join(s.filePaths().state, 'manifest-v1.json'), 'utf8')),
+			original
+		);
+		assert.deepEqual(s.migrateManifest(original).documents, original.documents);
+		const { default: yazl } = await import('yazl');
+		const { pipeline } = await import('node:stream/promises');
+		const { createWriteStream, createReadStream } = await import('node:fs');
+		const archive = join(s.filePaths().state, 'v1.zip');
+		const zip = new yazl.ZipFile();
+		zip.addBuffer(Buffer.from(JSON.stringify(original)), 'manifest.json');
+		zip.addFile(join(s.filePaths().root, cv.key), cv.key);
+		const output = pipeline(zip.outputStream, createWriteStream(archive));
+		zip.end();
+		await output;
+		const imported = await b.importFileBackup(createReadStream(archive));
+		const preview = await b.prepareFileRestore({ backup_id: imported.backup_id, mode: 'replace' });
+		await b.restoreFiles({ restore_id: preview.restore_id, confirm: true });
+		assert.equal((await d.getDocument({ designation: 'master_cv' })).id, cv.id);
+
+		assert.throws(
+			() => s.validateManifest({ ...original, designations: { resume_template: cv.id } }),
+			{ code: 'FORMAT' }
+		);
 	});
 });
