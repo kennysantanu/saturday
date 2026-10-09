@@ -133,7 +133,10 @@
 		{/if}
 		<ol class="list-decimal space-y-1.5 pl-5 text-sm text-muted-foreground">
 			<li>Build the MCP entry point with <code>npm run build:mcp</code>.</li>
-			<li>Copy the configuration below into the desktop client's local MCP settings.</li>
+			<li>
+				Use the configuration below in a desktop client that accepts <code>mcpServers</code> JSON. ChatGPT
+				Work desktop uses the same command, arguments and environment values in its TOML MCP settings.
+			</li>
 			<li>Reconnect the client, then ask it to list your jobs to check the connection.</li>
 		</ol>
 		<div class="space-y-2">

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { parse } from 'devalue';
 import { migrateDatabase } from '../src/lib/server/database.js';
@@ -449,6 +449,40 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 		child.kill('SIGTERM');
 		await childExit;
 		assert.ok(!logs.includes('Error:'), logs);
+		const stopped = spawnSync(process.execPath, ['scripts/status.mjs'], {
+			env: { ...process.env, PORT: String(port) },
+			encoding: 'utf8'
+		});
+		assert.equal(stopped.status, 1, 'Status reports stopped supervisor');
+		const restarted = spawn(process.execPath, ['scripts/start.mjs'], {
+			env: { ...process.env, PORT: String(port) },
+			stdio: ['ignore', 'pipe', 'pipe']
+		});
+		let restartLogs = '';
+		restarted.stderr.on('data', (c) => (restartLogs += c));
+		try {
+			let ready = false;
+			for (let i = 0; i < 80; i++) {
+				try {
+					if ((await fetch(`${base}/jobs/${job.id}`)).ok) {
+						ready = true;
+						break;
+					}
+				} catch {}
+				await new Promise((r) => setTimeout(r, 100));
+			}
+			assert.ok(ready, restartLogs);
+			const running = spawnSync(process.execPath, ['scripts/status.mjs'], {
+				env: { ...process.env, PORT: String(port) },
+				encoding: 'utf8'
+			});
+			assert.equal(running.status, 0, running.stderr);
+			assert.ok(getJob(job.id), 'Restart preserves existing numeric records');
+		} finally {
+			const exit = new Promise((r) => restarted.once('close', r));
+			restarted.kill('SIGINT');
+			await exit;
+		}
 	} finally {
 		if (child.exitCode === null && child.signalCode === null) {
 			const exited = new Promise((r) => child.on('close', r));

@@ -33,6 +33,24 @@ You do not need to keep Saturday's web server running for the assistant to work.
 
 If **Settings** says the MCP entry point is missing, run `npm run build` and reload the page.
 
+## ChatGPT Work (local desktop)
+
+ChatGPT Work is the selected beta verification target, but its real-client connection and workflows are not yet certified. Settings' JSON is not a universal client configuration. OpenAI documents that the desktop app shares `~/.codex/config.toml` with Codex; append a server table using your actual absolute paths, preserving existing configuration:
+
+```toml
+[mcp_servers.saturday]
+command = "/absolute/path/to/node"
+args = ["/absolute/path/to/saturday/build/mcp/index.js"]
+
+[mcp_servers.saturday.env]
+SATURDAY_DB_PATH = "/absolute/path/to/saturday/data/saturday.db"
+SATURDAY_FILES_PATH = "/absolute/path/to/saturday/data/files"
+```
+
+Use local execution, reconnect, and verify a Saturday tool call. Hosted Work chats use plugins/remote connections and do not read this local configuration. Saturday currently exposes local stdio, so a hosted connection would need additional transport/deployment work. See [OpenAI's MCP configuration documentation](https://learn.chatgpt.com/docs/extend/mcp).
+
+For beta verification, use disposable paths for both stores. Verify discovery; create/read/edit/search a numbered job; create and link a person; create/read/edit a document and select/read Master CV; provoke a validation error; create a backup, review its restore preview and confirm restoration of the disposable data. Restart/rebuild Saturday and reconnect the client, then read the same numbered records. Record the client version, execution mode and exact Saturday build. Passing automated MCP protocol tests does not certify these client workflows.
+
 ## What your assistant can do
 
 | Tool                | What it does                                                               | Changes data |
