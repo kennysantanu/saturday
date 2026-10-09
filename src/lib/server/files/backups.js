@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
+import { buildInfo, storageCompatibility } from '../compatibility.js';
+import { databaseIdentity } from '../database.js';
 import {
 	filePaths,
 	fs,
@@ -20,7 +22,8 @@ import {
 	reject,
 	regularPath,
 	ensureDiskSpace,
-	acquireDirectoryLock
+	acquireDirectoryLock,
+	manifestHash
 } from './store.js';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -48,7 +51,10 @@ export async function captureFiles(m) {
 	);
 	const dir = await fs.mkdtemp(join(filePaths().state, 'capture-'));
 	try {
-		await atomicJson(join(dir, 'manifest.json'), m);
+		await atomicJson(join(dir, 'manifest.json'), {
+			...m,
+			backup_metadata: { creator_build: buildInfo.id, created_at: new Date().toISOString() }
+		});
 		for (const d of m.documents) {
 			const out = join(dir, d.key);
 			await fs.mkdir(join(out, '..'), { recursive: true, mode: 0o700 });
@@ -77,6 +83,10 @@ export async function publishCapture(dir, kind = 'manual', extra = {}) {
 		await syncFile(temp);
 		await fs.rename(temp, path);
 		const record = {
+			format: m.format,
+			format_version: m.format_version,
+			dataset_id: m.dataset_id,
+			creator_build: buildInfo.id,
 			backup_id: id,
 			filename: `saturday-files-${id}.zip`,
 			kind,
@@ -131,6 +141,11 @@ export async function getFileBackup(id) {
 	const root = await backupDirectory();
 	managed(id);
 	const metadata = JSON.parse(await fs.readFile(join(root, `${id}.json`), 'utf8'));
+	if (
+		metadata.format !== storageCompatibility.manifest.format ||
+		metadata.format_version !== storageCompatibility.manifest.version
+	)
+		reject('FORMAT', 'Unsupported file backup format. Use a compatible build.');
 	const path = await regularPath(root, `${id}.zip`);
 	return { path, metadata };
 }
@@ -212,6 +227,10 @@ export async function importFileBackup(stream) {
 		await syncFile(temp);
 		await fs.rename(temp, join(root, `${id}.zip`));
 		const meta = {
+			format: extracted.manifest.format,
+			format_version: extracted.manifest.format_version,
+			dataset_id: extracted.manifest.dataset_id,
+			creator_build: extracted.manifest.backup_metadata?.creator_build ?? null,
 			backup_id: id,
 			filename: `saturday-files-${id}.zip`,
 			kind: 'imported',
@@ -229,6 +248,14 @@ export async function importFileBackup(stream) {
 }
 function mergeManifest(current, incoming, mode) {
 	if (mode === 'replace') return structuredClone(incoming);
+	if (current.dataset_id !== incoming.dataset_id) {
+		if (!current.documents.length && !Object.keys(current.designations).length)
+			return structuredClone(incoming);
+		reject(
+			'DATASET_MISMATCH',
+			'Add missing cannot merge different datasets. Use a reviewed Replace restore or recover files explicitly.'
+		);
+	}
 	const m = structuredClone(current);
 	for (const d of incoming.documents) {
 		const same = m.documents.find(
@@ -256,12 +283,18 @@ export async function prepareFileRestore({ backup_id, mode = 'add' }) {
 	if (h.sha256 !== source.metadata.sha256) reject('INTEGRITY', 'Managed backup changed.');
 	const { stage, manifest } = await extractArchive(source.path);
 	try {
+		if (manifest.dataset_id !== source.metadata.dataset_id)
+			reject('INTEGRITY', 'File backup dataset metadata does not match its archive.');
 		return await withFileLock(async (current) => {
 			await cleanupPreviews();
 			await validateWholeStore(current);
 			const result = mergeManifest(current, manifest, mode);
 			const id = randomUUID();
 			const preview = {
+				current_dataset_id: current.dataset_id,
+				incoming_dataset_id: manifest.dataset_id,
+				database_dataset_id: databaseIdentity()?.dataset_id ?? null,
+				files_match_database: databaseIdentity()?.dataset_id === result.dataset_id,
 				restore_id: id,
 				backup_id,
 				mode,
@@ -276,13 +309,17 @@ export async function prepareFileRestore({ backup_id, mode = 'add' }) {
 				master_cv_before: current.designations.master_cv ?? null,
 				master_cv_after: result.designations.master_cv ?? null,
 				warning:
-					mode === 'replace'
+					(mode === 'replace'
 						? 'Replace the entire file collection. A complete recovery backup is created first.'
-						: 'Add missing files; existing files are preserved. Conflicts block restore.'
+						: 'Add missing files; existing files are preserved. Conflicts block restore.') +
+					(databaseIdentity()?.dataset_id !== result.dataset_id
+						? ' Job files will be unavailable until a database from the same dataset is restored. User documents remain accessible.'
+						: '')
 			};
 			await atomicJson(join(filePaths().state, `${id}.restore.json`), {
 				...preview,
 				catalog_token: current.token,
+				catalog_fingerprint: manifestHash(current),
 				stage,
 				manifest
 			});
@@ -295,6 +332,13 @@ export async function prepareFileRestore({ backup_id, mode = 'add' }) {
 }
 export async function applyFileRestore(m, record) {
 	checkToken(m.token, record.catalog_token);
+	if (record.catalog_fingerprint && manifestHash(m) !== record.catalog_fingerprint)
+		reject('CONFLICT', 'File collection identity or content changed. Prepare again.');
+	if (
+		record.database_dataset_id !== undefined &&
+		record.database_dataset_id !== (databaseIdentity()?.dataset_id ?? null)
+	)
+		reject('CONFLICT', 'Database dataset changed. Prepare the file restore again.');
 	await validateWholeStore(m);
 	const incoming = validateManifest(record.manifest);
 	for (const d of incoming.documents) {
@@ -317,7 +361,7 @@ export async function applyFileRestore(m, record) {
 	}
 	for (const d of m.documents)
 		if (!next.documents.some((x) => x.key === d.key)) changes.push({ key: d.key, remove: true });
-	await commitManifest(next, changes);
+	await commitManifest(next, changes, { restore: true });
 	return {
 		restore_id: record.restore_id,
 		recovery_backup_id: recovery.backup_id,
@@ -483,4 +527,30 @@ async function cleanupPreviews() {
 			await fs.rm(path, { force: true });
 		}
 	}
+}
+
+// Retention removes both halves of a completed automatic set. Prepared sources
+// and interrupted recovery sessions keep the entire set available.
+export async function removePairedFileBackup(database, now) {
+	const backupId = managed(database.file_backup_id);
+	return withFileLock(async () => {
+		const p = filePaths();
+		for (const name of await fs.readdir(p.state)) {
+			if (!name.endsWith('.restore.json')) continue;
+			const record = JSON.parse(await fs.readFile(join(p.state, name), 'utf8'));
+			if (!record.consumed && Date.parse(record.expires_at) > now && record.backup_id === backupId)
+				return false;
+		}
+		const { metadata } = await getFileBackup(backupId);
+		if (
+			metadata.database_backup_id !== database.backup_id ||
+			metadata.backup_set_id !== database.backup_set_id ||
+			metadata.kind !== 'scheduled'
+		)
+			reject('INTEGRITY', 'Automatic backup membership changed; retention stopped.');
+		await fs.rm(join(p.backups, `${backupId}.zip`));
+		await fs.rm(join(p.backups, `${backupId}.json`));
+		await fs.rm(join(p.backups, `${managed(metadata.backup_set_id)}.pair.json`), { force: true });
+		return true;
+	});
 }

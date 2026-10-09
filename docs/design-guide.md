@@ -271,10 +271,7 @@ a badge beside the title.
 
 ## Settings patterns
 
-Settings opens with a section navigation (Assistant, Backups, Files, Storage)
-and one `SectionCard` per section. Backup and file backup sections share
-`SchedulePanel`, `BackupList` and `RestorePreview` (a Current-versus-Backup
-table). Timestamps use `formatDateTime` and sizes use `formatBytes`.
+Settings opens with a section navigation (Assistant, Backups, Storage) and one `SectionCard` per section. Backup and restore has one primary Back up now action, a contents select (Database and files by default, Database only optional), and a secondary Back up files only button. One `SchedulePanel` selects contents, interval and retained sets. One `BackupList` groups paired artifacts into a single entry with separate database/file downloads; `RestorePreview` shows the selected contents. Independent file import, additive restore and unmatched folders live in Advanced file recovery. Timestamps use `formatDateTime` and sizes use `formatBytes`.
 
 ## Building a new page or feature
 
@@ -320,3 +317,5 @@ A change is done when:
   temporary database (`SATURDAY_DB_PATH` and `SATURDAY_FILES_PATH`), never the real `data` folder.
 - Every new add or edit flow has required marks and a "* Required" cue, an error `Notice` with a title, focus on
   the first error, a toast on success (`SAVED_MESSAGES`), and an empty state with one primary action.
+
+Dataset mismatches use the existing Settings Notice and restore-preview warning text. Explain that job attachments need matching backups, user documents remain available, and files are retained. Do not expose opaque dataset identifiers as controls or offer automatic rebinding.

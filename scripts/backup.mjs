@@ -15,6 +15,7 @@ try {
 			output: { type: 'string' },
 			json: { type: 'boolean' },
 			enabled: { type: 'string' },
+			contents: { type: 'string' },
 			'interval-hours': { type: 'string' },
 			keep: { type: 'string' }
 		},
@@ -27,6 +28,7 @@ try {
 		if (positionals[1] === 'show') {
 			if (
 				values.enabled !== undefined ||
+				values.contents !== undefined ||
 				values['interval-hours'] !== undefined ||
 				values.keep !== undefined
 			)
@@ -34,6 +36,7 @@ try {
 			result = getBackupSettings();
 		} else if (positionals[1] === 'set') {
 			const input = {};
+			if (values.contents !== undefined) input.contents = values.contents;
 			if (values.enabled !== undefined) {
 				if (!['true', 'false'].includes(values.enabled))
 					throw new TypeError('--enabled must be true or false.');
@@ -48,6 +51,7 @@ try {
 		if (
 			positionals.length ||
 			values.enabled !== undefined ||
+			values.contents !== undefined ||
 			values.keep !== undefined ||
 			values['interval-hours'] !== undefined
 		)

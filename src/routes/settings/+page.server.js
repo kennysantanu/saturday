@@ -1,4 +1,5 @@
 import {
+	getFileBackup,
 	getFileBackupSettings,
 	setFileBackupSettings,
 	createFileBackup,
@@ -17,6 +18,7 @@ import {
 import { fail, redirect } from '@sveltejs/kit';
 import {
 	createBackup,
+	getBackupFile,
 	listBackups,
 	getBackupSettings,
 	setBackupSettings,
@@ -58,7 +60,35 @@ export async function load({ setHeaders }) {
 			}
 		}
 	};
+	const backups = listBackups({ limit: 50 }).backups;
+	const fileByDatabase = new Map(
+		fileBackups.filter((b) => b.database_backup_id).map((b) => [b.database_backup_id, b])
+	);
+	const databaseHistory = await Promise.all(
+		backups.map(async (b) => {
+			let files = fileByDatabase.get(b.backup_id) ?? null;
+			if (!files && b.file_backup_id) {
+				try {
+					files = (await getFileBackup(b.file_backup_id)).metadata;
+				} catch {}
+			}
+			const fileId = b.file_backup_id ?? files?.backup_id;
+			return { ...b, file_backup_id: fileId, contents: fileId ? 'all' : 'database', files };
+		})
+	);
+	const pairedFiles = new Set(databaseHistory.map((b) => b.file_backup_id).filter(Boolean));
+	const backupHistory = [
+		...databaseHistory,
+		...fileBackups
+			.filter((b) => !pairedFiles.has(b.backup_id))
+			.map((b) => ({ ...b, contents: 'files' }))
+	]
+		.sort(
+			(a, b) => b.created_at.localeCompare(a.created_at) || a.backup_id.localeCompare(b.backup_id)
+		)
+		.slice(0, 50);
 	return {
+		backupHistory,
 		buildInfo,
 		storageCompatibility,
 		databasePath,
@@ -71,7 +101,7 @@ export async function load({ setHeaders }) {
 		mcpReady: existsSync(mcpPath),
 		configuration: JSON.stringify(config, null, 2),
 		backupSettings: getBackupSettings(),
-		backups: listBackups({ limit: 50 }).backups
+		backups
 	};
 }
 
@@ -105,6 +135,19 @@ async function boundedForm(request) {
 	}).formData();
 }
 export const actions = {
+	backup: async ({ request }) => {
+		try {
+			const values = await request.formData();
+			const contents = values.get('contents') ?? 'all';
+			if (!['all', 'database'].includes(String(contents)))
+				return fail(400, { backupError: 'Choose database and files or database only.' });
+			if (contents === 'all') await createBackupPair();
+			else createBackup();
+		} catch (error) {
+			return actionFailure(error);
+		}
+		redirect(303, '/settings?saved=backup');
+	},
 	filePairPrepare: async ({ request }) => {
 		try {
 			const v = await request.formData();
@@ -140,27 +183,6 @@ export const actions = {
 			return fail(400, { fileError: e.code ? e.message : 'File backup failed. Check disk space.' });
 		}
 		redirect(303, '/settings?saved=file-backup');
-	},
-	pairBackup: async () => {
-		try {
-			await createBackupPair();
-		} catch (e) {
-			return fail(400, { fileError: e.code ? e.message : 'Paired backup failed.' });
-		}
-		redirect(303, '/settings?saved=file-backup');
-	},
-	fileSchedule: async ({ request }) => {
-		try {
-			const v = await request.formData();
-			await setFileBackupSettings({
-				enabled: v.get('enabled') === 'on',
-				interval_hours: Number(v.get('interval_hours')),
-				keep_count: Number(v.get('keep_count'))
-			});
-		} catch (e) {
-			return fail(400, { fileError: e.code ? e.message : 'Could not save file settings.' });
-		}
-		redirect(303, '/settings?saved=file-settings');
 	},
 	filePrepare: async ({ request }) => {
 		try {
@@ -204,10 +226,12 @@ export const actions = {
 		try {
 			const values = await request.formData();
 			setBackupSettings({
+				contents: String(values.get('contents') ?? 'all'),
 				enabled: values.get('enabled') === 'on',
 				interval_hours: Number(values.get('interval_hours')),
 				keep_count: Number(values.get('keep_count'))
 			});
+			await setFileBackupSettings({ enabled: false });
 		} catch (error) {
 			return actionFailure(error);
 		}
@@ -225,6 +249,29 @@ export const actions = {
 			}
 			if (typeof backupId !== 'string' || !backupId)
 				return fail(400, { backupError: 'Choose a backup file or a saved backup.' });
+			if (backupId.startsWith('all:')) {
+				const database = getBackupFile(backupId.slice(4)).metadata;
+				const fileId =
+					database.file_backup_id ??
+					(await listFileBackups({ limit: 100 })).backups.find(
+						(b) => b.database_backup_id === database.backup_id
+					)?.backup_id;
+				if (!fileId)
+					return fail(400, {
+						backupError:
+							'The file artifact is unavailable. Download its database archive and import it separately.'
+					});
+				return {
+					filePairPreview: await prepareBackupPairRestore({
+						file_backup_id: fileId
+					})
+				};
+			}
+			if (backupId.startsWith('files:'))
+				return {
+					filePreview: await prepareFileRestore({ backup_id: backupId.slice(6), mode: 'replace' })
+				};
+			if (backupId.startsWith('database:')) backupId = backupId.slice(9);
 			return { preview: prepareRestore(backupId) };
 		} catch (error) {
 			return actionFailure(error);

@@ -17,7 +17,7 @@ async function tick() {
 			!(Date.parse(settings.next_due_at ?? '') > now) &&
 			!(Date.parse(settings.retry_after ?? '') > now)
 		) {
-			const result = runScheduledBackup();
+			const result = await runScheduledBackup();
 			if (result.error) console.error(`Automatic backup: ${result.error.message}`);
 		}
 	} catch (error) {

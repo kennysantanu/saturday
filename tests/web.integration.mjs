@@ -361,6 +361,60 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 				.toString(),
 			'PK'
 		);
+		const completeBackup = await post('backup', new FormData());
+		assert.equal(completeBackup.type, 'redirect');
+		const savedSet = listBackups({ limit: 50 }).backups.find(
+			(b) => b.file_backup_id && b.kind === 'manual'
+		);
+		assert.ok(savedSet);
+		const backupPage = await (await fetch(`${base}/settings`)).text();
+		assert.ok(backupPage.includes('Back up now'));
+		assert.ok(backupPage.includes('Back up files only'));
+		assert.ok(!backupPage.includes('Automatic file backups'));
+		assert.ok(backupPage.includes('Advanced file recovery'));
+		assert.equal(backupPage.split(`href="/settings/backups/${savedSet.backup_id}"`).length - 1, 1);
+		assert.equal(
+			backupPage.split(`href="/settings/files/${savedSet.file_backup_id}"`).length - 1,
+			1
+		);
+		const selection = new FormData();
+		selection.set('backup_id', `all:${savedSet.backup_id}`);
+		const pairPreview = await post('prepare', selection);
+		assert.equal(pairPreview.type, 'success');
+		assert.ok(pairPreview.data.filePairPreview.files.incoming_count >= 2);
+		const pairConfirm = new FormData();
+		pairConfirm.set('restore_id', pairPreview.data.filePairPreview.restore_id);
+		assert.equal((await post('filePairRestore', pairConfirm)).type, 'failure');
+		pairConfirm.set('confirm', 'true');
+		assert.equal((await post('filePairRestore', pairConfirm)).type, 'redirect');
+		const databaseOnly = new FormData();
+		databaseOnly.set('contents', 'database');
+		assert.equal((await post('backup', databaseOnly)).type, 'redirect');
+		const only = listBackups({ limit: 50 }).backups.find(
+			(b) => b.kind === 'manual' && !b.file_backup_id
+		);
+		selection.set('backup_id', `database:${only.backup_id}`);
+		assert.ok((await post('prepare', selection)).data.preview);
+		selection.set('backup_id', `files:${fileArtifact.backup_id}`);
+		assert.ok((await post('prepare', selection)).data.filePreview);
+		databaseOnly.set('contents', 'invalid');
+		assert.equal((await post('backup', databaseOnly)).type, 'failure');
+		const documents = await import('../src/lib/server/files/documents.js');
+		const scoped = await documents.createDocument({
+			scope: newId,
+			filename: 'private.md',
+			content: 'Original dataset only'
+		});
+		const { DatabaseSync } = await import('node:sqlite');
+		const db = new DatabaseSync(process.env.SATURDAY_DB_PATH);
+		db.prepare('UPDATE app_metadata SET dataset_id=?').run('f7313b27-59bc-4c3c-bc81-869f19938765');
+		db.close();
+		const mismatchSettings = await (await fetch(`${base}/settings`)).text();
+		assert.ok(mismatchSettings.includes('Job attachments need a matching database'));
+		const blockedFile = await fetch(`${base}/api/files/${scoped.id}?scope=${newId}`);
+		assert.ok(blockedFile.status >= 400);
+		assert.ok(!(await blockedFile.text()).includes('Original dataset only'));
+		assert.equal(await (await fetch(`${base}/api/files/${docId}`)).text(), '# Web career');
 
 		const childExit = new Promise((r) => child.on('close', r));
 		child.kill('SIGTERM');

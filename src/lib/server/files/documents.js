@@ -4,6 +4,7 @@ import { pipeline } from 'node:stream/promises';
 import { createWriteStream } from 'node:fs';
 import { Transform } from 'node:stream';
 import { fileType } from '../../file-types.js';
+import { databaseIdentity } from '../database.js';
 import {
 	withFileLock,
 	entryFor,
@@ -260,6 +261,8 @@ export async function openDocument({ id, scope = 'documents', range, token }) {
 }
 export async function storageSummary() {
 	return withFileLock(async (m) => ({
+		dataset_id: m.dataset_id,
+		dataset_matches_database: databaseIdentity()?.dataset_id === m.dataset_id,
 		count: m.documents.length,
 		bytes: m.documents.reduce((n, d) => n + d.size, 0),
 		root: filePaths().root,

@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { DatabaseSync } from 'node:sqlite';
-import { migrateDatabase, openDatabase } from '../src/lib/server/database.js';
+import { migrateDatabase, openDatabase, inTransaction } from '../src/lib/server/database.js';
 import {
 	createJob,
 	addJobUpdate,
@@ -234,49 +234,58 @@ test('oversized, symlink and overwrite destinations are rejected', () => {
 	symlinkSync(output, link);
 	assert.throws(() => backups.importBackup(link), failure('invalid_backup'));
 });
-test('automatic schedule defaults, catch-up, idempotent updates and retention', () => {
+test('automatic schedule defaults, catch-up, idempotent updates and retention', async () => {
 	populated();
 	assert.equal(backups.getBackupSettings().enabled, false);
-	assert.equal(backups.runScheduledBackup({ now: 1000 }).ran, false);
+	assert.equal((await backups.runScheduledBackup({ now: 1000 })).ran, false);
 	const manual = backups.createBackup();
-	backups.setBackupSettings({ enabled: true, interval_hours: 1, keep_count: 2 }, { now: 1000 });
-	assert.equal(backups.runScheduledBackup({ now: 1000 }).ran, true);
-	assert.equal(backups.runScheduledBackup({ now: 2000 }).ran, false);
+	backups.setBackupSettings(
+		{ contents: 'database', enabled: true, interval_hours: 1, keep_count: 2 },
+		{ now: 1000 }
+	);
+	assert.equal((await backups.runScheduledBackup({ now: 1000 })).ran, true);
+	assert.equal((await backups.runScheduledBackup({ now: 2000 })).ran, false);
 	const due = backups.getBackupSettings().next_due_at;
-	backups.setBackupSettings({ enabled: true, interval_hours: 1 }, { now: 3000 });
+	backups.setBackupSettings(
+		{ contents: 'database', enabled: true, interval_hours: 1 },
+		{ now: 3000 }
+	);
 	assert.equal(backups.getBackupSettings().next_due_at, due);
-	assert.equal(backups.runScheduledBackup({ now: 86401000 }).ran, true);
-	assert.equal(backups.runScheduledBackup({ now: 86401001 }).ran, false);
-	backups.runScheduledBackup({ now: 90001000 });
+	assert.equal((await backups.runScheduledBackup({ now: 86401000 })).ran, true);
+	assert.equal((await backups.runScheduledBackup({ now: 86401001 })).ran, false);
+	await backups.runScheduledBackup({ now: 90001000 });
 	const catalog = backups.listBackups().backups;
 	assert.equal(catalog.filter((b) => b.kind === 'scheduled').length, 2);
 	assert.ok(catalog.some((b) => b.backup_id === manual.backup_id));
 	backups.setBackupSettings({ enabled: false });
-	assert.equal(backups.runScheduledBackup({ now: 999999999 }).ran, false);
+	assert.equal((await backups.runScheduledBackup({ now: 999999999 })).ran, false);
 	assert.throws(() => backups.setBackupSettings({ interval_hours: 0 }), failure('invalid_request'));
 });
-test('retention protects a backup with a prepared restore, preserves settings after restore', () => {
-	backups.setBackupSettings({ enabled: true, interval_hours: 1, keep_count: 1 }, { now: 1000 });
-	const first = backups.runScheduledBackup({ now: 1000 }).backup;
+test('retention protects a backup with a prepared restore, preserves settings after restore', async () => {
+	backups.setBackupSettings(
+		{ contents: 'database', enabled: true, interval_hours: 1, keep_count: 1 },
+		{ now: 1000 }
+	);
+	const first = (await backups.runScheduledBackup({ now: 1000 })).backup;
 	const p = backups.prepareRestore(first.backup_id, { now: 3600999 });
-	backups.runScheduledBackup({ now: 3601000 });
+	await backups.runScheduledBackup({ now: 3601000 });
 	assert.equal(backups.listBackups().backups.filter((b) => b.kind === 'scheduled').length, 2);
 	backups.restoreBackup(p.restore_id, true, { now: 3601001 });
 	assert.equal(backups.getBackupSettings().enabled, true);
-	backups.runScheduledBackup({ now: 7201000 });
+	await backups.runScheduledBackup({ now: 7201000 });
 	assert.equal(backups.listBackups().backups.filter((b) => b.kind === 'scheduled').length, 1);
 	assert.equal(backups.listBackups().backups.filter((b) => b.kind === 'recovery').length, 1);
 });
-test('backup publication failure preserves last success and defers retry', () => {
-	backups.setBackupSettings({ enabled: true }, { now: 1000 });
+test('backup publication failure preserves last success and defers retry', async () => {
+	backups.setBackupSettings({ contents: 'database', enabled: true }, { now: 1000 });
 	// Existing metadata is sound but a live content invariant is broken after enabling.
 	const job = createJob({ job_title: 'Broken', company_name: 'State' });
 	const db = raw();
 	db.prepare('UPDATE jobs SET is_active=0 WHERE id=?').run(job.id);
 	db.close();
-	assert.equal(backups.runScheduledBackup({ now: 1000 }).error.code, 'invalid_backup');
+	assert.equal((await backups.runScheduledBackup({ now: 1000 })).error.code, 'invalid_backup');
 	assert.equal(backups.getBackupSettings().retry_after, new Date(301000).toISOString());
-	assert.equal(backups.runScheduledBackup({ now: 2000 }).ran, false);
+	assert.equal((await backups.runScheduledBackup({ now: 2000 })).ran, false);
 	assert.equal(backups.getBackupSettings().last_success_at, null);
 });
 function childScript(code) {
@@ -349,9 +358,9 @@ test('restore preserves deleted allocation counters, dataset identity and stale 
 	check.close();
 });
 test('two processes coordinate one scheduled backup and concurrent migrations', async () => {
-	backups.setBackupSettings({ enabled: true }, { now: 1000 });
+	backups.setBackupSettings({ contents: 'database', enabled: true }, { now: 1000 });
 	const code =
-		"import {runScheduledBackup} from './src/lib/server/backups.js';console.log(JSON.stringify(runScheduledBackup({now:1000})));";
+		"import {runScheduledBackup} from './src/lib/server/backups.js';console.log(JSON.stringify(await runScheduledBackup({now:1000})));";
 	const results = await Promise.all([completed(childScript(code)), completed(childScript(code))]);
 	assert.equal(results.map(JSON.parse).filter((r) => r.ran).length, 1);
 	const newDb = join(scratch, 'new.sqlite');
@@ -778,7 +787,16 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 		assert.ok(restored.recovery_backup_id);
 		const replay = await call('restore_backup', { restore_id: p.restore_id, confirm: true });
 		assert.equal(replay.error.code, 'restore_consumed');
-		const settings = await call('set_backup_settings', { enabled: true, keep_count: 2 });
+		const settings = await call('set_backup_settings', {
+			enabled: true,
+			contents: 'all',
+			keep_count: 2
+		});
+		assert.equal(settings.contents, 'all');
+		assert.equal(
+			(await call('set_backup_settings', { contents: 'database' })).contents,
+			'database'
+		);
 		assert.equal(settings.keep_count, 2);
 		const doc = await call('create_document', { filename: 'master.md', content: '# Career' });
 		assert.equal(doc.created_via, 'mcp');
@@ -823,5 +841,35 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 		child.kill();
 		await new Promise((r) => child.on('close', r));
 		for (const p of pending.values()) clearTimeout(p.timer);
+	}
+});
+
+test('an already-open connection rejects a schema changed by another process before mutation', () => {
+	const db = openDatabase();
+	try {
+		const child = spawnSync(
+			process.execPath,
+			[
+				'--input-type=module',
+				'-e',
+				`import { DatabaseSync } from 'node:sqlite'; const db=new DatabaseSync(process.env.SATURDAY_DB_PATH); db.exec("INSERT INTO schema_migrations VALUES(2,'future','2026-10-08')"); db.close();`
+			],
+			{ env: process.env, encoding: 'utf8' }
+		);
+		assert.equal(child.status, 0, child.stderr);
+		const before = readFileSync(process.env.SATURDAY_DB_PATH);
+		let entered = false;
+		assert.throws(
+			() =>
+				inTransaction(db, () => {
+					entered = true;
+					db.exec('DELETE FROM jobs');
+				}),
+			/Unsupported database schema/
+		);
+		assert.equal(entered, false);
+		assert.deepEqual(readFileSync(process.env.SATURDAY_DB_PATH), before);
+	} finally {
+		db.close();
 	}
 });

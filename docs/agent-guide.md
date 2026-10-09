@@ -91,12 +91,12 @@ npm run backup -- --output ./career-backup.sqlite --json
 npm run restore -- ./career-backup.sqlite --inspect --json
 npm run restore -- --restore-id <preview-id> --confirm --json
 npm run backup -- schedule show --json
-npm run backup -- schedule set --enabled true --interval-hours 24 --keep 10 --json
+npm run backup -- schedule set --enabled true --contents all --interval-hours 24 --keep 10 --json
 ```
 
 When parsing program output, use `node scripts/backup.mjs ... --json` or `node scripts/restore.mjs ... --json` directly; npm may print its own script banner. Backup retains a managed copy even when exporting. Export never overwrites an existing file. Show the preview to the user and obtain authorization before committing a restore; record the recovery backup location returned on success. Never automatically retry after an uncertain response. Do not send backup contents or private paths to unrelated services.
 
-Enabling/changing automatic backup retention requires user authorization to delete older automatic files under that policy. Manual/imported/recovery backups remain. Start the web app through the documented npm scripts to run the scheduler; MCP alone does not schedule backups. Custom launches of `build/index.js` must set `BODY_SIZE_LIMIT=105906176` to support the documented 100 MiB uploads, and do not automatically start the scheduler.
+The main schedule accepts `--contents all` (database and files) or `--contents database`; new schedules default to all and existing schedules without this field retain database-only behavior. Retention counts complete sets and removes both automatic artifacts after a successful replacement. The manual `backup` command remains database-only; use the file CLI pair command for a complete set. Enabling/changing automatic backup retention requires user authorization to delete older automatic sets under that policy. Manual/imported/recovery backups remain. Start the web app through the documented npm scripts to run the scheduler; MCP alone does not schedule backups. Custom launches of `build/index.js` must set `BODY_SIZE_LIMIT=105906176` to support the documented 100 MiB uploads, and do not automatically start the scheduler.
 
 The current app rejects newer migration histories. Do not alter migration records to bypass this check: upgrade the app instead. In-app/CLI restore requires a healthy target database; offline replacement of a corrupt database requires stopping web/MCP processes first and preserving the original database and sidecars for recovery.
 
@@ -112,7 +112,7 @@ npm run files -- import ./files.zip
 npm run files -- export <backup-id> ./export.zip
 npm run files -- prepare <backup-id> --replace
 npm run files -- restore <preview-id> --confirm
-npm run files -- schedule set --enabled true --interval-hours 24 --keep 10
+npm run files -- schedule set --enabled true --contents all --interval-hours 24 --keep 10
 npm run files -- pair
 npm run files -- prepare-pair <file-backup-id>
 npm run files -- restore-pair <preview-id> --confirm
@@ -126,4 +126,4 @@ Puppeteer uses managed Chrome installed by `npm run setup` or `npm run setup:pdf
 
 ## Network upgrade and verification
 
-Migration 3 adds people, job-person links and optional interaction history without changing jobs or managed files. Run the normal build/migrate update steps. The central MCP entry now exposes 40 tools, including twelve Network operations documented in the [assistant guide](assistant-guide.md#network-tools). Verify a client with `list_networks` before claiming it is connected; writes use the same data as `/networks` and job details. Database backups include Network; restoring schema-1/2 clears new tables with a complete recovery snapshot first. File ZIP/manifest formats remain unchanged.
+Numeric schema baseline 1 includes people, job-person links and optional interaction history. Jobs, people and both histories use positive safe integer IDs; MCP IDs are JSON numbers. The central MCP entry exposes 40 tools, including twelve Network operations documented in the [assistant guide](assistant-guide.md#network-tools). UUID-era databases/backups and earlier unbound file manifests/pairs are unsupported. Never alter migration records or dataset IDs to bypass checks. File manifest `saturday.files.numeric` version 1 binds to the database dataset; restore matching independent artifacts in either order, or a validated coordinated pair. A mismatch retains files and blocks normal job-attachment access. Stop and rebuild/restart all processes together after updates; setup never resets data automatically.

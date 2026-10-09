@@ -10,7 +10,9 @@
 		detail: string;
 		href: string;
 		filename: string;
-		paired?: boolean;
+		fileHref?: string;
+		downloadLabel?: string;
+		contents?: string;
 	};
 
 	/** Saved backups as rows: kind, when, what it holds, and a download link. */
@@ -32,15 +34,16 @@
 						<p class="flex flex-wrap items-center gap-2 font-medium">
 							{formatDateTime(item.createdAt)}
 							<Badge variant="secondary" class="capitalize">{item.kind}</Badge>
-							{#if item.paired}<Badge variant="outline">Paired</Badge>{/if}
+							{#if item.contents}<Badge variant="outline">{item.contents}</Badge>{/if}
 						</p>
 						<p class="text-muted-foreground">{item.detail}</p>
 					</div>
 					<div class="flex flex-wrap items-center gap-2">
 						{#if extra}{@render extra(item)}{/if}
 						<a class="link" href={item.href}
-							>Download<span class="sr-only"> {item.filename}</span></a
+							>{item.downloadLabel ?? 'Download'}<span class="sr-only"> {item.filename}</span></a
 						>
+						{#if item.fileHref}<a class="link" href={item.fileHref}>Download files</a>{/if}
 					</div>
 				</li>
 			{/each}
