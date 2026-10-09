@@ -50,7 +50,7 @@ If **Settings** says the MCP entry point is missing, run `npm run build` and rel
 | `prepare_restore` | Validates a backup ID and previews replacement | Creates temporary staging |
 | `restore_backup` | Replaces records using the prepared ID and explicit confirmation | Yes |
 | `get_backup_settings` | Reads automatic backup settings/status | No |
-| `set_backup_settings` | Configures enablement, interval, and retained automatic-file count | Yes; authorizes retention |
+| `set_backup_settings` | Configures enablement, interval, and contents and retained automatic-set count | Yes; authorizes retention |
 
 Records created this way are labeled **Added by assistant**. Editing or removing job history updates, dismissing jobs, and reopening jobs stay in the web app. Your assistant app may ask you to approve changes before it makes them.
 
@@ -165,4 +165,12 @@ Master CV resolves directly through `get_document({designation:"master_cv",inclu
 
 To tailor a resume, identify the job with existing job tools, read Master CV/template, create job-scoped HTML, review/edit source, then generate a PDF with its ID/scope/token. Report saved filenames and job; a successful render is not visual verification. Existing PDFs remain snapshots. Binary files support metadata, rename/copy/delete, with UI download.
 
-`get_backup_settings` and `set_backup_settings` accept optional `kind:"files"`; omitted kind preserves legacy database behavior. File settings are independent and the MCP process starts no scheduler. Restore requires showing the preview and obtaining explicit authorization. Confirmation flags alone are not consent. After an interrupted mutation, inspect current state before deciding what remains; never automatically retry create/copy/generate/delete/restore.
+`get_backup_settings` and `set_backup_settings` accept optional `kind:"files"`; omitted kind selects the main schedule. Its optional `contents:"all"|"database"` chooses coordinated database/files sets or database-only snapshots. New schedules default to all; existing schedules without a contents field retain database-only behavior. `keep_count` counts complete automatic sets, including both artifacts. `create_backup` remains database-only; use the existing coordinated-pair tool for both. File settings are independent and the MCP process starts no scheduler. Restore requires showing the preview and obtaining explicit authorization. Confirmation flags alone are not consent. After an interrupted mutation, inspect current state before deciding what remains; never automatically retry create/copy/generate/delete/restore.
+
+## Numeric references and recovery namespaces
+
+Job, person and update IDs are positive safe integer JSON numbers, for example `get_job({job_id: 2345})`; document IDs and restore tokens remain strings. Document scope is `"documents"` or a numeric job ID. File keys are `documents/<filename>` or `jobs/<id>/<filename>`.
+
+Job-file access requires matching database/manifest dataset identities. A folder number alone cannot associate files with a different database. Report `DATASET_MISMATCH` and preserve the files; never rewrite dataset metadata to bypass the check. User documents and explicit Settings recovery remain available. Independent database/file restores may occur in either order, but job-file access waits for a matching pair of datasets. Add missing cannot combine populated different datasets; Replace installs the incoming namespace. Show dataset warnings as well as counts before requesting restore confirmation.
+
+Backup results include format/dataset/creator-build metadata. Same-dataset database restores retain higher allocation counters; matching file-folder IDs are also reserved to avoid reuse after independently timed restores. Coordinated artifacts must have matching identities and hashes. Unsupported old artifacts require the corresponding development build or an explicit reset; rebuild/restart every process together after an update.

@@ -259,7 +259,7 @@ const backupTools = [
 	],
 	[
 		'prepare_restore',
-		'Preview replacement of all jobs, people, relationships and both histories from a backup. Older backups clear Network data. Show current/incoming counts to the user and obtain explicit authorization before restore_backup. Preview expires after ten minutes.',
+		'Preview replacement of all jobs, people, relationships and both histories from a backup. Show current/incoming counts and file-dataset warnings to the user and obtain explicit authorization before restore_backup. Preview expires after ten minutes.',
 		z.object({ backup_id: z.string().uuid() }),
 		({ backup_id }) => prepareRestore(backup_id),
 		false,
@@ -286,10 +286,11 @@ const backupTools = [
 	],
 	[
 		'set_backup_settings',
-		'Configure automatic backups. Enabling authorizes deletion of older automatic backups beyond keep_count. Manual and recovery backups are preserved. Obtain user authorization for this policy before changing it.',
+		'Configure automatic backups; contents selects database and files (all) or database only. File-only legacy schedules remain available using kind files. Enabling authorizes deletion of older automatic backups beyond keep_count. Manual and recovery backups are preserved. Obtain user authorization for this policy before changing it.',
 		z
 			.object({
 				kind: z.enum(['database', 'files']).optional(),
+				contents: z.enum(['all', 'database']).optional(),
 				enabled: z.boolean().optional(),
 				interval_hours: z.number().int().min(1).max(168).optional(),
 				keep_count: z.number().int().min(1).max(100).optional()

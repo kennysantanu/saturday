@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, readFile, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -280,9 +281,13 @@ test('manifest validation preserves extensions and refuses unknown versions', as
 		join(s.filePaths().root, 'manifest.json'),
 		JSON.stringify({ ...m, format_version: 2 })
 	);
-	await assert.rejects(d.listDocuments(), { code: 'FORMAT' });
-	assert.ok(jobs.getJob(job.id), 'Core jobs remain usable');
-	await writeFile(join(s.filePaths().root, 'manifest.json'), stable);
+	try {
+		await assert.rejects(d.listDocuments(), { code: 'FORMAT' });
+		assert.throws(() => jobs.getJob(job.id), { code: 'FORMAT' });
+	} finally {
+		await writeFile(join(s.filePaths().root, 'manifest.json'), stable);
+	}
+	assert.ok(jobs.getJob(job.id));
 });
 test('corrupt and extra archive contents fail without modifying live state', async () => {
 	const { default: yazl } = await import('yazl');
@@ -425,4 +430,410 @@ test('coordinated pair preparation rejects mismatched artifact identities', asyn
 		code: 'INTEGRITY'
 	});
 	await writeFile(path, original);
+});
+
+async function isolatedStores(run) {
+	const previousDb = process.env.SATURDAY_DB_PATH;
+	const previousFiles = process.env.SATURDAY_FILES_PATH;
+	const scratch = await mkdtemp(join(root, 'namespace-'));
+	process.env.SATURDAY_DB_PATH = join(scratch, 'database.sqlite');
+	process.env.SATURDAY_FILES_PATH = join(scratch, 'files');
+	try {
+		await run(scratch);
+	} finally {
+		process.env.SATURDAY_DB_PATH = previousDb;
+		process.env.SATURDAY_FILES_PATH = previousFiles;
+		await rm(scratch, { recursive: true, force: true });
+	}
+}
+
+test('new file stores bind once to the database and accept only canonical numeric job keys', async () => {
+	await isolatedStores(async () => {
+		const database = await import('../src/lib/server/database.js');
+		await d.createDocument({ filename: 'cv.md', content: '# CV' });
+		const m = JSON.parse(await readFile(join(s.filePaths().root, 'manifest.json'), 'utf8'));
+		assert.equal(m.format, 'saturday.files.numeric');
+		assert.equal(m.dataset_id, database.databaseIdentity().dataset_id);
+		const original = m.dataset_id;
+		database.migrateDatabase();
+		await d.listDocuments();
+		assert.equal(database.databaseIdentity().dataset_id, original);
+		for (const id of ['01', '0', '-1', '1.0', '1e1', 'abc', '9007199254740992'])
+			assert.throws(() => s.validKey(`jobs/${id}/cv.md`), { code: 'VALIDATION' });
+		assert.equal(s.validKey('jobs/2345/cv.md'), 'jobs/2345/cv.md');
+		const { format, dataset_id, ...legacy } = m;
+		assert.throws(() => s.validateManifest(legacy), { code: 'FORMAT' });
+		assert.throws(() => s.validateManifest({ ...m, dataset_id: 'unknown' }), { code: 'FORMAT' });
+	});
+});
+
+test('same numeric job in another dataset cannot expose files; independent backup and explicit recovery remain available', async () => {
+	await isolatedStores(async (scratch) => {
+		const first = jobs.createJob({ job_title: 'Original', company_name: 'A' });
+		const file = await d.createDocument({
+			scope: first.id,
+			filename: 'resume.html',
+			content: '<p>Private A</p>'
+		});
+		const userFile = await d.createDocument({ filename: 'notes.md', content: 'Shared collection' });
+		const identity = (await import('../src/lib/server/database.js')).databaseIdentity().dataset_id;
+		process.env.SATURDAY_DB_PATH = join(scratch, 'other.sqlite');
+		const other = jobs.createJob({ job_title: 'Different', company_name: 'B' });
+		assert.equal(first.id, other.id);
+		for (const operation of [
+			() => d.listDocuments({ scope: other.id }),
+			() => d.getDocument({ id: file.id, scope: other.id, include_content: true }),
+			() => d.openDocument({ id: file.id, scope: other.id }),
+			() => d.editDocument({ id: file.id, scope: other.id, token: file.token, content: 'Wrong' }),
+			() =>
+				d.copyDocument({
+					id: userFile.id,
+					token: userFile.token,
+					destination_scope: other.id,
+					filename: 'copy.md'
+				}),
+			() => pdf.generateDocumentPdf({ id: file.id, scope: other.id, token: file.token }),
+			() => pairs.createBackupPair()
+		])
+			await assert.rejects(operation, { code: 'DATASET_MISMATCH' });
+		assert.equal(
+			(await d.getDocument({ id: userFile.id, include_content: true })).content,
+			'Shared collection'
+		);
+		assert.deepEqual((await d.storageSummary()).unmatched, ['1']);
+		assert.equal((await d.recoveryDocuments(1))[0].id, file.id);
+		const recovered = await d.recoverCopy({
+			id: file.id,
+			job_id: 1,
+			token: file.token,
+			destination_scope: 'documents',
+			filename: 'recovered.html'
+		});
+		assert.equal(
+			(await d.getDocument({ id: recovered.id, include_content: true })).content,
+			'<p>Private A</p>'
+		);
+		const artifact = await b.createFileBackup();
+		assert.equal(artifact.dataset_id, identity);
+		assert.equal(typeof artifact.creator_build, 'string');
+		assert.equal(jobs.getJob(other.id).title, 'Different');
+		// Initialized file collections can be backed up even without a database.
+		process.env.SATURDAY_DB_PATH = join(scratch, 'absent.sqlite');
+		assert.equal((await b.createFileBackup()).dataset_id, identity);
+		await assert.rejects(s.fs.access(process.env.SATURDAY_DB_PATH), { code: 'ENOENT' });
+	});
+});
+
+for (const order of ['database-first', 'files-first'])
+	test(`independent ${order} recovery reserves newer same-dataset folders`, async () => {
+		await isolatedStores(async (scratch) => {
+			const dbBackups = await import('../src/lib/server/backups.js');
+			const database = await import('../src/lib/server/database.js');
+			jobs.createJob({ job_title: 'Snapshot', company_name: 'A' });
+			const dbSnapshot = dbBackups.createBackup();
+			const dbPath = dbBackups.getBackupFile(dbSnapshot.backup_id).path;
+			const later = jobs.createJob({ job_title: 'Later', company_name: 'A' });
+			const file = await d.createDocument({
+				scope: later.id,
+				filename: 'later.md',
+				content: 'Owned by later job'
+			});
+			const fileSnapshot = await b.createFileBackup();
+			const filePath = (await b.getFileBackup(fileSnapshot.backup_id)).path;
+			process.env.SATURDAY_DB_PATH = join(scratch, 'clean.sqlite');
+			process.env.SATURDAY_FILES_PATH = join(scratch, 'clean-files');
+			jobs.createJob({ job_title: 'Disposable', company_name: 'B' });
+			const dbImported = dbBackups.importBackup(dbPath);
+			const fileImported = await b.importFileBackup(
+				(await import('node:fs')).createReadStream(filePath)
+			);
+			const restoreDatabase = () =>
+				dbBackups.restoreBackup(dbBackups.prepareRestore(dbImported.backup_id).restore_id, true);
+			const restoreFiles = async () => {
+				const preview = await b.prepareFileRestore({ backup_id: fileImported.backup_id });
+				assert.equal(preview.incoming_dataset_id, dbSnapshot.dataset_id);
+				assert.equal(preview.files_match_database, order === 'database-first');
+				await b.restoreFiles({ restore_id: preview.restore_id, confirm: true });
+			};
+			if (order === 'database-first') {
+				restoreDatabase();
+				await restoreFiles();
+			} else {
+				await restoreFiles();
+				await assert.rejects(d.listDocuments({ scope: 1 }), { code: 'DATASET_MISMATCH' });
+				restoreDatabase();
+			}
+			assert.equal(database.databaseIdentity().dataset_id, dbSnapshot.dataset_id);
+			assert.equal(jobs.getJob(later.id), null);
+			const next = jobs.createJob({ job_title: 'New after recovery', company_name: 'A' });
+			assert.equal(next.id, later.id + 1);
+			assert.equal((await d.recoveryDocuments(later.id))[0].id, file.id);
+			assert.equal((await d.listDocuments({ scope: next.id })).total, 0);
+		});
+	});
+
+test('cross-dataset Add missing is blocked and database changes invalidate file restore previews', async () => {
+	await isolatedStores(async (scratch) => {
+		const database = await import('../src/lib/server/database.js');
+		await d.createDocument({ filename: 'a.md', content: 'A' });
+		const snapshot = await b.createFileBackup();
+		const archive = (await b.getFileBackup(snapshot.backup_id)).path;
+		process.env.SATURDAY_DB_PATH = join(scratch, 'b.sqlite');
+		process.env.SATURDAY_FILES_PATH = join(scratch, 'b-files');
+		await d.createDocument({ filename: 'b.md', content: 'B' });
+		const imported = await b.importFileBackup((await import('node:fs')).createReadStream(archive));
+		await assert.rejects(b.prepareFileRestore({ backup_id: imported.backup_id }), {
+			code: 'DATASET_MISMATCH'
+		});
+		const preview = await b.prepareFileRestore({ backup_id: imported.backup_id, mode: 'replace' });
+		assert.equal(preview.files_match_database, false);
+		assert.match(preview.warning, /same dataset/);
+		const original = await readFile(join(s.filePaths().root, 'manifest.json'));
+		database.withDatabase((db) =>
+			db.prepare('UPDATE app_metadata SET dataset_id=?').run(randomUUID())
+		);
+		await assert.rejects(b.restoreFiles({ restore_id: preview.restore_id, confirm: true }), {
+			code: 'CONFLICT'
+		});
+		assert.deepEqual(await readFile(join(s.filePaths().root, 'manifest.json')), original);
+	});
+});
+
+test('mutation boundaries reject a manifest replaced by another process, including an already-open file operation', async () => {
+	await isolatedStores(async () => {
+		await d.createDocument({ filename: 'safe.md', content: 'Safe' });
+		const path = join(s.filePaths().root, 'manifest.json');
+		const original = await readFile(path);
+		const future = JSON.parse(original);
+		future.format_version = 2;
+		await assert.rejects(
+			s.withFileLock(async (m) => {
+				const script = `import {writeFileSync} from 'node:fs';writeFileSync(process.argv[1],process.argv[2]);`;
+				await new Promise((resolve, reject) => {
+					const child = spawn(
+						process.execPath,
+						['--input-type=module', '-e', script, path, JSON.stringify(future)],
+						{ stdio: ['ignore', 'pipe', 'pipe'] }
+					);
+					child.on('error', reject);
+					child.on('close', (code) => (code ? reject(new Error('Child failed')) : resolve()));
+				});
+				await s.createEntry(m, { name: 'blocked.md', bytes: Buffer.from('Blocked') });
+			}),
+			{ code: 'FORMAT' }
+		);
+		assert.throws(() => jobs.createJob({ job_title: 'Blocked', company_name: 'Example' }), {
+			code: 'FORMAT'
+		});
+		await assert.rejects(s.fs.access(join(s.filePaths().root, 'documents/blocked.md')), {
+			code: 'ENOENT'
+		});
+		await assert.rejects(s.fs.access(join(s.filePaths().state, 'journal.json')), {
+			code: 'ENOENT'
+		});
+		await writeFile(path, original);
+		assert.equal((await d.listDocuments()).total, 1);
+	});
+});
+
+test('cross-dataset pair restore publishes one namespace and retains incoming empty-table counters', async () => {
+	await isolatedStores(async (scratch) => {
+		const database = await import('../src/lib/server/database.js');
+		const original = jobs.createJob({ job_title: 'Original', company_name: 'A' });
+		await d.createDocument({ scope: original.id, filename: 'resume.md', content: 'A' });
+		database.withDatabase((db) =>
+			db.exec(
+				"UPDATE sqlite_sequence SET seq=40 WHERE name='jobs'; INSERT INTO sqlite_sequence(name,seq) VALUES('job_updates',30);"
+			)
+		);
+		const pair = await pairs.createBackupPair();
+		assert.equal(pair.format, 'saturday.backup-pair.numeric');
+		const originalDbPath = process.env.SATURDAY_DB_PATH;
+		process.env.SATURDAY_DB_PATH = join(scratch, 'other.sqlite');
+		jobs.createJob({ job_title: 'Other', company_name: 'B' });
+		database.withDatabase((db) => db.exec("UPDATE sqlite_sequence SET seq=100 WHERE name='jobs'"));
+		await s.fs.copyFile(process.env.SATURDAY_DB_PATH, originalDbPath);
+		process.env.SATURDAY_DB_PATH = originalDbPath;
+		const preview = await pairs.prepareBackupPairRestore({ file_backup_id: pair.file_backup_id });
+		await pairs.restoreBackupPair({ restore_id: preview.restore_id, confirm: true });
+		assert.equal(database.databaseIdentity().dataset_id, pair.dataset_id);
+		assert.equal((await d.listDocuments({ scope: 1 })).total, 1);
+		const next = jobs.createJob({ job_title: 'Next', company_name: 'A' });
+		assert.equal(next.id, 41);
+		assert.equal(
+			jobs.addJobUpdate({ job_id: next.id, event_date: '2026-10-08', note: 'Next' }).id,
+			31
+		);
+	});
+});
+
+test('unsupported archives, pair formats and pending journals are rejected without publication', async () => {
+	await isolatedStores(async (scratch) => {
+		await d.createDocument({ filename: 'safe.md', content: 'Keep me' });
+		const path = join(s.filePaths().root, 'manifest.json');
+		const before = await readFile(path);
+		const yazl = (await import('yazl')).default;
+		const zip = new yazl.ZipFile();
+		const legacy = join(scratch, 'legacy.zip');
+		const { pipeline } = await import('node:stream/promises');
+		const fs = await import('node:fs');
+		const writing = pipeline(zip.outputStream, fs.createWriteStream(legacy));
+		zip.addBuffer(
+			Buffer.from(
+				JSON.stringify({ format_version: 1, token: randomUUID(), documents: [], designations: {} })
+			),
+			'manifest.json'
+		);
+		zip.end();
+		await writing;
+		await assert.rejects(b.importFileBackup(fs.createReadStream(legacy)), { code: 'FORMAT' });
+		assert.deepEqual(await readFile(path), before);
+		const pair = await pairs.createBackupPair();
+		const pairPath = join(s.filePaths().backups, `${pair.backup_set_id}.pair.json`);
+		await writeFile(pairPath, JSON.stringify({ ...pair, format: 'future.format' }));
+		await assert.rejects(pairs.prepareBackupPairRestore({ file_backup_id: pair.file_backup_id }), {
+			code: 'FORMAT'
+		});
+		const manifest = JSON.parse(before);
+		manifest.format_version = 2;
+		await s.atomicJson(join(s.filePaths().state, 'journal.json'), {
+			manifest,
+			changes: [{ key: 'documents/safe.md', remove: true }]
+		});
+		await assert.rejects(d.listDocuments(), { code: 'FORMAT' });
+		assert.equal(await readFile(join(s.filePaths().root, 'documents/safe.md'), 'utf8'), 'Keep me');
+		assert.deepEqual(await readFile(path), before);
+	});
+});
+
+test('interrupted cross-dataset pair publication recovers the original database and file namespaces', async () => {
+	await isolatedStores(async (scratch) => {
+		const database = await import('../src/lib/server/database.js');
+		const dbBackups = await import('../src/lib/server/backups.js');
+		jobs.createJob({ job_title: 'Incoming A', company_name: 'A' });
+		await d.createDocument({ scope: 1, filename: 'a.md', content: 'A' });
+		const incomingPair = await pairs.createBackupPair();
+		const originalDbPath = process.env.SATURDAY_DB_PATH;
+		const incomingRoot = process.env.SATURDAY_FILES_PATH;
+		process.env.SATURDAY_DB_PATH = join(scratch, 'b.sqlite');
+		process.env.SATURDAY_FILES_PATH = join(scratch, 'b-files');
+		jobs.createJob({ job_title: 'Original B', company_name: 'B' });
+		const originalFile = await d.createDocument({ scope: 1, filename: 'b.md', content: 'B' });
+		const originalDataset = database.databaseIdentity().dataset_id;
+		await s.fs.copyFile(process.env.SATURDAY_DB_PATH, originalDbPath);
+		process.env.SATURDAY_DB_PATH = originalDbPath;
+		// Keep the incoming pair artifacts, but install the original B collection as live files.
+		await rm(incomingRoot, { recursive: true, force: true });
+		await s.fs.cp(process.env.SATURDAY_FILES_PATH, incomingRoot, { recursive: true });
+		process.env.SATURDAY_FILES_PATH = incomingRoot;
+		const preview = await pairs.prepareBackupPairRestore({
+			file_backup_id: incomingPair.file_backup_id
+		});
+		await assert.rejects(
+			dbBackups.restoreDatabaseWithFiles(preview.database.restore_id, (recoveryDb) =>
+				s.withFileLock(async (m) => {
+					const recoveryFiles = await b.publishCapture(await b.captureFiles(m), 'recovery');
+					await s.atomicJson(join(s.filePaths().state, 'pair-session.json'), {
+						format: 'saturday.backup-pair.numeric',
+						format_version: 1,
+						recovery_database_id: recoveryDb.backup_id,
+						recovery_files_id: recoveryFiles.backup_id,
+						recovery_database_dataset_id: recoveryDb.dataset_id,
+						recovery_files_dataset_id: recoveryFiles.dataset_id
+					});
+					const record = JSON.parse(
+						await readFile(
+							join(s.filePaths().state, `${preview.files.restore_id}.restore.json`),
+							'utf8'
+						)
+					);
+					await b.applyFileRestore(m, record);
+					throw new Error('Interrupted after file publication');
+				})
+			),
+			/Interrupted after file publication/
+		);
+		await assert.rejects(d.listDocuments(), { code: 'RECOVERY_REQUIRED' });
+		await pairs.recoverBackupPair();
+		assert.equal(database.databaseIdentity().dataset_id, originalDataset);
+		assert.equal(jobs.getJob(1).title, 'Original B');
+		assert.equal(
+			(await d.getDocument({ id: originalFile.id, scope: 1, include_content: true })).content,
+			'B'
+		);
+	});
+});
+
+test('one automatic schedule captures and retains complete sets; prepared file halves protect both artifacts', async () => {
+	await isolatedStores(async () => {
+		const backups = await import('../src/lib/server/backups.js');
+		jobs.createJob({ job_title: 'Scheduled', company_name: 'Example' });
+		await d.createDocument({ filename: 'cv.md', content: '# CV' });
+		assert.equal(backups.getBackupSettings().contents, 'all');
+		const manual = await pairs.createBackupPair();
+		const fileOnly = await b.createFileBackup();
+		const now = Date.now();
+		backups.setBackupSettings(
+			{ enabled: true, contents: 'all', interval_hours: 1, keep_count: 1 },
+			{ now }
+		);
+		const first = await backups.runScheduledBackup({ now });
+		assert.equal(first.ran, true);
+		const original = first.backup;
+		assert.ok(original.file_backup_id);
+		await b.prepareFileRestore({ backup_id: original.file_backup_id, mode: 'replace' });
+		assert.equal((await backups.runScheduledBackup({ now: now + 1 })).ran, false);
+		// Re-enabling makes a catch-up run due while the preview is still valid.
+		backups.setBackupSettings({ enabled: false }, { now: now + 2 });
+		backups.setBackupSettings({ enabled: true }, { now: now + 2 });
+		await backups.runScheduledBackup({ now: now + 2 });
+		assert.equal(
+			backups.listBackups({ limit: 50 }).backups.filter((x) => x.kind === 'scheduled').length,
+			2
+		);
+		assert.ok(backups.getBackupFile(original.backup_id));
+		assert.ok(await b.getFileBackup(original.file_backup_id));
+		// Once the preview expires, retention removes both halves and the pair record.
+		await backups.runScheduledBackup({ now: now + 3600002 });
+		assert.equal(
+			backups.listBackups({ limit: 50 }).backups.filter((x) => x.kind === 'scheduled').length,
+			1
+		);
+		assert.throws(() => backups.getBackupFile(original.backup_id));
+		await assert.rejects(b.getFileBackup(original.file_backup_id));
+		await assert.rejects(
+			readFile(join(s.filePaths().backups, `${original.backup_set_id}.pair.json`))
+		);
+		assert.ok(backups.getBackupFile(manual.database_backup_id));
+		assert.ok(await b.getFileBackup(manual.file_backup_id));
+		assert.ok(await b.getFileBackup(fileOnly.backup_id));
+	});
+});
+
+test('a failed complete backup keeps prior sets and database-only mode skips file contents', async () => {
+	await isolatedStores(async () => {
+		const backups = await import('../src/lib/server/backups.js');
+		jobs.createJob({ job_title: 'Retention', company_name: 'Example' });
+		const file = await d.createDocument({ filename: 'cv.md', content: 'healthy' });
+		const now = Date.now();
+		backups.setBackupSettings(
+			{ enabled: true, contents: 'all', interval_hours: 1, keep_count: 1 },
+			{ now }
+		);
+		const first = await backups.runScheduledBackup({ now });
+		await writeFile(join(s.filePaths().root, file.key), 'tampered');
+		const failure = await backups.runScheduledBackup({ now: now + 3600000 });
+		assert.equal(failure.ran, false);
+		assert.ok(failure.error);
+		assert.equal(backups.getBackupSettings().last_backup_id, first.backup.backup_id);
+		assert.ok(backups.getBackupFile(first.backup.backup_id));
+		assert.ok(await b.getFileBackup(first.backup.file_backup_id));
+		backups.setBackupSettings({ contents: 'database' }, { now: now + 7200000 });
+		const databaseOnly = await backups.runScheduledBackup({ now: now + 7200000 });
+		assert.equal(databaseOnly.ran, true);
+		assert.equal(databaseOnly.backup.file_backup_id, undefined);
+		assert.throws(() => backups.setBackupSettings({ contents: 'files' }), {
+			code: 'invalid_request'
+		});
+	});
 });

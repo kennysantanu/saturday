@@ -17,7 +17,8 @@
 		enabledLabel,
 		description,
 		saveLabel,
-		status
+		status,
+		contents
 	}: {
 		action: string;
 		idPrefix: string;
@@ -28,12 +29,14 @@
 		description: string;
 		saveLabel: string;
 		status: Snippet;
+		contents?: Snippet;
 	} = $props();
 </script>
 
 <form method="POST" {action} use:enhance={enhanceWithFocus} class="inset-surface space-y-4 p-4">
 	<Checkbox name="enabled" label={enabledLabel} checked={enabled} class="font-medium" />
 	<p class="text-sm text-muted-foreground">{description}</p>
+	{#if contents}{@render contents()}{/if}
 	<div class="grid gap-4 sm:grid-cols-2">
 		<Field id={`${idPrefix}_interval`} label="Back up every (hours)">
 			{#snippet control(attrs)}

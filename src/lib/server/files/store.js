@@ -2,15 +2,25 @@ import * as fs from 'node:fs/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { resolve, dirname, join, basename } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { getProjectRoot, withDatabase } from '../database.js';
+import { getProjectRoot, withDatabase, databaseIdentity } from '../database.js';
 import { parseRecordId, recordIdInputSchema } from '../validation.js';
 import { fileType } from '../../file-types.js';
-import { storageCompatibility } from '../compatibility.js';
+import { storageCompatibility, assertManifestCompatibility } from '../compatibility.js';
 
 export const UPLOAD_LIMIT = 25 * 1024 * 1024;
 export const TEXT_LIMIT = 1024 * 1024;
+const fileSession = new AsyncLocalStorage();
+export const manifestHash = (m) => createHash('sha256').update(JSON.stringify(m)).digest('hex');
+export function assertDataset(m, identity = databaseIdentity()) {
+	if (!m || !identity || identity.dataset_id !== m.dataset_id)
+		reject(
+			'DATASET_MISMATCH',
+			'Job files belong to a different database dataset. Restore matching database/files backups; files have been retained.'
+		);
+}
 export class FileError extends Error {
 	constructor(code, message) {
 		super(message);
@@ -19,6 +29,8 @@ export class FileError extends Error {
 }
 
 export function publicFileError(e) {
+	if (e?.code === 'FORMAT' || String(e?.message).includes('Unsupported database schema'))
+		return { code: 'FORMAT', message: e.message };
 	return e instanceof FileError
 		? { code: e.code, message: e.message }
 		: {
@@ -48,11 +60,12 @@ export function filename(value) {
 		reject('VALIDATION', 'Use a portable filename of 1–255 UTF-8 bytes without path separators.');
 	return name;
 }
-export function scopePrefix(scope = 'documents', checkJob = true) {
+export function scopePrefix(scope = 'documents', checkJob = true, manifest) {
 	if (scope === 'documents') return 'documents';
 	const parsed = recordIdInputSchema.safeParse(scope);
 	if (!parsed.success) reject('VALIDATION', 'Choose documents or a positive numeric job ID.');
 	scope = parsed.data;
+	if (checkJob) assertDataset(manifest ?? fileSession.getStore()?.manifest);
 	if (checkJob && !withDatabase((db) => db.prepare('SELECT id FROM jobs WHERE id=?').get(scope)))
 		reject('NOT_FOUND', 'Job not found. Use Settings to recover unmatched attachments.');
 	return `jobs/${scope}`;
@@ -62,7 +75,11 @@ export function validKey(key) {
 	if (parts.length === 2 && parts[0] === 'documents') {
 		if (filename(parts[1]) !== parts[1])
 			reject('VALIDATION', 'Filename must use Unicode NFC normalization.');
-	} else if (parts.length === 3 && parts[0] === 'jobs' && /^[a-zA-Z0-9_-]{1,100}$/.test(parts[1])) {
+	} else if (
+		parts.length === 3 &&
+		parts[0] === 'jobs' &&
+		recordIdInputSchema.safeParse(parts[1]).success
+	) {
 		if (filename(parts[2]) !== parts[2])
 			reject('VALIDATION', 'Filename must use Unicode NFC normalization.');
 	} else reject('VALIDATION', 'Invalid document key.');
@@ -211,13 +228,11 @@ export class LocalFileStore {
 	}
 }
 export function validateManifest(m) {
-	if (!m || m.format_version !== storageCompatibility.manifest.version)
-		reject(
-			'FORMAT',
-			m?.format_version > storageCompatibility.manifest.version
-				? 'Update Saturday to access this file store.'
-				: 'Invalid file manifest version. Restore a valid file backup offline.'
-		);
+	try {
+		assertManifestCompatibility(m);
+	} catch (e) {
+		reject('FORMAT', e.message);
+	}
 	if (
 		typeof m.token !== 'string' ||
 		!Array.isArray(m.documents) ||
@@ -272,6 +287,24 @@ async function recover() {
 		throw e;
 	}
 	validateManifest(j.manifest);
+	// Reject unsupported or replaced storage before replaying pending writes.
+	try {
+		const current = validateManifest(
+			JSON.parse(await fs.readFile(join(p.root, 'manifest.json'), 'utf8'))
+		);
+		if (
+			j.previous_hash &&
+			manifestHash(current) !== j.previous_hash &&
+			manifestHash(current) !== manifestHash(j.manifest)
+		)
+			reject(
+				'CONFLICT',
+				'File store changed during publication. Stop Saturday and use offline recovery.'
+			);
+	} catch (e) {
+		if (e.code !== 'ENOENT') throw e;
+	}
+	databaseIdentity();
 	const adapter = new LocalFileStore();
 	for (let i = 0; i < j.changes.length; i++) {
 		const c = j.changes[i];
@@ -377,7 +410,14 @@ export async function withFileLock(operation, { initialize = true, allowSession 
 			const names = await fs.readdir(p.root);
 			if (names.length) reject('FORMAT', 'Existing files have no manifest. Use offline recovery.');
 			m = {
+				format: storageCompatibility.manifest.format,
 				format_version: storageCompatibility.manifest.version,
+				dataset_id: (
+					databaseIdentity() ??
+					withDatabase((db) =>
+						db.prepare('SELECT format, dataset_id FROM app_metadata WHERE id=1').get()
+					)
+				).dataset_id,
 				token: randomUUID(),
 				documents: [],
 				designations: {}
@@ -385,13 +425,27 @@ export async function withFileLock(operation, { initialize = true, allowSession 
 			await atomicJson(join(p.root, 'manifest.json'), m);
 		}
 		validateManifest(m);
-		return await operation(m);
+		databaseIdentity();
+		return await fileSession.run({ manifest: structuredClone(m), hash: manifestHash(m) }, () =>
+			operation(m)
+		);
 	} finally {
 		await release();
 	}
 }
-export async function commitManifest(manifest, changes = []) {
+export async function commitManifest(manifest, changes = [], { restore = false } = {}) {
 	const p = filePaths();
+	const session = fileSession.getStore();
+	if (!session) reject('BUSY', 'File writes require the file-store lock.');
+	const current = validateManifest(
+		JSON.parse(await fs.readFile(join(p.root, 'manifest.json'), 'utf8'))
+	);
+	if (manifestHash(current) !== session.hash)
+		reject('CONFLICT', 'File store changed. Reload and restart Saturday before saving.');
+	if (!restore && manifest.dataset_id !== current.dataset_id)
+		reject('DATASET_MISMATCH', 'Normal file edits cannot change the dataset identity.');
+	databaseIdentity();
+	if (!restore && changes.some((c) => c.key.startsWith('jobs/'))) assertDataset(manifest);
 	manifest.token = randomUUID();
 	validateManifest(manifest);
 	await fs.rm(join(p.state, 'pending'), { recursive: true, force: true });
@@ -415,10 +469,13 @@ export async function commitManifest(manifest, changes = []) {
 		}
 	await syncDirectory(join(p.state, 'pending'));
 	await atomicJson(join(p.state, 'journal.json'), {
+		previous_hash: session.hash,
 		manifest,
 		changes: changes.map((c) => ({ key: c.key, remove: !!c.remove }))
 	});
 	await recover();
+	session.hash = manifestHash(manifest);
+	session.manifest = structuredClone(manifest);
 }
 export function entryFor(m, id, scope = 'documents') {
 	const prefix = scopePrefix(scope);

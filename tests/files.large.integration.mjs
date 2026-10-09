@@ -12,6 +12,7 @@ import { pipeline } from 'node:stream/promises';
 test('file backups and streamed imports exceed 1 GiB with bounded memory', async () => {
 	const root = await mkdtemp(join(tmpdir(), 'saturday-large-files-'));
 	process.env.SATURDAY_FILES_PATH = join(root, 'files');
+	process.env.SATURDAY_DB_PATH = join(root, 'absent.sqlite');
 	const s = await import('../src/lib/server/files/store.js');
 	const b = await import('../src/lib/server/files/backups.js');
 	let peak = process.memoryUsage().rss;
@@ -45,7 +46,14 @@ test('file backups and streamed imports exceed 1 GiB with bounded memory', async
 		}
 		await writeFile(
 			join(root, 'files', 'manifest.json'),
-			JSON.stringify({ format_version: 1, token: randomUUID(), documents, designations: {} })
+			JSON.stringify({
+				format: 'saturday.files.numeric',
+				dataset_id: randomUUID(),
+				format_version: 1,
+				token: randomUUID(),
+				documents,
+				designations: {}
+			})
 		);
 		const backup = await b.createFileBackup();
 		assert.ok(backup.bytes > 1024 ** 3, 'Compressed archive must itself exceed 1 GiB');

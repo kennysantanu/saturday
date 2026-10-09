@@ -5,6 +5,7 @@
  */
 export const SAVED_MESSAGES: Record<string, string> = {
 	restored: 'Backup restored.',
+	backup: 'Backup saved.',
 	person: 'Person saved.',
 	'network-linked': 'Relationship linked.',
 	'network-unlinked': 'Relationship unlinked.',

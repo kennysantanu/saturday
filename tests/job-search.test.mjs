@@ -19,16 +19,20 @@ import {
 import { defaultJobFilters, searchUrl, searchFromUrl, filterChips } from '../src/lib/job-search.js';
 
 const previous = process.env.SATURDAY_DB_PATH;
+const previousFiles = process.env.SATURDAY_FILES_PATH;
 let scratch;
 beforeEach(() => {
 	scratch = mkdtempSync(join(tmpdir(), 'saturday-search-'));
 	process.env.SATURDAY_DB_PATH = join(scratch, 'career.sqlite');
+	process.env.SATURDAY_FILES_PATH = join(scratch, 'files');
 	migrateDatabase();
 });
 afterEach(() => {
 	rmSync(scratch, { recursive: true, force: true });
 	if (previous === undefined) delete process.env.SATURDAY_DB_PATH;
 	else process.env.SATURDAY_DB_PATH = previous;
+	if (previousFiles === undefined) delete process.env.SATURDAY_FILES_PATH;
+	else process.env.SATURDAY_FILES_PATH = previousFiles;
 });
 const job = (fields = {}, origin = 'manual') =>
 	createJob({ job_title: 'Engineer', company_name: 'Acme', ...fields }, origin);

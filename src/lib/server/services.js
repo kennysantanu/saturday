@@ -6,7 +6,7 @@ import {
 	jobToStorage
 } from '../job-fields.js';
 import { EVENT_LABELS } from '../event-labels.js';
-import { inTransaction, withDatabase } from './database.js';
+import { inTransaction, withDatabase, reserveJobFileIds } from './database.js';
 import {
 	jobSearchSchema,
 	parseRecordId,
@@ -152,6 +152,7 @@ export function createJob(input, createdVia = 'manual') {
 				updated_at: now
 			};
 			const fields = jobColumns().filter((name) => name !== 'id');
+			reserveJobFileIds(db);
 			const { lastInsertRowid: id } = db
 				.prepare(
 					`INSERT INTO jobs (${fields.join(',')}) VALUES (${fields.map(() => '?').join(',')})`

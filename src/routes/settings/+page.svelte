@@ -7,7 +7,7 @@
 	import { formatBytes, formatDateTime } from '$lib/format';
 	import Clipboard from '@lucide/svelte/icons/clipboard';
 	import Check from '@lucide/svelte/icons/check';
-	import Download from '@lucide/svelte/icons/download';
+	import Archive from '@lucide/svelte/icons/archive';
 	import BackupList from '$lib/components/app/backup-list.svelte';
 	import ConfirmDialog from '$lib/components/app/confirm-dialog.svelte';
 	import Field from '$lib/components/app/field.svelte';
@@ -53,7 +53,7 @@
 			});
 			const body = await r.json();
 			if (!r.ok) throw new Error(body.error);
-			toast.show('File backup imported. Choose it below to preview restore.');
+			toast.show('File backup imported. Choose it in Saved backup to preview restore.');
 			await invalidateAll();
 		} catch (e) {
 			uploadError = (e as Error).message;
@@ -82,25 +82,25 @@
 			{ label: 'Interactions', current: a.interactions, incoming: b.interactions }
 		];
 	}
-	const databaseBackups = $derived(
-		data.backups.map((b: any) => ({
+	const backupRows = $derived(
+		data.backupHistory.map((b: any) => ({
 			id: b.backup_id,
 			kind: b.kind,
 			createdAt: b.created_at,
-			detail: `${b.job_count} ${b.job_count === 1 ? 'job' : 'jobs'} · ${formatBytes(b.bytes)}`,
-			href: `/settings/backups/${b.backup_id}`,
-			filename: b.filename
-		}))
-	);
-	const fileBackups = $derived(
-		data.fileBackups.map((b: any) => ({
-			id: b.backup_id,
-			kind: b.kind,
-			createdAt: b.created_at,
-			detail: `${b.file_count} ${b.file_count === 1 ? 'file' : 'files'} · ${formatBytes(b.bytes)}`,
-			href: `/settings/files/${b.backup_id}`,
+			detail: `${b.contents === 'files' ? `${b.file_count} files` : `${b.job_count} jobs`}${b.files ? ` · ${b.files.file_count} files` : ''} · ${formatBytes(b.bytes + (b.files?.bytes ?? 0))}`,
+			href:
+				b.contents === 'files'
+					? `/settings/files/${b.backup_id}`
+					: `/settings/backups/${b.backup_id}`,
+			fileHref: b.file_backup_id ? `/settings/files/${b.file_backup_id}` : undefined,
 			filename: b.filename,
-			paired: Boolean(b.backup_set_id)
+			contents:
+				b.contents === 'all'
+					? 'Database + files'
+					: b.contents === 'files'
+						? 'Files only'
+						: 'Database only',
+			downloadLabel: b.contents === 'files' ? 'Download files' : 'Download database'
 		}))
 	);
 </script>
@@ -114,7 +114,6 @@
 	<nav aria-label="Settings sections" class="section-nav">
 		<a href="#assistant">Assistant</a>
 		<a href="#backups">Backups</a>
-		<a href="#files">Files</a>
 		<a href="#storage">Storage</a>
 	</nav>
 
@@ -170,7 +169,7 @@
 	<SectionCard
 		id="backups"
 		title="Backup and restore"
-		description="Save a portable copy of your jobs and history. Backups contain private data and are not encrypted."
+		description="Back up your records and files together, or save the database only. Backups contain private data and are not encrypted."
 	>
 		{#if form?.backupError}<Notice tone="error" title="Backup operation failed"
 				>{form.backupError}</Notice
@@ -183,8 +182,37 @@
 				>
 			</Notice>
 		{/if}
-		<form method="POST" action="?/download" class="form-actions">
-			<Button type="submit"><Download data-icon="inline-start" />Download backup</Button>
+		{#if data.filesError || form?.fileError || uploadError}<Notice
+				tone="error"
+				title="File operation failed">{data.filesError || form?.fileError || uploadError}</Notice
+			>{/if}
+		{#if data.fileSummary}
+			{#if !data.fileSummary.dataset_matches_database && data.fileSummary.unmatched.length}
+				<Notice title="Job attachments need a matching database">
+					These files belong to another dataset. Restore matching database and file backups to use
+					job attachments. User documents remain available, and existing files are kept for
+					recovery.
+				</Notice>
+			{/if}
+			<p class="text-sm text-muted-foreground">
+				{data.fileSummary.count}
+				{data.fileSummary.count === 1 ? 'file' : 'files'} · {formatBytes(data.fileSummary.bytes)}
+			</p>
+		{/if}
+
+		<form method="POST" action="?/backup" use:enhance={enhanceWithFocus} class="space-y-4">
+			<Field id="backup_contents" label="Include">
+				{#snippet control(attrs)}<NativeSelect {...attrs} name="contents">
+						<option value="all">Database and files</option><option value="database"
+							>Database only</option
+						>
+					</NativeSelect>{/snippet}
+			</Field>
+			<div class="form-actions">
+				<Button type="submit"><Archive data-icon="inline-start" />Back up now</Button>
+				<Button type="submit" variant="outline" formaction="?/fileBackup">Back up files only</Button
+				>
+			</div>
 		</form>
 		<SchedulePanel
 			action="?/schedule"
@@ -193,9 +221,22 @@
 			intervalHours={data.backupSettings.interval_hours}
 			keepCount={data.backupSettings.keep_count}
 			enabledLabel="Automatic backups"
-			description="Runs while Saturday is running and your computer is awake. One catch-up backup is made after downtime. Older automatic backups are deleted after a new backup succeeds; manual, imported and recovery backups are kept. This limits file count, not total storage."
+			description="Runs while Saturday is running and your computer is awake. One catch-up backup is made after downtime. Older automatic backups are deleted after a new backup succeeds; manual, imported and recovery backups are kept. Retention counts complete backup sets, not individual archives or total storage."
 			saveLabel="Save backup settings"
 		>
+			{#snippet contents()}
+				<Field id="schedule_contents" label="Include in automatic backups">
+					{#snippet control(attrs)}<NativeSelect
+							{...attrs}
+							name="contents"
+							value={data.backupSettings.contents}
+						>
+							<option value="all">Database and files</option><option value="database"
+								>Database only</option
+							>
+						</NativeSelect>{/snippet}
+				</Field>
+			{/snippet}
 			{#snippet status()}
 				<p>
 					Last automatic backup: {data.backupSettings.last_success_at
@@ -221,31 +262,40 @@
 			class="space-y-4"
 		>
 			<h3 class="font-medium">Restore a backup</h3>
-			<Field
-				id="backup_file"
-				label="Upload a SQLite backup"
-				hint="Up to 100 MiB. An uploaded file takes priority over a saved backup."
-			>
-				{#snippet control(attrs)}<Input
-						{...attrs}
-						type="file"
-						name="backup_file"
-						accept=".sqlite,.db"
-					/>{/snippet}
-			</Field>
-			<Field id="backup_id" label="Or select a saved backup">
+
+			<Field id="backup_id" label="Saved backup">
 				{#snippet control(attrs)}
 					<NativeSelect {...attrs} name="backup_id">
 						<option value="">Choose a backup</option>
-						{#each data.backups as backup (backup.backup_id)}
-							<option value={backup.backup_id}
-								>{backup.kind} · {formatDateTime(backup.created_at)} · {backup.job_count}
-								{backup.job_count === 1 ? 'job' : 'jobs'}</option
+						{#each data.backupHistory as backup (backup.backup_id)}
+							<option value={`${backup.contents}:${backup.backup_id}`}
+								>{formatDateTime(backup.created_at)} · {backup.contents === 'all'
+									? 'Database and files'
+									: backup.contents === 'files'
+										? 'Files only'
+										: 'Database only'}</option
 							>
 						{/each}
 					</NativeSelect>
 				{/snippet}
 			</Field>
+			<details class="disclosure">
+				<summary>Import a database backup</summary>
+				<div class="disclosure-body">
+					<Field
+						id="backup_file"
+						label="Upload a SQLite backup"
+						hint="Up to 100 MiB. An uploaded file takes priority over a saved backup."
+					>
+						{#snippet control(attrs)}<Input
+								{...attrs}
+								type="file"
+								name="backup_file"
+								accept=".sqlite,.db"
+							/>{/snippet}
+					</Field>
+				</div>
+			</details>
 			<div class="form-actions">
 				<Button type="submit" variant="outline">Preview restore</Button>
 			</div>
@@ -275,116 +325,54 @@
 			<ConfirmDialog
 				bind:open={confirmRestore}
 				title="Replace current records?"
-				description="All current jobs, people, relationships and history will be replaced. Older backups clear Network data. A complete recovery backup will be kept."
+				description="All current jobs, people, relationships and history will be replaced. A complete recovery backup will be kept."
 				confirmLabel="Replace records"
 				formId="restore-backup-form"
 				destructive
 			/>
 		{/if}
-		<BackupList
-			title="Saved backups"
-			items={databaseBackups}
-			note="Showing up to 50 recent backups. Refresh to see new automatic backups."
-		/>
-	</SectionCard>
-
-	<SectionCard
-		id="files"
-		title="File backups"
-		description="Back up user documents, job attachments and the file manifest separately from SQLite. Archives contain private data and are not encrypted."
-	>
-		{#if data.filesError || form?.fileError || uploadError}<Notice
-				tone="error"
-				title="File operation failed">{data.filesError || form?.fileError || uploadError}</Notice
-			>{/if}
-		{#if data.fileSummary}
-			<p class="text-sm text-muted-foreground">
-				{data.fileSummary.count}
-				{data.fileSummary.count === 1 ? 'file' : 'files'} · {formatBytes(data.fileSummary.bytes)}
-			</p>
-			<p class="inset-surface p-3 font-mono text-sm break-all">{data.fileSummary.root}</p>
+		{#if form?.filePairPreview}
+			<RestorePreview
+				title="Coordinated restore preview"
+				columns={['Current', 'After restore']}
+				rows={[
+					...databaseRows(
+						form.filePairPreview.database.current,
+						form.filePairPreview.database.incoming
+					),
+					{
+						label: 'Files',
+						current: form.filePairPreview.files.current_count,
+						incoming: form.filePairPreview.files.result_count
+					}
+				]}
+			>
+				<p class="text-sm">
+					Both collections will be replaced; {form.filePairPreview.files.removed} files will be removed.
+					Separate recovery artifacts are kept. An interrupted restore requires offline recovery before
+					writes resume.
+				</p>
+				<p class="text-sm">{form.filePairPreview.database.warning}</p>
+				<p class="text-sm">{form.filePairPreview.files.warning}</p>
+				<form method="POST" action="?/filePairRestore" id="restore-file-pair" class="form-actions">
+					<input type="hidden" name="restore_id" value={form.filePairPreview.restore_id} /><input
+						type="hidden"
+						name="confirm"
+						value="true"
+					/><Button type="button" variant="outline" onclick={() => (confirmPair = true)}
+						>Restore database and files</Button
+					>
+				</form>
+			</RestorePreview>
+			<ConfirmDialog
+				bind:open={confirmPair}
+				title="Replace database and files?"
+				description="Apply both previewed snapshots. Recovery copies will be kept."
+				confirmLabel="Restore both"
+				formId="restore-file-pair"
+				destructive
+			/>
 		{/if}
-		<div class="form-actions">
-			<form method="POST" action="?/fileBackup" use:enhance={enhanceWithFocus}>
-				<Button type="submit" variant="outline">Back up files now</Button>
-			</form>
-			<form method="POST" action="?/pairBackup" use:enhance={enhanceWithFocus}>
-				<Button type="submit" variant="outline">Back up database and files</Button>
-			</form>
-		</div>
-		<SchedulePanel
-			action="?/fileSchedule"
-			idPrefix="file_schedule"
-			enabled={data.fileSettings.enabled}
-			intervalHours={data.fileSettings.interval_hours}
-			keepCount={data.fileSettings.keep_count}
-			enabledLabel="Automatic file backups"
-			description="Runs while Saturday is running and your computer is awake. Older automatic file backups are removed only after a new one succeeds. Manual and recovery backups stay."
-			saveLabel="Save file backup settings"
-		>
-			{#snippet status()}
-				<p>
-					Status: {data.fileSettings.running
-						? 'Running'
-						: data.fileSettings.last_error
-							? 'Failed'
-							: data.fileSettings.enabled
-								? 'Scheduled'
-								: 'Disabled'}
-				</p>
-				<p>
-					Last success: {data.fileSettings.last_success_at
-						? formatDateTime(data.fileSettings.last_success_at)
-						: 'None yet'}
-				</p>
-				<p>
-					Next run: {data.fileSettings.enabled
-						? data.fileSettings.next_due_at
-							? formatDateTime(data.fileSettings.next_due_at)
-							: 'Due'
-						: 'Disabled'}
-				</p>
-				{#if data.fileSettings.last_error}<p role="alert" class="text-destructive">
-						{data.fileSettings.last_error.message}
-					</p>{/if}
-			{/snippet}
-		</SchedulePanel>
-		<Field
-			id="file_import"
-			label={uploading ? 'Importing and validating archive…' : 'Import a file backup ZIP'}
-		>
-			{#snippet control(attrs)}<Input
-					{...attrs}
-					type="file"
-					accept=".zip"
-					disabled={uploading}
-					onchange={importArchive}
-				/>{/snippet}
-		</Field>
-		<form method="POST" action="?/filePrepare" use:enhance={enhanceWithFocus} class="space-y-4">
-			<h3 class="font-medium">Restore file backup</h3>
-			<Field id="file_backup_id" label="Saved file backup" required>
-				{#snippet control(attrs)}
-					<NativeSelect {...attrs} name="backup_id" required>
-						<option value="">Choose a backup</option>
-						{#each data.fileBackups as b (b.backup_id)}<option value={b.backup_id}
-								>{b.kind} · {formatDateTime(b.created_at)} · {b.file_count} files</option
-							>{/each}
-					</NativeSelect>
-				{/snippet}
-			</Field>
-			<Field id="file_restore_mode" label="Restore mode">
-				{#snippet control(attrs)}
-					<NativeSelect {...attrs} name="mode">
-						<option value="add">Add missing files</option>
-						<option value="replace">Replace entire file collection</option>
-					</NativeSelect>
-				{/snippet}
-			</Field>
-			<div class="form-actions">
-				<Button type="submit" variant="outline">Preview file restore</Button>
-			</div>
-		</form>
 		{#if form?.filePreview}
 			<RestorePreview
 				title="File restore preview"
@@ -426,74 +414,77 @@
 				destructive
 			/>
 		{/if}
-		{#if form?.filePairPreview}
-			<RestorePreview
-				title="Coordinated restore preview"
-				columns={['Current', 'After restore']}
-				rows={[
-					...databaseRows(
-						form.filePairPreview.database.current,
-						form.filePairPreview.database.incoming
-					),
-					{
-						label: 'Files',
-						current: form.filePairPreview.files.current_count,
-						incoming: form.filePairPreview.files.result_count
-					}
-				]}
-			>
-				<p class="text-sm">
-					Both collections will be replaced; {form.filePairPreview.files.removed} files will be removed.
-					Separate recovery artifacts are kept. An interrupted restore requires offline recovery before
-					writes resume.
-				</p>
-				<form method="POST" action="?/filePairRestore" id="restore-file-pair" class="form-actions">
-					<input type="hidden" name="restore_id" value={form.filePairPreview.restore_id} /><input
-						type="hidden"
-						name="confirm"
-						value="true"
-					/><Button type="button" variant="outline" onclick={() => (confirmPair = true)}
-						>Restore database and files</Button
-					>
-				</form>
-			</RestorePreview>
-			<ConfirmDialog
-				bind:open={confirmPair}
-				title="Replace database and files?"
-				description="Apply both previewed snapshots. Recovery copies will be kept."
-				confirmLabel="Restore both"
-				formId="restore-file-pair"
-				destructive
-			/>
-		{/if}
 
-		<BackupList title="Saved file backups" items={fileBackups}>
-			{#snippet extra(item)}
-				{#if item.paired}
-					<form method="POST" action="?/filePairPrepare" use:enhance={enhanceWithFocus}>
-						<input type="hidden" name="file_backup_id" value={item.id} /><Button
-							variant="outline"
-							size="sm"
-							type="submit">Preview coordinated restore</Button
-						>
-					</form>
+		<BackupList
+			title="Saved backups"
+			items={backupRows}
+			note="Showing up to 50 recent backups. Manual, imported and recovery backups are kept."
+		/>
+		<details class="disclosure" open={Boolean(form?.fileError || uploadError)}>
+			<summary>Advanced file recovery</summary>
+			{#if data.fileSettings.enabled}<Notice title="Separate file schedule is active"
+					>An existing file-only schedule is still running. Saving the automatic backup settings
+					above disables it and uses the single schedule.</Notice
+				>{/if}
+			<div class="disclosure-body space-y-4">
+				{#if data.fileSummary}<p class="inset-surface p-3 font-mono text-sm break-all">
+						{data.fileSummary.root}
+					</p>{/if}
+				<Field
+					id="file_import"
+					label={uploading ? 'Importing and validating archive…' : 'Import a file backup ZIP'}
+				>
+					{#snippet control(attrs)}<Input
+							{...attrs}
+							type="file"
+							accept=".zip"
+							disabled={uploading}
+							onchange={importArchive}
+						/>{/snippet}
+				</Field>
+				<form method="POST" action="?/filePrepare" use:enhance={enhanceWithFocus} class="space-y-4">
+					<h3 class="font-medium">Restore file backup</h3>
+					<Field id="file_backup_id" label="Saved file backup" required>
+						{#snippet control(attrs)}
+							<NativeSelect {...attrs} name="backup_id" required>
+								<option value="">Choose a backup</option>
+								{#each data.fileBackups as b (b.backup_id)}<option value={b.backup_id}
+										>{b.kind} · {formatDateTime(b.created_at)} · {b.file_count} files</option
+									>{/each}
+							</NativeSelect>
+						{/snippet}
+					</Field>
+					<Field id="file_restore_mode" label="Restore mode">
+						{#snippet control(attrs)}
+							<NativeSelect {...attrs} name="mode">
+								<option value="add">Add missing files</option>
+								<option value="replace">Replace entire file collection</option>
+							</NativeSelect>
+						{/snippet}
+					</Field>
+					<div class="form-actions">
+						<Button type="submit" variant="outline">Preview file restore</Button>
+					</div>
+				</form>
+
+				{#if data.fileSummary?.unmatched.length}
+					<div class="space-y-2">
+						<h3 class="font-medium">Unmatched job folders</h3>
+						<p class="text-sm text-muted-foreground">
+							These files belong to jobs absent from the current database. They are preserved in
+							backups.
+						</p>
+						{#each data.fileSummary.unmatched as id (id)}<a
+								class="link block break-all"
+								href={`/settings/files/recovery/${id}`}>{id}</a
+							>{/each}
+					</div>
 				{/if}
-			{/snippet}
-		</BackupList>
-		{#if data.fileSummary?.unmatched.length}
-			<div class="space-y-2">
-				<h3 class="font-medium">Unmatched job folders</h3>
-				<p class="text-sm text-muted-foreground">
-					These files belong to jobs absent from the current database. They are preserved in
-					backups.
-				</p>
-				{#each data.fileSummary.unmatched as id (id)}<a
-						class="link block break-all"
-						href={`/settings/files/recovery/${id}`}>{id}</a
-					>{/each}
+				{#if data.pdfStatus}<p class="text-sm text-muted-foreground">
+						{data.pdfStatus.message}
+					</p>{/if}
 			</div>
-		{/if}
-		{#if data.pdfStatus}<p class="text-sm text-muted-foreground">{data.pdfStatus.message}</p>{/if}
+		</details>
 	</SectionCard>
 
 	<SectionCard

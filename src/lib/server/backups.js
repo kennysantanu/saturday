@@ -7,7 +7,7 @@ import {
 	networkUpdateShape,
 	parseSchema
 } from './validation.js';
-import { assertDatabaseAvailable } from './database.js';
+import { assertDatabaseAvailable, assertFileStorageCompatible } from './database.js';
 import {
 	chmodSync,
 	mkdirSync,
@@ -29,16 +29,17 @@ import {
 import { resolve, join, dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { getDatabasePath, getProjectRoot, inTransaction } from './database.js';
+import { getDatabasePath, getProjectRoot, inTransaction, reserveJobFileIds } from './database.js';
 import { applyMigrations, assertMigrationHistory } from './migrations.js';
 import { parseJobInput, parseAssessment, validDate, ordinaryEventTypes } from './validation.js';
 import { jobColumns, jobFields } from '../job-fields.js';
-import { storageCompatibility } from './compatibility.js';
+import { storageCompatibility, buildInfo } from './compatibility.js';
 
 export const MAX_BACKUP_BYTES = 100 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const defaults = {
 	enabled: false,
+	contents: 'all',
 	interval_hours: 24,
 	keep_count: 10,
 	last_success_at: null,
@@ -71,6 +72,7 @@ function fail(code, message) {
 }
 export function publicBackupError(error) {
 	if (error instanceof BackupError) return { code: error.code, message: error.message };
+	if (error?.code === 'FORMAT') return { code: 'unsupported_file_format', message: error.message };
 	if (String(error?.message).includes('locked') || String(error?.message).includes('busy'))
 		return { code: 'database_busy', message: 'Saturday is busy. Try again shortly.' };
 	return {
@@ -417,6 +419,7 @@ function publish(temp, kind, now) {
 		kind,
 		created_at: new Date(now).toISOString(),
 		app_version: '0.0.1',
+		creator_build: buildInfo.id,
 		...counts,
 		bytes: regular(temp).size,
 		sha256: digest(temp)
@@ -575,7 +578,7 @@ export function prepareRestore(backupId, { now = Date.now() } = {}) {
 				validate(incoming);
 				stage = connect(stagePath, false);
 				applyMigrations(stage, databaseVersion(incoming));
-				inTransaction(stage, () => insertData(stage, dataset(incoming)));
+				inTransaction(stage, () => insertData(stage, dataset(incoming)), { checkFiles: false });
 				const incomingSummary = validate(stage);
 				const unmatchedJobFolders = fileFolderImpact(stage);
 				stage.close();
@@ -587,11 +590,16 @@ export function prepareRestore(backupId, { now = Date.now() } = {}) {
 					backup_id: backupId,
 					expires_at: new Date(now + 600000).toISOString(),
 					current: summary(db),
+					file_dataset_id: fileDatasetId(),
+					files_match_incoming: fileDatasetId() === incomingSummary.dataset_id,
 					unmatched_job_folders: unmatchedJobFolders,
 					incoming: incomingSummary,
 					requires_confirmation: true,
 					warning:
-						'Restoring replaces all current jobs, people, relationships and history. A complete recovery backup will be created first.'
+						'Restoring replaces all current jobs, people, relationships and history. A complete recovery backup will be created first.' +
+						(fileDatasetId() && fileDatasetId() !== incomingSummary.dataset_id
+							? ' Current job files belong to another dataset and will be blocked until matching files are restored. Matching folder numbers do not establish ownership.'
+							: '')
 				};
 				atomicJSON(join(p.restore, `${restoreId}.json`), {
 					...preview,
@@ -644,6 +652,8 @@ export function restoreBackup(restoreId, confirm, { now = Date.now(), beforeComm
 				const incoming = dataset(stage);
 				const expectedHash = dataHash(stage);
 				result = locked((db) => {
+					if (fileDatasetId() !== record.file_dataset_id)
+						fail('restore_stale', 'File dataset changed after the preview. Prepare again.');
 					if (fingerprint(db) !== record.fingerprint)
 						fail('restore_stale', 'Current records changed after the preview. Prepare again.');
 					const recovery = snapshot('recovery', now);
@@ -651,6 +661,7 @@ export function restoreBackup(restoreId, confirm, { now = Date.now(), beforeComm
 						'DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs;'
 					);
 					insertData(db, incoming, true);
+					reserveJobFileIds(db);
 					beforeCommit?.();
 					validate(db);
 					if (dataHash(db) !== expectedHash)
@@ -686,7 +697,9 @@ function settingsPath() {
 }
 export function getBackupSettings() {
 	return safe(() =>
-		existsSync(settingsPath()) ? { ...defaults, ...json(settingsPath()) } : { ...defaults }
+		existsSync(settingsPath())
+			? { ...defaults, contents: 'database', ...json(settingsPath()) }
+			: { ...defaults }
 	);
 }
 export function setBackupSettings(input, { now = Date.now() } = {}) {
@@ -694,8 +707,9 @@ export function setBackupSettings(input, { now = Date.now() } = {}) {
 		const keys = Object.keys(input);
 		if (
 			!keys.length ||
-			keys.some((key) => !['enabled', 'interval_hours', 'keep_count'].includes(key)) ||
+			keys.some((key) => !['enabled', 'contents', 'interval_hours', 'keep_count'].includes(key)) ||
 			('enabled' in input && typeof input.enabled !== 'boolean') ||
+			('contents' in input && !['all', 'database'].includes(input.contents)) ||
 			('interval_hours' in input &&
 				(!Number.isInteger(input.interval_hours) ||
 					input.interval_hours < 1 ||
@@ -705,12 +719,16 @@ export function setBackupSettings(input, { now = Date.now() } = {}) {
 		)
 			fail(
 				'invalid_request',
-				'Use enabled true/false, an interval of 1–168 whole hours, and a count of 1–100.'
+				'Use contents all/database, enabled true/false, an interval of 1–168 whole hours, and a count of 1–100.'
 			);
 		return locked(() => {
 			const old = getBackupSettings();
 			const updated = { ...old, ...input };
-			if ((!old.enabled && updated.enabled) || old.interval_hours !== updated.interval_hours) {
+			if (
+				(!old.enabled && updated.enabled) ||
+				old.interval_hours !== updated.interval_hours ||
+				old.contents !== updated.contents
+			) {
 				updated.next_due_at = new Date(
 					(!old.enabled && updated.enabled) || !old.last_success_at
 						? now
@@ -723,7 +741,7 @@ export function setBackupSettings(input, { now = Date.now() } = {}) {
 		}, false);
 	});
 }
-function prune(keep, now) {
+async function prune(keep, now) {
 	const p = storage();
 	const protectedIds = new Set();
 	for (const name of readdirSync(p.restore).filter(
@@ -746,49 +764,89 @@ function prune(keep, now) {
 	const scheduled = all.filter((m) => m.kind === 'scheduled');
 	for (const m of scheduled.slice(keep)) {
 		if (protectedIds.has(m.backup_id)) continue;
+		if (m.file_backup_id) {
+			const { removePairedFileBackup } = await import('./files/backups.js');
+			if (!(await removePairedFileBackup(m, now))) continue;
+		}
 		regular(join(p.backups, `${m.backup_id}.sqlite`));
 		unlinkSync(join(p.backups, `${m.backup_id}.sqlite`));
 		unlinkSync(join(p.backups, `${m.backup_id}.json`));
 	}
 }
-export function runScheduledBackup({ now = Date.now() } = {}) {
-	return safe(() =>
-		locked(() => {
-			const settings = getBackupSettings();
-			if (
-				!settings.enabled ||
-				Date.parse(settings.next_due_at ?? '') > now ||
-				Date.parse(settings.retry_after ?? '') > now
-			)
-				return { ran: false };
-			let backup;
-			try {
-				backup = snapshot('scheduled', now);
-			} catch (error) {
-				atomicJSON(settingsPath(), {
-					...settings,
-					retry_after: new Date(now + 300000).toISOString(),
-					last_error: { ...publicBackupError(error), at: new Date(now).toISOString() }
-				});
-				return { ran: false, error: publicBackupError(error) };
-			}
-			let lastError = null;
-			try {
-				prune(settings.keep_count, now);
-			} catch (error) {
-				lastError = { ...publicBackupError(error), at: new Date(now).toISOString() };
-			}
+// Hold the database write gate across a complete scheduled set, including file capture.
+export async function runScheduledBackup({ now = Date.now() } = {}) {
+	let db;
+	try {
+		assertDatabaseAvailable();
+		db = connect(paths().database, false);
+		db.exec('BEGIN IMMEDIATE');
+		validateSchema(db);
+		assertFileStorageCompatible();
+		const settings = getBackupSettings();
+		if (
+			!settings.enabled ||
+			Date.parse(settings.next_due_at ?? '') > now ||
+			Date.parse(settings.retry_after ?? '') > now
+		) {
+			db.exec('ROLLBACK');
+			return { ran: false };
+		}
+		let backup;
+		try {
+			if (settings.contents === 'all') {
+				const { createBackupPair } = await import('./files/pairs.js');
+				const pair = await createBackupPair({ kind: 'scheduled', now, gateHeld: true });
+				backup = getBackupFile(pair.database_backup_id).metadata;
+			} else backup = snapshot('scheduled', now);
+		} catch (error) {
+			const detail = error.code
+				? { code: error.code, message: error.message }
+				: publicBackupError(error);
 			atomicJSON(settingsPath(), {
 				...settings,
-				last_success_at: new Date(now).toISOString(),
-				last_backup_id: backup.backup_id,
-				next_due_at: new Date(now + settings.interval_hours * 3600000).toISOString(),
-				retry_after: null,
-				last_error: lastError
+				retry_after: new Date(now + 300000).toISOString(),
+				last_error: { ...detail, at: new Date(now).toISOString() }
 			});
-			return { ran: true, backup };
-		}, false)
-	);
+			db.exec('COMMIT');
+			return { ran: false, error: detail };
+		}
+		let lastError = null;
+		try {
+			await prune(settings.keep_count, now);
+		} catch (error) {
+			lastError = { ...publicBackupError(error), at: new Date(now).toISOString() };
+		}
+		atomicJSON(settingsPath(), {
+			...settings,
+			last_success_at: new Date(now).toISOString(),
+			last_backup_id: backup.backup_id,
+			next_due_at: new Date(now + settings.interval_hours * 3600000).toISOString(),
+			retry_after: null,
+			last_error: lastError
+		});
+		db.exec('COMMIT');
+		return { ran: true, backup };
+	} catch (error) {
+		try {
+			db?.exec('ROLLBACK');
+		} catch {}
+		const detail = publicBackupError(error);
+		throw new BackupError(detail.code, detail.message);
+	} finally {
+		db?.close();
+	}
+}
+
+// Publish pair membership only after both independently downloadable artifacts exist.
+export function completeBackupPair(backupId, pair, kind, now) {
+	const metadata = getBackupFile(backupId).metadata;
+	atomicJSON(join(storage().backups, `${id(backupId)}.json`), {
+		...metadata,
+		kind,
+		created_at: new Date(now).toISOString(),
+		backup_set_id: pair.backup_set_id,
+		file_backup_id: pair.file_backup_id
+	});
 }
 export function exportBackup(backupId, destination) {
 	return safe(() => {
@@ -843,14 +901,18 @@ export async function restoreDatabaseWithFiles(restoreId, fileOperation) {
 		validate(stage);
 		db.exec('BEGIN IMMEDIATE');
 		validate(db);
+		assertFileStorageCompatible();
 		if (fingerprint(db) !== record.fingerprint)
 			fail('restore_stale', 'Current records changed. Prepare again.');
+		if (fileDatasetId() !== record.file_dataset_id)
+			fail('restore_stale', 'File dataset changed. Prepare again.');
 		const recovery = snapshot('recovery');
-		const files = await fileOperation(recovery);
+		const files = await fileOperation(recovery, summary(stage));
 		db.exec(
 			'DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs;'
 		);
 		insertData(db, dataset(stage), true);
+		reserveJobFileIds(db);
 		validate(db);
 		if (dataHash(db) !== dataHash(stage)) fail('invalid_backup', 'Database verification failed.');
 		db.exec('COMMIT');
@@ -876,6 +938,23 @@ export async function restoreDatabaseWithFiles(restoreId, fileOperation) {
 	}
 }
 
+function fileDatasetId() {
+	assertFileStorageCompatible();
+	try {
+		return JSON.parse(
+			readFileSync(
+				join(
+					resolve(getProjectRoot(), process.env.SATURDAY_FILES_PATH || 'data/files'),
+					'manifest.json'
+				),
+				'utf8'
+			)
+		).dataset_id;
+	} catch (e) {
+		if (e.code === 'ENOENT') return null;
+		throw e;
+	}
+}
 function fileFolderImpact(incoming) {
 	try {
 		const root = resolve(getProjectRoot(), process.env.SATURDAY_FILES_PATH || 'data/files');
@@ -890,7 +969,12 @@ function fileFolderImpact(incoming) {
 			...new Set(
 				m.documents.filter((d) => d.key.startsWith('jobs/')).map((d) => d.key.split('/')[1])
 			)
-		].filter((id) => !ids.has(id));
+		].filter(
+			(id) =>
+				m.dataset_id !==
+					incoming.prepare('SELECT dataset_id FROM app_metadata WHERE id=1').get().dataset_id ||
+				!ids.has(id)
+		);
 	} catch {
 		return null;
 	}
