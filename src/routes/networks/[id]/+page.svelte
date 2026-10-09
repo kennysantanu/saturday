@@ -101,6 +101,7 @@
 
 <PageShell title={`${person.name} · Network`}>
 	<PageHeader
+		recordNumber={person.id}
 		back={{ href: '/networks', label: 'Network' }}
 		title={person.name}
 		description={[person.role, person.organization].filter(Boolean).join(' · ')}
@@ -198,6 +199,7 @@
 		{/if}
 		{#each data.linkedJobs.jobs as job (job.id)}
 			<LinkedItem
+				recordNumber={job.id}
 				href={`/jobs/${job.id}`}
 				title={job.job_title}
 				subtitle={`${job.company_name}${!job.is_active ? ' · Inactive' : ''}`}
@@ -504,7 +506,7 @@
 						required
 						disabled={data.linkedIds.includes(job.id)}
 						checked={values.job_id === String(job.id)}
-						label={job.title}
+						label={`${job.title} #${job.id}`}
 						description={`${job.company}${!job.isActive ? ' · Inactive' : ''}${data.linkedIds.includes(job.id) ? ' · Already linked' : ''}`}
 					/>
 				{/each}

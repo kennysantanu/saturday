@@ -5,12 +5,14 @@
 	let {
 		href,
 		title,
+		recordNumber,
 		subtitle,
 		note,
 		actions
 	}: {
 		href: string;
 		title: string;
+		recordNumber?: number;
 		subtitle?: string;
 		note?: string | null;
 		actions?: Snippet;
@@ -19,7 +21,9 @@
 
 <div class="space-y-3 border-b pb-4 last:border-0 last:pb-0">
 	<div class="min-w-0">
-		<a class="link break-words" {href}>{title}</a>
+		<a class="link break-words" {href}>{title}</a>{#if recordNumber}
+			<span class="meta-text ml-2 whitespace-nowrap text-muted-foreground">#{recordNumber}</span
+			>{/if}
 		{#if subtitle}<p class="text-sm break-words text-muted-foreground">{subtitle}</p>{/if}
 	</div>
 	{#if note}

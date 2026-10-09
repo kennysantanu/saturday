@@ -4,6 +4,7 @@
 
 	let {
 		title,
+		recordNumber,
 		description,
 		eyebrow,
 		back,
@@ -11,6 +12,7 @@
 		actions
 	}: {
 		title: string;
+		recordNumber?: number;
 		description?: string;
 		eyebrow?: string;
 		/** Link to the page this one belongs to, shown above the title as "Back to …". */
@@ -30,7 +32,13 @@
 			{#if eyebrow}
 				<p class="text-sm font-medium text-muted-foreground">{eyebrow}</p>
 			{/if}
-			<h1 class="page-title">{title}</h1>
+			<h1 class="page-title">
+				{title}{#if recordNumber}
+					<span
+						class="ml-2 text-base font-normal whitespace-nowrap text-muted-foreground"
+						aria-label={`Record number ${recordNumber}`}>#{recordNumber}</span
+					>{/if}
+			</h1>
 			{#if description}
 				<p class="max-w-prose text-base text-muted-foreground">{description}</p>
 			{/if}

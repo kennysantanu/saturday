@@ -1,7 +1,7 @@
 import * as networks from '../src/lib/server/networks.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -50,6 +50,14 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 		assert.equal(settingsResponse.headers.get('x-saturday-build'), readBuildInfo().id);
 		const settings = await settingsResponse.text();
 		assert.ok(settings.includes('Backup and restore'));
+		assert.ok(settings.includes('Diagnostics'));
+		assert.ok(settings.includes('Database schema'));
+		assert.ok(settings.includes('saturday.database.numeric'));
+		assert.ok(settings.includes('saturday.files.numeric'));
+		assert.ok(settings.includes(process.env.SATURDAY_DB_PATH + '.backups'));
+		assert.ok(settings.includes(process.env.SATURDAY_DB_PATH + '.restore'));
+		assert.ok(settings.includes(process.env.SATURDAY_FILES_PATH + '.backups'));
+		assert.ok(settings.includes(process.env.SATURDAY_FILES_PATH + '.state'));
 		assert.ok(settings.replace(/\s+/g, ' ').includes('Automatic backups'));
 		for (let i = 0; i < 30 && !listBackups().backups.some((b) => b.kind === 'scheduled'); i++)
 			await new Promise((r) => setTimeout(r, 100));
@@ -136,6 +144,10 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 			organization: 'Acme'
 		});
 		assert.equal(editPerson.type, 'redirect');
+		const peopleList = await (await fetch(`${base}/networks`)).text();
+		assert.ok(peopleList.includes(`Person number ${personId}`));
+		const personDetail = await (await fetch(`${base}/networks/${personId}`)).text();
+		assert.ok(personDetail.includes(`Record number ${personId}`));
 		const follow = await postJob(`/networks/${personId}?/followUp`, {
 			follow_up_date: '2000-01-01',
 			follow_up_comment: 'Check in'
@@ -260,6 +272,7 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 		setJobScore(newId, { score: 8.5, score_comment: 'Strong relevant skills' });
 		const detail = await (await fetch(`${base}/jobs/${newId}`)).text();
 		assert.ok(detail.includes('Seattle'));
+		assert.ok(detail.includes(`Record number ${newId}`));
 		assert.ok(detail.includes('Strong relevant skills'));
 		assert.ok(detail.includes('Starred'));
 		assert.ok(!detail.includes('name="score"'));
@@ -271,6 +284,7 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 		).text();
 		assert.ok(jobsPage.includes('method="GET"'));
 		assert.ok(jobsPage.includes('Apply filters'));
+		assert.ok(jobsPage.includes(`Job number ${newId}`));
 		assert.ok(jobsPage.includes('Advanced filters'));
 		assert.ok(jobsPage.includes(`href="/jobs/${newId}"`));
 		assert.ok(
@@ -416,6 +430,21 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 		assert.ok(!(await blockedFile.text()).includes('Original dataset only'));
 		assert.equal(await (await fetch(`${base}/api/files/${docId}`)).text(), '# Web career');
 
+		const manifestPath = join(process.env.SATURDAY_FILES_PATH, 'manifest.json');
+		const validManifest = readFileSync(manifestPath, 'utf8');
+		try {
+			writeFileSync(
+				manifestPath,
+				JSON.stringify({ ...JSON.parse(validManifest), format_version: 2 })
+			);
+			const unavailable = await fetch(`${base}/settings`);
+			assert.equal(unavailable.status, 200);
+			const unavailablePage = await unavailable.text();
+			assert.ok(unavailablePage.includes('Unavailable'));
+			assert.ok(unavailablePage.includes('Database schema'));
+		} finally {
+			writeFileSync(manifestPath, validManifest);
+		}
 		const childExit = new Promise((r) => child.on('close', r));
 		child.kill('SIGTERM');
 		await childExit;

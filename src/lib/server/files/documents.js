@@ -261,6 +261,8 @@ export async function openDocument({ id, scope = 'documents', range, token }) {
 }
 export async function storageSummary() {
 	return withFileLock(async (m) => ({
+		format: m.format,
+		format_version: m.format_version,
 		dataset_id: m.dataset_id,
 		dataset_matches_database: databaseIdentity()?.dataset_id === m.dataset_id,
 		count: m.documents.length,
