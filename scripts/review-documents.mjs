@@ -45,6 +45,12 @@ try {
 	}
 	browser = await puppeteer.launch({ headless: true });
 	const page = await browser.newPage();
+	const settled = async () => {
+		await page.waitForNetworkIdle({ idleTime: 100 });
+		await page.waitForFunction(() =>
+			document.getAnimations().every((a) => a.playState !== 'running')
+		);
+	};
 
 	page.on('pageerror', (e) => errors.push(e.message));
 	await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
@@ -61,37 +67,38 @@ try {
 	await page.screenshot({ path: join(scratch, 'desktop.png'), fullPage: true });
 	await page.locator('button::-p-text(Select Master CV)').click();
 	await page.waitForSelector('input[type=radio]');
-	await page.click('input[type=radio]');
+	await page.click(`input[type=radio][value="${cv.id}"]`);
 	await page.locator('button::-p-text(Use selected file)').click();
 	await page.waitForSelector('[data-slot=dialog-overlay]', { hidden: true });
 	await page.waitForFunction(() =>
 		document.getAnimations().every((a) => a.playState !== 'running')
 	);
-	await page.waitForSelector('button[aria-label="Remove Master CV designation from master-cv.md"]');
-	await page.locator('button[aria-label="Remove Master CV designation from master-cv.md"]').click();
-	await page.waitForSelector('[role=dialog]');
 	assert.equal((await getDocument({ id: cv.id })).designation, 'master_cv');
-	await page.locator('[role=dialog] button::-p-text(Cancel)').click();
-	assert.equal((await getDocument({ id: cv.id })).designation, 'master_cv');
-	await page.locator('button[aria-label="Remove Master CV designation from master-cv.md"]').click();
-	await page.locator('[role=dialog] button::-p-text(Remove designation)').click();
-	await page.waitForSelector(
-		'button[aria-label="Remove Master CV designation from master-cv.md"]',
-		{ hidden: true }
-	);
-	assert.equal((await getDocument({ id: cv.id })).designation, null);
-	await page.waitForFunction(() =>
-		document.getAnimations().every((a) => a.playState !== 'running')
-	);
 	await page.locator('button::-p-text(Select Master CV)').click();
-	await page.waitForSelector('input[type=radio]');
-	await page.click('input[type=radio]');
-	await page.locator('button::-p-text(Use selected file)').click();
-	await page.waitForSelector('[data-slot=dialog-overlay]', { hidden: true });
-	await page.waitForFunction(() =>
-		document.getAnimations().every((a) => a.playState !== 'running')
+	await page.waitForSelector('input[type=radio][value=""]');
+	await page.click('input[type=radio][value=""]');
+	await page.locator('[role=dialog] button::-p-text(Cancel)').click();
+	assert.equal(
+		(await getDocument({ id: cv.id })).designation,
+		'master_cv',
+		'Cancelling preserves designation'
 	);
-	await page.waitForSelector('button[aria-label="Remove Master CV designation from master-cv.md"]');
+	await page.waitForSelector('[role=dialog]', { hidden: true });
+	await settled();
+	await page.locator('button::-p-text(Select Master CV)').click();
+	await page.waitForSelector('input[type=radio][value=""]');
+	await page.click('input[type=radio][value=""]');
+	await page.locator('button::-p-text(Clear Master CV)').click();
+	await page.waitForSelector('[role=dialog]', { hidden: true });
+	await settled();
+	assert.equal((await getDocument({ id: cv.id })).designation, null);
+	await settled();
+	await page.locator('button::-p-text(Select Master CV)').click();
+	await page.waitForSelector(`input[type=radio][value="${cv.id}"]`);
+	await page.click(`input[type=radio][value="${cv.id}"]`);
+	await page.locator('button::-p-text(Use selected file)').click();
+	await page.waitForSelector('[role=dialog]', { hidden: true });
+	await settled();
 	const uploaded = join(scratch, 'uploaded.txt');
 	await writeFile(uploaded, 'Uploaded directly from the picker.');
 	const [chooser] = await Promise.all([
@@ -156,6 +163,12 @@ try {
 	);
 	await page.screenshot({ path: join(scratch, 'picker-mobile.png'), fullPage: true });
 	await page.keyboard.press('Escape');
+	await page.waitForSelector('[role=dialog]', { hidden: true });
+	await settled();
+	assert.ok(
+		await page.evaluate(() => document.activeElement.textContent.includes('Select Master CV')),
+		'Picker cancellation returns focus to its trigger'
+	);
 	await page.goto(`${base}/settings`, { waitUntil: 'networkidle0' });
 	assert.ok(
 		await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
@@ -169,12 +182,6 @@ try {
 		document.body.style.zoom = '2';
 	});
 	await page.screenshot({ path: join(scratch, 'zoom.png'), fullPage: true });
-	const settled = async () => {
-		await page.waitForNetworkIdle({ idleTime: 100 });
-		await page.waitForFunction(() =>
-			document.getAnimations().every((a) => a.playState !== 'running')
-		);
-	};
 	// Network uses the same pages, controls and dialogs, with disposable records.
 	await page.setViewport({ width: 1365, height: 900 });
 	await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
@@ -192,10 +199,7 @@ try {
 	await page.locator('button::-p-text(Save person)').click();
 	await page.waitForFunction(() => /\/networks\/[0-9a-f-]+$/.test(location.pathname));
 	const personId = new URL(page.url()).pathname.split('/').at(-1);
-	await page.waitForNetworkIdle();
-	await page.waitForFunction(() =>
-		document.getAnimations().every((a) => a.playState !== 'running')
-	);
+	await settled();
 	await page.locator('button::-p-text(Schedule follow-up)').click();
 	await page.waitForSelector('[role=dialog]');
 	await settled();
@@ -243,12 +247,16 @@ try {
 		'Hiring manager and referrer'
 	);
 	await page.screenshot({ path: join(scratch, 'network-detail-desktop.png'), fullPage: true });
-	await page.locator('button[aria-label^="Delete interaction"]').click();
+	await page.locator('button[aria-label^="More actions for interaction"]').click();
+	await page.locator('[role=menuitem]::-p-text(Delete)').click();
 	await page.waitForSelector('[role=dialog]');
 	await settled();
 	await page.locator('[role=dialog] button::-p-text(Cancel)').click();
 	assert.equal(networks.getNetwork(personId).interaction_count, 1);
-	await page.locator('button[aria-label^="Delete interaction"]').click();
+	await page.waitForSelector('[role=dialog]', { hidden: true });
+	await settled();
+	await page.locator('button[aria-label^="More actions for interaction"]').click();
+	await page.locator('[role=menuitem]::-p-text(Delete)').click();
 	await page.locator('[role=dialog] button::-p-text(Delete interaction)').click();
 	await page.waitForSelector('[role=dialog]', { hidden: true });
 	await settled();
@@ -267,7 +275,7 @@ try {
 	await settled();
 	assert.equal(networks.listNetworkJobs({ network_id: personId }).jobs[0].job_link.notes, null);
 	await page.locator('button[aria-label="Unlink Alex Example"]').click();
-	await page.waitForFunction(() => document.body.textContent.includes('No linked people yet.'));
+	await page.waitForFunction(() => document.body.textContent.includes('No linked people yet'));
 	await settled();
 	await page.locator('a::-p-text(Link person)').click();
 	await page.waitForSelector('[role=dialog]');
@@ -349,6 +357,85 @@ try {
 		'Zoomed navigation labels fit'
 	);
 	await page.screenshot({ path: join(scratch, 'network-zoom.png'), fullPage: true });
+	// Broad reflow and labeling checks complement the interactive workflows above.
+	for (const scheme of ['light', 'dark']) {
+		await page.emulateMediaFeatures([
+			{ name: 'prefers-color-scheme', value: scheme },
+			{ name: 'prefers-reduced-motion', value: 'reduce' }
+		]);
+		for (const width of [1365, 320]) {
+			await page.setViewport({ width, height: 900 });
+			for (const path of [
+				'/',
+				'/jobs',
+				'/jobs/new',
+				`/jobs/${job.id}`,
+				'/networks',
+				`/networks/${personId}`,
+				'/documents',
+				'/settings'
+			]) {
+				await page.goto(`${base}${path}`, { waitUntil: 'networkidle0' });
+				assert.ok(
+					await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+					`${scheme} ${width}px ${path} must fit`
+				);
+				const unnamed = await page.evaluate(() =>
+					[...document.querySelectorAll('main input, main select, main textarea, main button')]
+						.filter((e) => {
+							if (!e.getClientRects().length || e.type === 'hidden') return false;
+							return !(
+								e.getAttribute('aria-label') ||
+								e.getAttribute('aria-labelledby') ||
+								e.labels?.length ||
+								(e.tagName === 'BUTTON' && e.textContent.trim())
+							);
+						})
+						.map((e) => e.outerHTML)
+				);
+				assert.deepEqual(unnamed, [], `Visible controls need names: ${path}`);
+				await page.screenshot({
+					path: join(scratch, `${scheme}-${width}-${path.replaceAll('/', '_') || 'dashboard'}.png`),
+					fullPage: true
+				});
+			}
+		}
+	}
+	await page.goto(`${base}/jobs/new`, { waitUntil: 'networkidle0' });
+	await page.locator('button::-p-text(Save job)').click();
+	await page.waitForSelector('#job_title[aria-invalid="true"]');
+	assert.equal(await page.evaluate(() => document.activeElement.id), 'job_title');
+	assert.ok(
+		await page.$eval('#job_title', (e) =>
+			document.getElementById(e.getAttribute('aria-describedby')).textContent.trim()
+		),
+		'Invalid field describes its error'
+	);
+	await page.type('#job_title', 'Unsaved job');
+	await page.locator('a::-p-text(Cancel)').click();
+	await page.waitForSelector('[role=dialog]');
+	await page.waitForFunction(() =>
+		document.querySelector('[role=dialog]').contains(document.activeElement)
+	);
+	for (let i = 0; i < 8; i++) {
+		await page.keyboard.press('Tab');
+		assert.ok(
+			await page.$eval('[role=dialog]', (e) => e.contains(document.activeElement)),
+			'Dialog traps keyboard focus'
+		);
+	}
+	await page.keyboard.press('Escape');
+	await page.waitForSelector('[role=dialog]', { hidden: true });
+	await settled();
+	assert.equal(
+		await page.$eval('#job_title', (e) => e.value),
+		'Unsaved job',
+		'Cancel keeps unsaved input'
+	);
+	await page.locator('a::-p-text(Cancel)').click();
+	await page.waitForSelector('[role=dialog]');
+	await page.locator('[role=dialog] button::-p-text(Discard changes)').click();
+	await page.waitForFunction(() => location.pathname === '/jobs');
 	const noJs = await browser.newPage();
 	await noJs.setJavaScriptEnabled(false);
 	await noJs.goto(`${base}/networks?organization=Acme&role=recruiter`, {

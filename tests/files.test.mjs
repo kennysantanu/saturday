@@ -267,6 +267,28 @@ test('real HTML PDF generation saves independently and enforces source conflicts
 	await assert.rejects(pdf.generateDocumentPdf({ id: html.id, scope: job.id, token: 'old' }), {
 		code: 'CONFLICT'
 	});
+	const invalid = await d.createDocument({
+		filename: 'invalid-page.html',
+		content: '<style>@page {size:100in}</style><p>Keep this source.</p>'
+	});
+	const before = (await d.listDocuments()).total;
+	await assert.rejects(pdf.generateDocumentPdf({ id: invalid.id, token: invalid.token }), {
+		code: 'VALIDATION'
+	});
+	assert.equal((await d.listDocuments()).total, before, 'Failed rendering publishes no PDF');
+	assert.equal(
+		(await d.getDocument({ id: invalid.id, include_content: true })).token,
+		invalid.token
+	);
+	const fixed = await d.editDocument({
+		id: invalid.id,
+		token: invalid.token,
+		content: '<p>Valid page.</p>'
+	});
+	assert.equal(
+		(await pdf.generateDocumentPdf({ id: fixed.id, token: fixed.token })).filename,
+		'invalid-page.pdf'
+	);
 });
 
 test('manifest validation preserves extensions and refuses unknown versions', async () => {
@@ -834,6 +856,118 @@ test('a failed complete backup keeps prior sets and database-only mode skips fil
 		assert.equal(databaseOnly.backup.file_backup_id, undefined);
 		assert.throws(() => backups.setBackupSettings({ contents: 'files' }), {
 			code: 'invalid_request'
+		});
+	});
+});
+
+test('failed atomic metadata publication cleans staging and allows retry', async () => {
+	await isolatedStores(async (scratch) => {
+		const fs = (await import('node:fs/promises')).default;
+		const { syncBuiltinESMExports } = await import('node:module');
+		const path = join(scratch, 'metadata.json');
+		await s.atomicJson(path, { value: 'original' });
+		const rename = fs.rename;
+		try {
+			fs.rename = async () => {
+				throw Object.assign(new Error('Disk full'), { code: 'ENOSPC' });
+			};
+			syncBuiltinESMExports();
+			await assert.rejects(s.atomicJson(path, { value: 'replacement' }), { code: 'ENOSPC' });
+		} finally {
+			fs.rename = rename;
+			syncBuiltinESMExports();
+		}
+		assert.equal(JSON.parse(await readFile(path, 'utf8')).value, 'original');
+		assert.deepEqual(
+			(await fs.readdir(scratch)).filter((name) => name.endsWith('.tmp')),
+			[]
+		);
+		await s.atomicJson(path, { value: 'replacement' });
+		assert.equal(JSON.parse(await readFile(path, 'utf8')).value, 'replacement');
+	});
+});
+
+test('disk-full publication blocks inconsistent reads then replays after space returns', async () => {
+	await isolatedStores(async () => {
+		const file = await d.createDocument({ filename: 'retry.txt', content: 'original' });
+		const put = s.LocalFileStore.prototype.put;
+		try {
+			s.LocalFileStore.prototype.put = async () => {
+				throw Object.assign(new Error('Disk full'), { code: 'ENOSPC' });
+			};
+			await assert.rejects(
+				d.editDocument({ id: file.id, token: file.token, content: 'replacement' }),
+				{ code: 'ENOSPC' }
+			);
+			await assert.rejects(d.getDocument({ id: file.id, include_content: true }), {
+				code: 'ENOSPC'
+			});
+			assert.equal(await readFile(join(s.filePaths().root, file.key), 'utf8'), 'original');
+			assert.ok(await s.fs.stat(join(s.filePaths().state, 'journal.json')));
+		} finally {
+			s.LocalFileStore.prototype.put = put;
+		}
+		const recovered = await d.getDocument({ id: file.id, include_content: true });
+		assert.equal(recovered.content, 'replacement');
+		assert.notEqual(recovered.token, file.token);
+		await assert.rejects(s.fs.access(join(s.filePaths().state, 'journal.json')), {
+			code: 'ENOENT'
+		});
+		await d.editDocument({ id: file.id, token: recovered.token, content: 'next edit' });
+	});
+});
+
+test('interrupted byte stream never replaces the visible file or leaves a partial upload', async () => {
+	await isolatedStores(async () => {
+		await d.listDocuments();
+		const store = new s.LocalFileStore(s.filePaths().root);
+		const key = 'documents/stream.txt';
+		await store.put(key, Readable.from(['original']));
+		const stream = Readable.from(
+			(async function* () {
+				yield 'partial replacement';
+				throw new Error('Upload disconnected');
+			})()
+		);
+		await assert.rejects(store.put(key, stream), /Upload disconnected/);
+		assert.equal(await readFile(join(s.filePaths().root, key), 'utf8'), 'original');
+		assert.deepEqual(await s.fs.readdir(join(s.filePaths().root, 'documents')), ['stream.txt']);
+	});
+});
+
+test('process death after byte publication recovers the pending manifest on restart', async () => {
+	await isolatedStores(async () => {
+		const file = await d.createDocument({ filename: 'restart.txt', content: 'original' });
+		const script = `
+			import * as store from './src/lib/server/files/store.js';
+			import * as documents from './src/lib/server/files/documents.js';
+			const put = store.LocalFileStore.prototype.put;
+			store.LocalFileStore.prototype.put = async function (...args) {
+				await put.apply(this, args);
+				process.exit(17);
+			};
+			await documents.editDocument(${JSON.stringify({ id: file.id, token: file.token, content: 'published before interruption' })});
+		`;
+		const code = await new Promise((resolve, reject) => {
+			const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+				env: process.env,
+				stdio: ['ignore', 'ignore', 'pipe']
+			});
+			let error = '';
+			child.stderr.on('data', (data) => (error += data));
+			child.on('error', reject);
+			child.on('close', (code) => (code === 17 ? resolve(code) : reject(new Error(error))));
+		});
+		assert.equal(code, 17);
+		assert.equal(
+			await readFile(join(s.filePaths().root, file.key), 'utf8'),
+			'published before interruption'
+		);
+		const recovered = await d.getDocument({ id: file.id, include_content: true });
+		assert.equal(recovered.content, 'published before interruption');
+		assert.notEqual(recovered.token, file.token);
+		await assert.rejects(s.fs.access(join(s.filePaths().state, 'journal.json')), {
+			code: 'ENOENT'
 		});
 	});
 });

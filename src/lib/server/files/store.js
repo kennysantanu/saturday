@@ -111,15 +111,20 @@ async function syncDirectory(path) {
 export async function atomicJson(path, value) {
 	await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 });
 	const temp = `${path}.${randomUUID()}.tmp`;
-	const h = await fs.open(temp, 'wx', 0o600);
 	try {
-		await h.writeFile(JSON.stringify(value, null, 2));
-		await h.sync();
-	} finally {
-		await h.close();
+		const h = await fs.open(temp, 'wx', 0o600);
+		try {
+			await h.writeFile(JSON.stringify(value, null, 2));
+			await h.sync();
+		} finally {
+			await h.close();
+		}
+		await fs.rename(temp, path);
+		await syncDirectory(dirname(path));
+	} catch (error) {
+		await fs.rm(temp, { force: true });
+		throw error;
 	}
-	await fs.rename(temp, path);
-	await syncDirectory(dirname(path));
 }
 export async function ensureDiskSpace(bytes) {
 	try {

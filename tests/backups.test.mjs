@@ -880,3 +880,29 @@ test('an already-open connection rejects a schema changed by another process bef
 		db.close();
 	}
 });
+
+test('disk-full metadata publication keeps existing backups and database intact, then retries', async () => {
+	const fs = (await import('node:fs')).default;
+	const { syncBuiltinESMExports } = await import('node:module');
+	const job = createJob({ job_title: 'Preserve me', company_name: 'Example' });
+	const previous = backups.createBackup();
+	const directory = fs.realpathSync(process.env.SATURDAY_DB_PATH + '.backups');
+	const before = readdirSync(directory).sort();
+	const write = fs.writeFileSync;
+	try {
+		fs.writeFileSync = (...args) => {
+			if (String(args[0]).startsWith(directory) && String(args[0]).endsWith('.tmp'))
+				throw Object.assign(new Error('Disk full'), { code: 'ENOSPC' });
+			return write(...args);
+		};
+		syncBuiltinESMExports();
+		assert.throws(() => backups.createBackup(), { code: 'io_error' });
+	} finally {
+		fs.writeFileSync = write;
+		syncBuiltinESMExports();
+	}
+	assert.deepEqual(readdirSync(directory).sort(), before);
+	assert.ok(getJob(job.id));
+	assert.equal(backups.listBackups().backups[0].backup_id, previous.backup_id);
+	assert.ok(backups.createBackup().backup_id);
+});
