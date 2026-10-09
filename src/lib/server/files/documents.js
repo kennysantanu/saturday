@@ -3,7 +3,7 @@ import { basename } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createWriteStream } from 'node:fs';
 import { Transform } from 'node:stream';
-import { fileType } from '../../file-types.js';
+import { fileType, documentDesignations } from '../../file-types.js';
 import { databaseIdentity } from '../database.js';
 import {
 	withFileLock,
@@ -41,10 +41,13 @@ export async function listDocuments({
 	page = 1,
 	limit = 50,
 	catalog_token,
-	editable_markdown = false
+	editable_markdown = false,
+	editable_format
 } = {}) {
 	return withFileLock(async (m) => {
 		const prefix = scopePrefix(scope);
+		if (editable_format && !['markdown', 'html'].includes(editable_format))
+			reject('VALIDATION', 'Invalid document format.');
 		if (!Number.isInteger(page) || page < 1 || !Number.isInteger(limit) || limit < 1 || limit > 100)
 			reject('VALIDATION', 'Invalid document pagination.');
 		if (catalog_token) checkToken(m.token, catalog_token);
@@ -53,6 +56,8 @@ export async function listDocuments({
 				(d) =>
 					d.key.startsWith(`${prefix}/`) &&
 					basename(d.key).toLowerCase().includes(query.toLowerCase()) &&
+					(!editable_format ||
+						(fileType(d.key).type === editable_format && d.size <= TEXT_LIMIT)) &&
 					(!editable_markdown || (fileType(d.key).type === 'markdown' && d.size <= TEXT_LIMIT))
 			)
 			.sort((a, b) => a.key.localeCompare(b.key, 'en') || a.id.localeCompare(b.id));
@@ -64,7 +69,7 @@ export async function listDocuments({
 			totalPages: Math.ceil(docs.length / limit),
 			catalog_token: m.token,
 			...(scope === 'documents'
-				? { designations: { master_cv: m.designations.master_cv ?? null } }
+				? { designations: { ...m.designations, master_cv: m.designations.master_cv ?? null } }
 				: {})
 		};
 	});
@@ -74,13 +79,16 @@ export async function getDocument(
 	{ includeAvailableContent = false } = {}
 ) {
 	return withFileLock(async (m) => {
-		if (!!id === !!designation)
-			reject('VALIDATION', 'Specify a document ID or master_cv designation.');
+		if (!!id === !!designation) reject('VALIDATION', 'Specify a document ID or designation.');
 		if (designation) {
-			if (designation !== 'master_cv' || scope !== 'documents')
+			if (!Object.hasOwn(documentDesignations, designation) || scope !== 'documents')
 				reject('VALIDATION', 'Invalid designation scope.');
-			id = m.designations.master_cv;
-			if (!id) reject('NOT_CONFIGURED', 'Master CV has not been selected.');
+			id = m.designations[designation];
+			if (!id)
+				reject(
+					'NOT_CONFIGURED',
+					`${documentDesignations[designation].label} has not been selected.`
+				);
 		}
 		const d = entryFor(m, id, scope);
 
@@ -114,11 +122,13 @@ export async function getDocument(
 	});
 }
 export async function createDocument(
-	{ scope = 'documents', filename: name, content },
+	{ scope = 'documents', filename: name, content, designation, catalog_token },
 	origin = 'manual'
 ) {
 	const bytes = textBytes(name, content);
-	return withFileLock((m) => createEntry(m, { scope, name, origin, bytes }));
+	return withFileLock((m) =>
+		createEntry(m, { scope, name, origin, bytes, designation, catalog_token })
+	);
 }
 export async function editDocument({ id, scope = 'documents', token, filename: name, content }) {
 	return withFileLock(async (m) => {
@@ -133,8 +143,12 @@ export async function editDocument({ id, scope = 'documents', token, filename: n
 			const next = `${scopePrefix(scope)}/${name}`;
 			if (m.documents.some((x) => x.id !== id && x.key.toLowerCase() === next.toLowerCase()))
 				reject('COLLISION', 'That filename already exists.');
-			if (m.designations.master_cv === id && fileType(name).type !== 'markdown')
-				reject('VALIDATION', 'Clear Master CV before changing its format.');
+			for (const [key, selected] of Object.entries(m.designations))
+				if (selected === id && fileType(name).type !== documentDesignations[key].format)
+					reject(
+						'VALIDATION',
+						`Clear ${documentDesignations[key].label} before changing its format.`
+					);
 			d.key = next;
 		}
 		let bytes;
@@ -185,42 +199,54 @@ export async function deleteDocument({
 	token,
 	confirm,
 	catalog_token,
-	clear_master = false
+	clear_master = false,
+	clear_designations = false
 }) {
 	return withFileLock(async (m) => {
 		if (confirm !== true) reject('CONFIRMATION', 'Confirm permanent deletion first.');
 		const d = entryFor(m, id, scope);
 		checkToken(d.token, token);
-		if (m.designations.master_cv === id) {
+		const assigned = Object.entries(m.designations).filter(([, selected]) => selected === id);
+		if (assigned.length) {
 			checkToken(m.token, catalog_token);
-			if (!clear_master)
-				reject('CONFIRMATION', 'Deleting this file also clears Master CV. Acknowledge this first.');
-			delete m.designations.master_cv;
+			if (!clear_designations && !(clear_master && assigned.every(([key]) => key === 'master_cv')))
+				reject(
+					'CONFIRMATION',
+					`Deleting this file also clears ${assigned.map(([key]) => documentDesignations[key].label).join(', ')}. Acknowledge this first.`
+				);
+			for (const [key] of assigned) delete m.designations[key];
 		}
+
 		m.documents = m.documents.filter((d) => d.id !== id);
 		await commitManifest(m, [{ key: d.key, remove: true }]);
 		return { id, deleted: true, catalog_token: m.token };
 	});
 }
-export async function setMasterDocument({ id, token, catalog_token }) {
+export async function setMasterDocument({ id, token, catalog_token, designation = 'master_cv' }) {
 	return withFileLock(async (m) => {
 		checkToken(m.token, catalog_token);
+		if (!Object.hasOwn(documentDesignations, designation))
+			reject('VALIDATION', 'Invalid document designation.');
 		if (id !== null) {
 			const d = entryFor(m, id);
 			checkToken(d.token, token);
-			if (fileType(d.key).type !== 'markdown')
-				reject('UNSUPPORTED_FORMAT', 'Select an existing Markdown document.');
+			if (fileType(d.key).type !== documentDesignations[designation].format)
+				reject(
+					'UNSUPPORTED_FORMAT',
+					`Select an existing ${documentDesignations[designation].format} document.`
+				);
 			await readText(d);
 		}
-		if ((m.designations.master_cv ?? null) === id) return { master_cv: id, catalog_token: m.token };
-		if (id === null) delete m.designations.master_cv;
-		else m.designations.master_cv = id;
+		if ((m.designations[designation] ?? null) === id)
+			return { [designation]: id, catalog_token: m.token };
+		if (id === null) delete m.designations[designation];
+		else m.designations[designation] = id;
 		await commitManifest(m);
-		return { master_cv: id, catalog_token: m.token };
+		return { [designation]: id, catalog_token: m.token };
 	});
 }
 export async function uploadDocument(
-	{ scope = 'documents', filename: name, stream },
+	{ scope = 'documents', filename: name, stream, designation, catalog_token },
 	origin = 'manual'
 ) {
 	name = filename(name);
@@ -246,7 +272,9 @@ export async function uploadDocument(
 			}),
 			createWriteStream(temp, { flags: 'wx', mode: 0o600 })
 		);
-		return await withFileLock((m) => createEntry(m, { scope, name, path: temp, origin }));
+		return await withFileLock((m) =>
+			createEntry(m, { scope, name, path: temp, origin, designation, catalog_token })
+		);
 	} finally {
 		await fs.rm(temp, { force: true });
 	}

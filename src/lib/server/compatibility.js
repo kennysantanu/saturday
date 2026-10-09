@@ -16,7 +16,7 @@ export const storageCompatibility = Object.freeze({
 		minimumVersion: 1,
 		currentVersion: schemaVersion
 	}),
-	manifest: Object.freeze({ format: 'saturday.files.numeric', version: 1 }),
+	manifest: Object.freeze({ format: 'saturday.files.numeric', minimumVersion: 1, version: 2 }),
 	pair: Object.freeze({ format: 'saturday.backup-pair.numeric', version: 1 })
 });
 
@@ -32,7 +32,9 @@ export function assertManifestCompatibility(m) {
 	if (
 		!m ||
 		m.format !== storageCompatibility.manifest.format ||
-		m.format_version !== storageCompatibility.manifest.version ||
+		!Number.isInteger(m.format_version) ||
+		m.format_version < storageCompatibility.manifest.minimumVersion ||
+		m.format_version > storageCompatibility.manifest.version ||
 		typeof m.dataset_id !== 'string' ||
 		!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
 			m.dataset_id ?? ''

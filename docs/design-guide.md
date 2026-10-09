@@ -261,10 +261,8 @@ Network uses solid list/cards, inline labeled person fields, GET filters and ind
 ## Documents patterns
 
 Documents is a `Card` of `DocumentRow`s under a search `FilterBar`. Upload is the tinted primary; New document
-and Select Master CV are secondary buttons beside it. A row shows the filename (link), a Master CV badge, type,
-size and date, then Edit and a menu (Preview, Download, Rename, Duplicate, Delete). The Select Master CV dialog lists
-Markdown documents with a No Master CV choice, so one dialog both selects and unselects. The Master CV picker and Copy to this job picker fetch in place with a
-skeleton while loading; Network and job pickers keep URL state so they work with
+and Profile are secondary buttons beside it. A row shows the filename (link), designation badges, type,
+size and date, then Edit and a menu (Preview, Download, Rename, Duplicate, Delete). Profile manages document designations. Its existing-document picker keeps search/pagination in the URL; Copy to this job fetches in place with a skeleton while loading. Network and job pickers also keep URL state so they work with
 server validation and survive reloads. The editor toolbar uses icons, reports
 `aria-pressed`, and disables Undo and Redo when unavailable. Unsaved edits show
 a badge beside the title.
@@ -321,3 +319,7 @@ A change is done when:
 Dataset mismatches use the existing Settings Notice and restore-preview warning text. Explain that job attachments need matching backups, user documents remain available, and files are retained. Do not expose opaque dataset identifiers as controls or offer automatic rebinding.
 
 Job and person rows, detail headings, linked records and relationship pickers show a subdued `#123` reference beside the primary name/title. Pass numeric record numbers explicitly to existing components; do not derive them from URLs. Settings Storage contains a collapsed Diagnostics disclosure with selectable build identity, actual schema/manifest versions and resolved storage/backup/recovery paths. Do not display secrets or treat the development package version as a release version.
+
+## Profile patterns
+
+Profile is reached from Documents without adding a sixth navigation tab. Use PageShell/PageHeader and one solid SectionCard per known designation. Show its selected filename or a brief empty message, with compact secondary Select document, Upload, and Create new controls. Reuse the document editor and picker styles. Edit is visible; Clear selection uses the kebab menu and ConfirmDialog, keeping the file. Templates create HTML source; other slots create Markdown. No additional editor, workflow builder, or account form is needed.

@@ -5,7 +5,8 @@ export async function GET({ url }) {
 		const result = await listDocuments({
 			query: url.searchParams.get('query') ?? '',
 			page: Number(url.searchParams.get('page') || 1),
-			editable_markdown: url.searchParams.get('markdown') === '1'
+			editable_markdown: url.searchParams.get('markdown') === '1',
+			editable_format: url.searchParams.get('format') || undefined
 		});
 
 		return json(result, { headers: { 'cache-control': 'no-store' } });

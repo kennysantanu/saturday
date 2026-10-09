@@ -143,7 +143,9 @@ export async function getFileBackup(id) {
 	const metadata = JSON.parse(await fs.readFile(join(root, `${id}.json`), 'utf8'));
 	if (
 		metadata.format !== storageCompatibility.manifest.format ||
-		metadata.format_version !== storageCompatibility.manifest.version
+		!Number.isInteger(metadata.format_version) ||
+		metadata.format_version < storageCompatibility.manifest.minimumVersion ||
+		metadata.format_version > storageCompatibility.manifest.version
 	)
 		reject('FORMAT', 'Unsupported file backup format. Use a compatible build.');
 	const path = await regularPath(root, `${id}.zip`);
@@ -269,11 +271,12 @@ function mergeManifest(current, incoming, mode) {
 				);
 		} else m.documents.push({ ...d, token: randomUUID() });
 	}
-	if (incoming.designations.master_cv) {
-		if (m.designations.master_cv && m.designations.master_cv !== incoming.designations.master_cv)
-			reject('CONFLICT', 'Master CV assignments conflict.');
-		m.designations.master_cv = incoming.designations.master_cv;
+	for (const [key, id] of Object.entries(incoming.designations)) {
+		if (m.designations[key] && m.designations[key] !== id)
+			reject('CONFLICT', 'Document assignments conflict.');
+		m.designations[key] = id;
 	}
+
 	return m;
 }
 export async function prepareFileRestore({ backup_id, mode = 'add' }) {
@@ -306,6 +309,8 @@ export async function prepareFileRestore({ backup_id, mode = 'add' }) {
 					mode === 'replace'
 						? current.documents.filter((d) => !manifest.documents.some((x) => x.id === d.id)).length
 						: 0,
+				designations_before: current.designations,
+				designations_after: result.designations,
 				master_cv_before: current.designations.master_cv ?? null,
 				master_cv_after: result.designations.master_cv ?? null,
 				warning:

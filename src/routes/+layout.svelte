@@ -28,6 +28,7 @@
 
 	function isCurrent(href: string) {
 		const path = page.url.pathname;
+		if (href === '/documents' && path === '/profile') return true;
 		return href === '/' ? path === '/' : path === href || path.startsWith(`${href}/`);
 	}
 

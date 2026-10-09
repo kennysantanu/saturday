@@ -338,7 +338,8 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 		assert.equal((await postJob(`/jobs/${newId}?/clearFollowUp`, {})).type, 'redirect');
 		assert.equal(getJob(newId).followUpDate, null);
 		assert.equal(getJob(newId).followUpComment, null);
-		assert.ok((await (await fetch(`${base}/documents`)).text()).includes('Select Master CV'));
+		assert.ok((await (await fetch(`${base}/documents`)).text()).includes('/profile'));
+		assert.ok((await (await fetch(`${base}/profile`)).text()).includes('Cover letter template'));
 		const createdDocument = await postJob('/documents/new?/save', {
 			filename: 'web-cv',
 			content: '# Web career'
@@ -357,6 +358,37 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 			body: 'Streamed upload'
 		});
 		assert.equal(rawUpload.status, 200);
+
+		const profileCatalog = await (await fetch(`${base}/api/documents`)).json();
+		const profileCreated = await postJob('/documents/new?/save', {
+			filename: 'web-letter',
+			content: '<p>Dear team</p>',
+			designation: 'cover_letter_template',
+			catalog_token: profileCatalog.catalog_token
+		});
+		assert.equal(profileCreated.location, '/profile?saved=profile');
+		const { getDocument: getProfileDocument } =
+			await import('../src/lib/server/files/documents.js');
+		const letter = await getProfileDocument({
+			designation: 'cover_letter_template',
+			include_content: true
+		});
+		assert.equal(letter.filename, 'web-letter.html');
+		assert.equal(letter.content, '<p>Dear team</p>');
+		const profileUploadCatalog = await (await fetch(`${base}/api/documents`)).json();
+		const profileUpload = await fetch(
+			`${base}/api/files/upload?filename=direction.md&designation=career_direction&catalog_token=${profileUploadCatalog.catalog_token}`,
+			{
+				method: 'POST',
+				headers: { origin: base, 'content-type': 'application/octet-stream' },
+				body: '# Target roles'
+			}
+		);
+		assert.equal(profileUpload.status, 200);
+		assert.equal(
+			(await getProfileDocument({ designation: 'career_direction' })).filename,
+			'direction.md'
+		);
 		const crossOrigin = await fetch(`${base}/api/files/upload?filename=evil.txt`, {
 			method: 'POST',
 			headers: { origin: 'https://evil.example', 'content-type': 'application/octet-stream' },
@@ -435,7 +467,7 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 		try {
 			writeFileSync(
 				manifestPath,
-				JSON.stringify({ ...JSON.parse(validManifest), format_version: 2 })
+				JSON.stringify({ ...JSON.parse(validManifest), format_version: 3 })
 			);
 			const unavailable = await fetch(`${base}/settings`);
 			assert.equal(unavailable.status, 200);

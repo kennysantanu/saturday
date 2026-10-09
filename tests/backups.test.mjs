@@ -817,6 +817,42 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			(await call('get_document', { designation: 'master_cv', include_content: true })).content,
 			'# Career'
 		);
+
+		const letter = await call('create_document', {
+			filename: 'letter.html',
+			content: '<p>Dear team</p>'
+		});
+		const letterCatalog = await call('list_documents');
+		await call('set_master_document', {
+			designation: 'cover_letter_template',
+			id: letter.id,
+			token: letter.token,
+			catalog_token: letterCatalog.catalog_token
+		});
+		assert.equal(
+			(await call('get_document', { designation: 'cover_letter_template', include_content: true }))
+				.content,
+			'<p>Dear team</p>'
+		);
+		const letterNow = await call('get_document', { id: letter.id });
+		assert.equal(
+			(
+				await call('delete_document', {
+					id: letter.id,
+					token: letterNow.token,
+					confirm: true,
+					catalog_token: letterNow.catalog_token
+				})
+			).error.code,
+			'CONFIRMATION'
+		);
+		await call('delete_document', {
+			id: letter.id,
+			token: letterNow.token,
+			confirm: true,
+			catalog_token: letterNow.catalog_token,
+			clear_designations: true
+		});
 		const copied = await call('copy_document', {
 			id: doc.id,
 			token: doc.token,

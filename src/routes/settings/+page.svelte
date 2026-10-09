@@ -5,6 +5,7 @@
 	import { enhanceWithFocus } from '$lib/forms';
 	import { page } from '$app/state';
 	import { formatBytes, formatDateTime } from '$lib/format';
+	import { documentDesignations } from '$lib/file-types';
 	import Clipboard from '@lucide/svelte/icons/clipboard';
 	import Check from '@lucide/svelte/icons/check';
 	import Archive from '@lucide/svelte/icons/archive';
@@ -386,11 +387,11 @@
 						current: form.filePreview.current_count,
 						incoming: form.filePreview.result_count
 					},
-					{
-						label: 'Master CV',
-						current: form.filePreview.master_cv_before ?? 'Not selected',
-						incoming: form.filePreview.master_cv_after ?? 'Not selected'
-					}
+					...Object.entries(documentDesignations).map(([key, definition]) => ({
+						label: definition.label,
+						current: form.filePreview.designations_before?.[key] ?? 'Not selected',
+						incoming: form.filePreview.designations_after?.[key] ?? 'Not selected'
+					}))
 				]}
 			>
 				<p class="text-sm">

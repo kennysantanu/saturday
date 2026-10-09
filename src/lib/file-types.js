@@ -39,3 +39,38 @@ export function visualMarkdownSupported(text) {
 		text
 	);
 }
+
+// Known document assignments; files remain ordinary user documents.
+/** @type {Readonly<Record<string, {label: string, format: string, extension: string, description: string}>>} */
+export const documentDesignations = Object.freeze({
+	master_cv: {
+		label: 'Master CV',
+		format: 'markdown',
+		extension: '.md',
+		description: 'Your experience, education, skills, and background.'
+	},
+	resume_template: {
+		label: 'Resume template',
+		format: 'html',
+		extension: '.html',
+		description: 'The layout and styling for tailored resumes.'
+	},
+	cover_letter_template: {
+		label: 'Cover letter template',
+		format: 'html',
+		extension: '.html',
+		description: 'The layout and wording structure for tailored cover letters.'
+	},
+	career_direction: {
+		label: 'Career direction',
+		format: 'markdown',
+		extension: '.md',
+		description: 'Your target roles, locations, and career preferences.'
+	},
+	assistant_preferences: {
+		label: 'Assistant preferences',
+		format: 'markdown',
+		extension: '.md',
+		description: 'How you want your assistant to help.'
+	}
+});
