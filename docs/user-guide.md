@@ -60,6 +60,10 @@ From the job chooser, **Add person** opens the normal form and returns to the ch
 
 To connect a local assistant, build Saturday and follow **Settings → Connect an assistant**. Its generated configuration uses paths for your installation and the same database file as the web app. After reconnecting the client, ask it to list your jobs to confirm access. The assistant can list and read jobs, create a job, and add a dated update. The assistant can also edit job details, schedule follow-ups, and set an assessment score with an explanation. Job update corrections/removals, dismissal, and reopening remain in the web app. Network tools can find/edit people, manage job relationships/follow-ups, and read/add/correct/delete scoped interactions with explicit confirmation for deletion. The [assistant guide](assistant-guide.md) has the full connection steps and troubleshooting. An assistant installing Saturday for you can follow the [agent setup guide](agent-guide.md).
 
+Jobs and people show their record numbers (such as **#123**) in lists, headings and relationship pickers. Use these when asking an assistant to read or update a particular job or person. Numbers are separate for Jobs and Network; include which record you mean.
+
+Under **Settings → Local database → Diagnostics**, expand the disclosure to copy your development build, actual database/manifest versions, and storage/backup/recovery paths when reporting a problem.
+
 ## Backup and restore
 
 In **Settings → Backup and restore**, click **Back up now** to save your database and files together. Choose **Database only** for a smaller snapshot of jobs, people, follow-ups, relationships and history. **Back up files only** saves documents and attachments separately. Saved backups appear in one history; a complete set has separate **Download database** (`.sqlite`) and **Download files** (`.zip`) links. A backup completes only when both artifacts of a selected complete set are published. Files are not encrypted and contain private career information; copy important backups to another device or location if you need protection against loss of this computer.

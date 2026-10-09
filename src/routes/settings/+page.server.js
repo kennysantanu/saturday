@@ -18,6 +18,7 @@ import {
 import { fail, redirect } from '@sveltejs/kit';
 import {
 	createBackup,
+	getBackupPaths,
 	getBackupFile,
 	listBackups,
 	getBackupSettings,
@@ -31,7 +32,7 @@ import {
 } from '$lib/server/backups.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { getDatabasePath, getProjectRoot } from '$lib/server/database.js';
+import { getDatabasePath, getProjectRoot, openDatabase } from '$lib/server/database.js';
 import { buildInfo, storageCompatibility } from '$lib/server/compatibility.js';
 
 export async function load({ setHeaders }) {
@@ -87,7 +88,23 @@ export async function load({ setHeaders }) {
 			(a, b) => b.created_at.localeCompare(a.created_at) || a.backup_id.localeCompare(b.backup_id)
 		)
 		.slice(0, 50);
+	const db = openDatabase({ migrate: false });
+	let diagnostics;
+	try {
+		diagnostics = {
+			databaseVersion: db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get()
+				.version,
+			databaseFormat: db.prepare('SELECT format FROM app_metadata WHERE id=1').get().format,
+			manifestVersion: fileSummary?.format_version ?? null,
+			manifestFormat: fileSummary?.format ?? null,
+			databasePaths: getBackupPaths(),
+			filePaths: filePaths()
+		};
+	} finally {
+		db.close();
+	}
 	return {
+		diagnostics,
 		backupHistory,
 		buildInfo,
 		storageCompatibility,

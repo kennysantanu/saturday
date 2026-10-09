@@ -97,6 +97,9 @@ function paths() {
 	const p = root();
 	return { database: p, backups: `${p}.backups`, restore: `${p}.restore` };
 }
+export function getBackupPaths() {
+	return paths();
+}
 function privateDir(path) {
 	if (existsSync(path) && (lstatSync(path).isSymbolicLink() || !lstatSync(path).isDirectory()))
 		fail('io_error', 'Backup storage must be a regular directory.');

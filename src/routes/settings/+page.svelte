@@ -512,5 +512,22 @@
 		<p class="text-sm text-muted-foreground">
 			Set <code>SATURDAY_DB_PATH</code> before starting Saturday to use another location.
 		</p>
+		<details class="disclosure">
+			<summary>Diagnostics</summary>
+			<div class="disclosure-body space-y-4">
+				<p class="text-sm text-muted-foreground">
+					Select and copy these details when reporting a problem. Development builds remain
+					unversioned until the 0.1.0 release.
+				</p>
+				<dl class="space-y-4 text-sm">
+					{#each [['Development build', data.buildInfo.id], ['Database schema', data.diagnostics.databaseVersion], ['Database format', data.diagnostics.databaseFormat], ['File manifest version', data.diagnostics.manifestVersion ?? 'Unavailable'], ['File manifest format', data.diagnostics.manifestFormat ?? 'Unavailable'], ['Database', data.diagnostics.databasePaths.database], ['Database backups', data.diagnostics.databasePaths.backups], ['Database restore staging', data.diagnostics.databasePaths.restore], ['Files', data.diagnostics.filePaths.root], ['File backups', data.diagnostics.filePaths.backups], ['File recovery state', data.diagnostics.filePaths.state]] as [label, value] (label)}
+						<div>
+							<dt class="font-medium">{label}</dt>
+							<dd class="mt-1 font-mono break-all text-muted-foreground select-text">{value}</dd>
+						</div>
+					{/each}
+				</dl>
+			</div>
+		</details>
 	</SectionCard>
 </PageShell>

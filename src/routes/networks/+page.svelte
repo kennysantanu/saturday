@@ -130,6 +130,7 @@
 			<Card.Root class="gap-0 divide-y divide-border p-0">
 				{#each data.networks as person (person.id)}
 					<PersonRow
+						recordNumber={person.id}
 						href={`/networks/${person.id}`}
 						name={person.name}
 						role={person.role}

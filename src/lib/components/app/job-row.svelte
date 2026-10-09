@@ -7,6 +7,7 @@
 
 	let {
 		href,
+		recordNumber,
 		title,
 		company,
 		status,
@@ -15,6 +16,7 @@
 		score = null
 	}: {
 		href: string;
+		recordNumber: number;
 		title: string;
 		company: string;
 		status: StatusInfo;
@@ -32,6 +34,10 @@
 					class="sr-only"
 					>Starred:
 				</span>{/if}{title}
+			<span
+				class="meta-text ml-2 font-normal whitespace-nowrap text-muted-foreground"
+				aria-label={`Job number ${recordNumber}`}>#{recordNumber}</span
+			>
 		</p>
 		<p class="mt-1 text-sm text-muted-foreground">{company}</p>
 	</div>

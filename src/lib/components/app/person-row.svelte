@@ -5,6 +5,7 @@
 
 	let {
 		href,
+		recordNumber,
 		name,
 		role,
 		organization,
@@ -13,6 +14,7 @@
 		today
 	}: {
 		href: string;
+		recordNumber: number;
 		name: string;
 		role?: string | null;
 		organization?: string | null;
@@ -25,7 +27,13 @@
 <a {href} class="list-row group">
 	<div class="row-mark" aria-hidden="true">{initialOf(name)}</div>
 	<div class="list-row-title min-w-0">
-		<p class="font-semibold">{name}</p>
+		<p class="font-semibold">
+			{name}
+			<span
+				class="meta-text ml-2 font-normal whitespace-nowrap text-muted-foreground"
+				aria-label={`Person number ${recordNumber}`}>#{recordNumber}</span
+			>
+		</p>
 		{#if role || organization}
 			<p class="mt-1 text-sm text-muted-foreground">
 				{[role, organization].filter(Boolean).join(' · ')}

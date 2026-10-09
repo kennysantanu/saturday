@@ -145,7 +145,12 @@
 
 <Dialog.Root bind:open>
 	<PageShell title={`${job.title} · ${job.company}`}>
-		<PageHeader back={{ href: '/jobs', label: 'Jobs' }} title={job.title} eyebrow={job.company}>
+		<PageHeader
+			recordNumber={job.id}
+			back={{ href: '/jobs', label: 'Jobs' }}
+			title={job.title}
+			eyebrow={job.company}
+		>
 			{#snippet meta()}
 				<StatusBadge status={job.status} class="h-7 text-sm" />
 				{#if job.createdVia === 'mcp'}
@@ -298,6 +303,7 @@
 					{/if}
 					{#each data.people.networks as person (person.id)}
 						<LinkedItem
+							recordNumber={person.id}
 							href={`/networks/${person.id}`}
 							title={person.name}
 							subtitle={[person.role, person.organization].filter(Boolean).join(' · ')}
@@ -654,7 +660,7 @@
 						checked
 						required
 						disabled={data.linkedPersonIds.includes(data.selectedPerson.id)}
-						label={data.selectedPerson.name}
+						label={`${data.selectedPerson.name} #${data.selectedPerson.id}`}
 					/>
 				{/if}
 				{#each data.personPicker?.networks ?? [] as person (person.id)}
@@ -664,7 +670,7 @@
 						required
 						disabled={data.linkedPersonIds.includes(person.id)}
 						checked={String(values.network_id ?? data.selectedPerson?.id) === String(person.id)}
-						label={person.name}
+						label={`${person.name} #${person.id}`}
 						description={`${[person.role, person.organization].filter(Boolean).join(' · ')}${data.linkedPersonIds.includes(person.id) ? ' · Already linked' : ''}`}
 					/>
 				{/each}

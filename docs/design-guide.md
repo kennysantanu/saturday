@@ -319,3 +319,5 @@ A change is done when:
   the first error, a toast on success (`SAVED_MESSAGES`), and an empty state with one primary action.
 
 Dataset mismatches use the existing Settings Notice and restore-preview warning text. Explain that job attachments need matching backups, user documents remain available, and files are retained. Do not expose opaque dataset identifiers as controls or offer automatic rebinding.
+
+Job and person rows, detail headings, linked records and relationship pickers show a subdued `#123` reference beside the primary name/title. Pass numeric record numbers explicitly to existing components; do not derive them from URLs. Settings Storage contains a collapsed Diagnostics disclosure with selectable build identity, actual schema/manifest versions and resolved storage/backup/recovery paths. Do not display secrets or treat the development package version as a release version.

@@ -787,6 +787,13 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 		assert.ok(restored.recovery_backup_id);
 		const replay = await call('restore_backup', { restore_id: p.restore_id, confirm: true });
 		assert.equal(replay.error.code, 'restore_consumed');
+		for (const invalidId of ['1', '01', '1e0', 0, -1, 1.5, 9007199254740992]) {
+			const result = await request('tools/call', {
+				name: 'get_job',
+				arguments: { job_id: invalidId }
+			});
+			assert.equal(result.isError, true);
+		}
 		const settings = await call('set_backup_settings', {
 			enabled: true,
 			contents: 'all',

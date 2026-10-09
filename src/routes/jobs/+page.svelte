@@ -404,6 +404,7 @@
 			{:else}
 				<Card.Root class="gap-0 divide-y divide-border p-0">
 					{#each data.jobs as job (job.id)}<JobRow
+							recordNumber={job.id}
 							href={`/jobs/${job.id}`}
 							title={job.title}
 							company={job.company}
