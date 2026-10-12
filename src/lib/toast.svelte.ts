@@ -14,6 +14,7 @@ export const SAVED_MESSAGES: Record<string, string> = {
 	'interaction-corrected': 'Interaction corrected.',
 	'interaction-deleted': 'Interaction deleted.',
 	document: 'Document saved.',
+	extension: 'Extension changes saved.',
 	profile: 'Profile selection saved.',
 	'document-copy': 'Document copied.',
 	'document-deleted': 'Document deleted.',

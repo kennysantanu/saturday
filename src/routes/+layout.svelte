@@ -11,20 +11,22 @@
 	import Briefcase from '@lucide/svelte/icons/briefcase';
 	import Users from '@lucide/svelte/icons/users';
 	import Folder from '@lucide/svelte/icons/folder';
+	import Puzzle from '@lucide/svelte/icons/puzzle';
 	import Settings from '@lucide/svelte/icons/settings';
 
-	let { children } = $props();
+	let { children, data } = $props();
 
 	// Explicit imports keep the bundle limited to the icons this app uses.
 	setLucideProps({ size: 20, strokeWidth: 2, color: 'currentColor' });
 
-	const links = [
+	const links = $derived([
 		{ href: '/', label: 'Dashboard', icon: LayoutDashboard },
 		{ href: '/jobs', label: 'Jobs', icon: Briefcase },
 		{ href: '/networks', label: 'Network', icon: Users },
 		{ href: '/documents', label: 'Documents', icon: Folder },
+		...(data.extensionsEnabled ? [{ href: '/extensions', label: 'Extensions', icon: Puzzle }] : []),
 		{ href: '/settings', label: 'Settings', icon: Settings }
-	];
+	]);
 
 	function isCurrent(href: string) {
 		const path = page.url.pathname;

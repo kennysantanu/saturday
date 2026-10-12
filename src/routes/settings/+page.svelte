@@ -18,6 +18,7 @@
 	import PageShell from '$lib/components/app/page-shell.svelte';
 	import RestorePreview from '$lib/components/app/restore-preview.svelte';
 	import SchedulePanel from '$lib/components/app/schedule-panel.svelte';
+	import Checkbox from '$lib/components/app/checkbox.svelte';
 	import SectionCard from '$lib/components/app/section-card.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -115,8 +116,32 @@
 	<nav aria-label="Settings sections" class="section-nav">
 		<a href="#assistant">Assistant</a>
 		<a href="#backups">Backups</a>
-		<a href="#storage">Storage</a>
+		<a href="#storage">Storage</a><a href="#extensions">Extensions</a>
 	</nav>
+
+	<SectionCard
+		id="extensions"
+		title="Extensions"
+		description="Trusted custom pages and MCP tools. Installed code runs with Saturday’s access."
+	>
+		{#if data.extensionsError}<Notice tone="error" title="Extensions unavailable"
+				>{data.extensionsError}</Notice
+			>{/if}
+		{#if form?.extensionError}<Notice tone="error" title="Extension setting was not saved"
+				>{form.extensionError}</Notice
+			>{/if}
+		<form method="POST" action="?/extensions" use:enhance={enhanceWithFocus} class="space-y-4">
+			<Checkbox name="enabled" label="Enable extensions" checked={data.extensionsEnabled} />
+			<div class="form-actions">
+				<Button variant="outline" href="/extensions">Installed extensions and recovery</Button
+				><Button type="submit">Save extension setting</Button>
+			</div>
+		</form>
+		<p class="text-sm text-muted-foreground">
+			Core database and file backups exclude extension databases. Back up each extension from its
+			list actions.
+		</p>
+	</SectionCard>
 
 	<SectionCard
 		id="assistant"

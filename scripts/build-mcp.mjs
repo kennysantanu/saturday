@@ -1,3 +1,4 @@
+import { generateExtensions } from './extension-build.mjs';
 import { build } from 'esbuild';
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -8,6 +9,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const outfile = join(root, 'build', 'mcp', 'index.js');
 
 try {
+	await generateExtensions();
 	await mkdir(dirname(outfile), { recursive: true });
 	await build({
 		entryPoints: [join(root, 'src', 'lib', 'server', 'mcp-server.js')],
@@ -20,6 +22,15 @@ try {
 		packages: 'bundle',
 		external: ['puppeteer', 'yazl', 'yauzl'],
 		banner: { js: '#!/usr/bin/env node' }
+	});
+	await build({
+		entryPoints: [join(root, 'src', 'lib', 'server', 'extensions.generated.js')],
+		outfile: join(root, 'build', 'mcp', 'extensions.js'),
+		bundle: true,
+		platform: 'node',
+		format: 'esm',
+		target: 'node22.13',
+		packages: 'bundle'
 	});
 	console.log(`Built local MCP server at ${outfile}`);
 } catch (error) {

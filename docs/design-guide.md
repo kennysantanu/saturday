@@ -74,7 +74,7 @@ the tab bar. In Tailwind, write `rounded-[var(--r-group)]`; do not use
 
 ### Navigation
 
-- Five destinations: Dashboard, Jobs, Network, Documents, Settings, always with the same icons.
+- Dashboard, Jobs, Network, Documents, and Settings retain their icons. Extensions appears before Settings only when its master switch is enabled. The mobile tab bar scrolls horizontally when needed; labels remain visible.
 - At 48rem and wider, they are in the sticky glass top bar
   (`.desktop-navigation`), with a soft blurred scroll edge (`.scroll-edge`)
   above scrolling content.

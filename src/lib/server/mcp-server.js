@@ -1,3 +1,12 @@
+import { extensionRegistry } from './extensions.generated.js';
+import {
+	extensionStatus,
+	runExtension,
+	runExtensionTool,
+	toolName,
+	extensionError,
+	registerExtensionRuntime
+} from './extensions.js';
 import { documentDesignations } from '../file-types.js';
 import * as networks from './networks.js';
 import { buildInfo } from './compatibility.js';
@@ -652,6 +661,75 @@ for (const [tools, formatError] of [
 		);
 	}
 }
+
+// Registration is local to this process; every invocation still checks persisted enablement.
+const extensionTools = new Map();
+let refreshingExtensions = false;
+async function refreshExtensionTools() {
+	if (refreshingExtensions) return;
+	refreshingExtensions = true;
+	try {
+		const active = new Set();
+		const status = await extensionStatus(extensionRegistry);
+		for (const entry of status.installed.filter((e) => e.available)) {
+			try {
+				await runExtension(entry.id, extensionRegistry, async (mod) => {
+					for (const [local, definition] of Object.entries(mod.tools ?? {})) {
+						const name = toolName(entry.id, local);
+						if (!extensionTools.has(name))
+							extensionTools.set(
+								name,
+								server.registerTool(
+									name,
+									{
+										description: `${entry.manifest.name}: ${definition.description}`,
+										inputSchema: definition.inputSchema,
+										annotations: definition.annotations
+									},
+									async (input) => {
+										try {
+											return toolResult(
+												await runExtensionTool(entry.id, local, input, extensionRegistry)
+											);
+										} catch (e) {
+											return {
+												content: [
+													{
+														type: 'text',
+														text: JSON.stringify({ ok: false, error: extensionError(e) })
+													}
+												],
+												isError: true
+											};
+										}
+									}
+								)
+							);
+						active.add(name);
+						if (!extensionTools.get(name).enabled) extensionTools.get(name).enable();
+					}
+				});
+			} catch (e) {
+				console.error(`Extension ${entry.id}: ${extensionError(e).message}`);
+			}
+		}
+		for (const [name, tool] of extensionTools)
+			if (!active.has(name) && tool.enabled) tool.disable();
+	} catch (e) {
+		for (const tool of extensionTools.values()) if (tool.enabled) tool.disable();
+		console.error(`Extensions unavailable: ${extensionError(e).message}`);
+	} finally {
+		refreshingExtensions = false;
+	}
+}
+try {
+	await registerExtensionRuntime();
+} catch (e) {
+	console.error(`Extension runtime registration failed: ${e.message}`);
+}
+await refreshExtensionTools();
+const extensionRefresh = setInterval(() => void refreshExtensionTools(), 1000);
+extensionRefresh.unref();
 
 const transport = new StdioServerTransport();
 server.connect(transport).catch((error) => {

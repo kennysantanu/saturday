@@ -23,6 +23,33 @@ const html = await createDocument({
 		'<!doctype html><html><head><style>body{font:16px sans-serif;padding:32px}h1{color:#16324f}</style></head><body><h1>Alex Example</h1><p>Engineer</p><img src="https://example.invalid/probe"><script>fetch("https://example.invalid/probe")</script></body></html>'
 });
 const job = createJob({ job_title: 'Senior engineer', company_name: 'Example' });
+const extensionService = await import('../src/lib/server/extensions.js');
+const { pathToFileURL } = await import('node:url');
+const samplePath = new URL('../examples/extensions/interview-practice/', import.meta.url);
+const sampleInfo = await extensionService.inspectExtension(samplePath.pathname);
+const sampleEntry = {
+	id: sampleInfo.manifest.id,
+	manifest: sampleInfo.manifest,
+	fingerprint: sampleInfo.fingerprint,
+	enabled: true,
+	source: { type: 'local', reference: samplePath.pathname }
+};
+const { cp } = await import('node:fs/promises');
+process.env.SATURDAY_EXTENSIONS_PATH = join(scratch, 'extensions-code');
+await cp(samplePath.pathname, join(process.env.SATURDAY_EXTENSIONS_PATH, 'interview-practice'), {
+	recursive: true
+});
+const { atomicJson } = await import('../src/lib/server/files/store.js');
+await extensionService.withExtensionLock(async () => {
+	await atomicJson(extensionService.extensionPaths().catalog, {
+		version: 1,
+		extensions_enabled: false,
+		installed: [sampleEntry]
+	});
+	await extensionService.initializeExtension(sampleEntry, {
+		server: () => import(new URL('server.js', samplePath).href)
+	});
+});
 const socket = createServer();
 await new Promise((r) => socket.listen(0, '127.0.0.1', r));
 const port = socket.address().port;
@@ -55,6 +82,96 @@ try {
 	page.on('pageerror', (e) => errors.push(e.message));
 	await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
 	await page.setViewport({ width: 1365, height: 900 });
+
+	await page.goto(`${base}/settings`, { waitUntil: 'networkidle0' });
+	assert.equal(await page.$('nav a[href="/extensions"]'), null);
+	await page.click('#extensions input[type="checkbox"]');
+	await Promise.all([
+		page.waitForResponse((r) => r.request().method() === 'POST'),
+		page.click('form[action="?/extensions"] button[type="submit"]')
+	]);
+	await settled();
+	assert.ok(await page.$('nav a[href="/extensions"]'));
+	await page.goto(`${base}/extensions/interview-practice?new=1`, { waitUntil: 'networkidle0' });
+	await page.type('textarea[name="question"]', 'Explain a difficult project');
+	await page.type('textarea[name="answer"]', 'Saved example answer');
+	await Promise.all([
+		page.waitForResponse((r) => r.request().method() === 'POST'),
+		page.locator('button::-p-text(Save question)').click()
+	]);
+	await settled();
+	await page.locator('a::-p-text(Explain a difficult project)').click();
+	await settled();
+	await page.locator('button::-p-text(Practice)').click();
+	await settled();
+	assert.equal(await page.$eval('textarea[name="answer"]', (e) => e.value), '');
+	assert.ok(!(await page.$eval('#main', (e) => e.textContent)).includes('Saved example answer'));
+	await page.type('textarea[name="answer"]', 'A practice draft');
+	await page.locator('a::-p-text(Add question)').click();
+	await page.waitForSelector('[role=dialog]');
+	await page.locator('[role=dialog] button::-p-text(Keep editing)').click();
+	await settled();
+	assert.equal(await page.$eval('textarea[name="answer"]', (e) => e.value), 'A practice draft');
+	await Promise.all([
+		page.waitForResponse((r) => r.request().method() === 'POST'),
+		page.locator('button::-p-text(Save answer)').click()
+	]);
+	await settled();
+	await page.locator('a::-p-text(Explain a difficult project)').click();
+	await settled();
+	assert.equal(await page.$eval('textarea[name="answer"]', (e) => e.value), 'A practice draft');
+	await page.setViewport({ width: 390, height: 844 });
+	await settled();
+	assert.ok(await page.$eval('html', (e) => e.scrollWidth <= e.clientWidth + 1));
+	assert.equal(
+		await page.$$eval(
+			'.tab-bar .tab-item',
+			(items) => new Set(items.map((item) => item.offsetTop)).size
+		),
+		1,
+		'Six navigation items stay on one scrollable row'
+	);
+	await page.screenshot({ path: join(scratch, 'extensions-mobile.png'), fullPage: true });
+	await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
+	await page.screenshot({ path: join(scratch, 'extensions-dark.png'), fullPage: true });
+	await page.setViewport({ width: 1365, height: 900 });
+	await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
+	await page.goto(`${base}/extensions`, { waitUntil: 'networkidle0' });
+	await page.click('button[aria-label="More actions for Interview Practice"]');
+	await page.locator('[role=menuitem]::-p-text(Back up)').click();
+	await settled();
+	const extBackups = await extensionService.listExtensionBackups();
+	assert.equal(extBackups.length, 1);
+	await page.click('button[aria-label="More actions for Interview Practice"]');
+	await page.locator('[role=menuitem]::-p-text(Restore)').click();
+	await page.waitForSelector('[role=dialog]');
+	await page.select('[role=dialog] select[name="backup_id"]', extBackups[0].backup_id);
+	await Promise.all([
+		page.waitForNavigation(),
+		page.locator('[role=dialog] button::-p-text(Preview restore)').click()
+	]);
+	await settled();
+	await page.locator('button::-p-text(Restore extension)').click();
+	await page.waitForSelector('[role=dialog]');
+	await Promise.all([
+		page.waitForNavigation(),
+		page.locator('[role=dialog] button::-p-text(Restore extension)').click()
+	]);
+	await settled();
+	await page.click('button[aria-label="More actions for Interview Practice"]');
+	await page.locator('[role=menuitem]::-p-text(Disable)').click();
+	await settled();
+	assert.equal(await page.$('a[href="/extensions/interview-practice"]'), null);
+	await page.click('button[aria-label="More actions for Interview Practice"]');
+	await page.locator('[role=menuitem]::-p-text(Enable)').click();
+	await settled();
+	assert.ok(await page.$('a[href="/extensions/interview-practice"]'));
+	await page.click('button[aria-label="More actions for Interview Practice"]');
+	await page.locator('[role=menuitem]::-p-text(Remove extension)').click();
+	await page.waitForSelector('[role=dialog]');
+	await page.locator('[role=dialog] button::-p-text(Cancel)').click();
+	await settled();
+	await extensionService.setExtensionsEnabled(false);
 	const externalRequests = [];
 	page.on('request', (request) => {
 		if (request.url().startsWith('https://example.invalid')) externalRequests.push(request.url());

@@ -16,7 +16,7 @@
 		"status": "node scripts/status.mjs",
 		"preview": "vite preview --host 127.0.0.1",
 		"prepare": "svelte-kit sync || echo ''",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check": "npm run extensions:generate && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"lint": "prettier --check .",
 		"format": "prettier --write .",
@@ -27,7 +27,9 @@
 		"test:beta": "node scripts/review-documents.mjs",
 		"verify": "npm run lint && npm run check && npm test && npm run test:web && npm run test:beta",
 		"files": "node scripts/files.mjs",
-		"setup:pdf": "puppeteer browsers install chrome"
+		"setup:pdf": "puppeteer browsers install chrome",
+		"extension": "node scripts/extensions.mjs",
+		"extensions:generate": "node scripts/extension-build.mjs"
 	},
 	"devDependencies": {
 		"@internationalized/date": "^3.12.4",

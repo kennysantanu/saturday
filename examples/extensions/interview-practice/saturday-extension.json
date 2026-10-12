@@ -1,0 +1,12 @@
+{
+	"manifestVersion": 1,
+	"id": "interview-practice",
+	"name": "Interview Practice",
+	"description": "Build a question bank and practice your interview answers.",
+	"version": "0.1.0",
+	"apiVersion": 1,
+	"page": "page.svelte",
+	"server": "server.js",
+	"database": true,
+	"mcp": ["list_questions", "get_question", "create_question", "edit_question", "delete_question"]
+}

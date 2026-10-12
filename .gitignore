@@ -27,3 +27,8 @@ Thumbs.db
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Managed extensions and generated build registrations
+/extensions
+/src/lib/extensions.generated.js
+/src/lib/server/extensions.generated.js
