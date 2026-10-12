@@ -1,4 +1,10 @@
 import {
+	extensionCatalog,
+	extensionPaths,
+	setExtensionsEnabled,
+	extensionError
+} from '$lib/server/extensions.js';
+import {
 	getFileBackup,
 	getFileBackupSettings,
 	setFileBackupSettings,
@@ -49,6 +55,13 @@ export async function load({ setHeaders }) {
 	} catch (e) {
 		filesError = e.code ? e.message : 'File store unavailable.';
 	}
+	let extensionsEnabled = false,
+		extensionsError = null;
+	try {
+		extensionsEnabled = (await extensionCatalog()).extensions_enabled;
+	} catch (e) {
+		extensionsError = extensionError(e).message;
+	}
 	const databasePath = getDatabasePath();
 	const nodePath = process.execPath;
 	const mcpPath = join(getProjectRoot(), 'build', 'mcp', 'index.js');
@@ -57,7 +70,12 @@ export async function load({ setHeaders }) {
 			saturday: {
 				command: nodePath,
 				args: [mcpPath],
-				env: { SATURDAY_DB_PATH: databasePath, SATURDAY_FILES_PATH: filePaths().root }
+				env: {
+					SATURDAY_DB_PATH: databasePath,
+					SATURDAY_FILES_PATH: filePaths().root,
+					SATURDAY_EXTENSION_STATE_PATH: extensionPaths().state,
+					SATURDAY_EXTENSIONS_PATH: extensionPaths().code
+				}
 			}
 		}
 	};
@@ -104,6 +122,8 @@ export async function load({ setHeaders }) {
 		db.close();
 	}
 	return {
+		extensionsEnabled,
+		extensionsError,
 		diagnostics,
 		backupHistory,
 		buildInfo,
@@ -152,6 +172,15 @@ async function boundedForm(request) {
 	}).formData();
 }
 export const actions = {
+	extensions: async ({ request }) => {
+		try {
+			const v = await request.formData();
+			await setExtensionsEnabled(v.get('enabled') === 'on');
+		} catch (e) {
+			return fail(400, { extensionError: extensionError(e).message });
+		}
+		redirect(303, '/settings?saved=extension');
+	},
 	backup: async ({ request }) => {
 		try {
 			const values = await request.formData();

@@ -1156,3 +1156,15 @@ form[aria-busy='true'] [data-slot='button'][type='submit']::after {
 		background: Highlight;
 	}
 }
+
+/* The optional Extensions destination keeps readable touch targets on narrow screens. */
+@media (max-width: 47.999rem) {
+	.tab-bar:has(a[href='/extensions']) {
+		display: flex;
+		overflow-x: auto;
+		justify-content: flex-start;
+	}
+	.tab-bar:has(a[href='/extensions']) .tab-item {
+		flex: 0 0 64px;
+	}
+}

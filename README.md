@@ -96,9 +96,7 @@ See [Connect your assistant](docs/assistant-guide.md) for the full steps, an exa
 
 ## Where Saturday is headed
 
-Saturday will grow beyond job tracking into a fuller career center. Planned features include tracking your professional network, storing resumes and other career documents, managing follow-ups, and more ways to support your career progression.
-
-These features are not available yet. Saturday does not currently apply to jobs for you, import postings or PDFs, or sync between computers.
+Saturday includes Network, career documents, Profile, follow-ups and optional trusted extensions. Later improvements include broader search, cloud storage and easier distribution. Saturday does not apply to jobs for you, import postings or extract PDFs, or sync between computers.
 
 ## Contributing
 
@@ -110,8 +108,12 @@ Saturday is released under the [MIT License](LICENSE).
 
 ### Current development storage
 
-Jobs and Network use the fresh numeric schema-1 baseline. Files use a dataset-bound version-1 manifest; job attachments remain in `files/jobs/<id>`. Previous UUID databases/backups and unbound file manifests/pairs are unsupported. Startup never resets them automatically; use isolated `SATURDAY_DB_PATH` and `SATURDAY_FILES_PATH` values for testing until the planned final development reset.
+Jobs and Network use the fresh numeric schema-1 baseline. Files use a dataset-bound version-2 manifest; job attachments remain in `files/jobs/<id>`. Previous UUID databases/backups and unbound file manifests/pairs are unsupported. Startup never resets them automatically; use isolated `SATURDAY_DB_PATH` and `SATURDAY_FILES_PATH` values for testing until the planned final development reset.
 
 Database and file backups remain independent and can be restored in either order. Job attachments require matching dataset identities; matching folder numbers alone are insufficient. A mismatch retains files, keeps user documents available, and offers explicit recovery through Settings. Rebuild/restart web, MCP and workers together after updating. Development remains unversioned until `0.1.0`.
 
 Jobs and Network show readable record numbers for assistant requests. Settings → Local database → Diagnostics shows selectable build, storage versions and local paths for troubleshooting.
+
+## Extensions
+
+Optional trusted extensions add one page, an independent SQLite database, and namespaced MCP tools. Enable the master switch in Settings; manage installed extensions in Extensions. Interview Practice is included as a portable starter package. See the [extension guide](docs/extension-guide.md) for installation, authoring and independent backup/restore. Core backups exclude extension databases.
