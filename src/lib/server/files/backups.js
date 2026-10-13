@@ -22,7 +22,6 @@ import {
 	reject,
 	regularPath,
 	ensureDiskSpace,
-	acquireDirectoryLock,
 	manifestHash
 } from './store.js';
 
@@ -123,10 +122,21 @@ export async function listFileBackups({ limit = 50, offset = 0 } = {}) {
 		reject('VALIDATION', 'Invalid backup pagination.');
 	const root = await backupDirectory();
 	const all = [];
-	for (const name of await fs.readdir(root)) {
-		if (!uuid.test(name.replace(/\.json$/, '')) || !name.endsWith('.json')) continue;
-		const meta = JSON.parse(await fs.readFile(join(root, name), 'utf8'));
-		all.push(meta);
+	for (const directory of [root, filePaths().legacyBackups]) {
+		let names;
+		try {
+			names = await fs.readdir(directory);
+		} catch (e) {
+			if (e.code === 'ENOENT') continue;
+			throw e;
+		}
+		for (const name of names) {
+			if (!uuid.test(name.replace(/\.json$/, '')) || !name.endsWith('.json')) continue;
+			try {
+				const meta = JSON.parse(await fs.readFile(join(directory, name), 'utf8'));
+				if (meta.backup_id === name.slice(0, -5)) all.push(meta);
+			} catch {}
+		}
 	}
 	all.sort(
 		(a, b) => b.created_at.localeCompare(a.created_at) || a.backup_id.localeCompare(b.backup_id)
@@ -140,7 +150,14 @@ export async function listFileBackups({ limit = 50, offset = 0 } = {}) {
 export async function getFileBackup(id) {
 	const root = await backupDirectory();
 	managed(id);
-	const metadata = JSON.parse(await fs.readFile(join(root, `${id}.json`), 'utf8'));
+	let directory = root;
+	try {
+		await fs.access(join(root, `${id}.json`));
+	} catch (e) {
+		if (e.code !== 'ENOENT') throw e;
+		directory = filePaths().legacyBackups;
+	}
+	const metadata = JSON.parse(await fs.readFile(join(directory, `${id}.json`), 'utf8'));
 	if (
 		metadata.format !== storageCompatibility.manifest.format ||
 		!Number.isInteger(metadata.format_version) ||
@@ -148,7 +165,7 @@ export async function getFileBackup(id) {
 		metadata.format_version > storageCompatibility.manifest.version
 	)
 		reject('FORMAT', 'Unsupported file backup format. Use a compatible build.');
-	const path = await regularPath(root, `${id}.zip`);
+	const path = await regularPath(directory, `${id}.zip`);
 	return { path, metadata };
 }
 export async function extractArchive(path) {
@@ -392,134 +409,6 @@ export async function restoreFiles({ restore_id, confirm }) {
 		}
 	});
 }
-const defaults = {
-	enabled: false,
-	interval_hours: 24,
-	keep_count: 10,
-	last_success_at: null,
-	next_due_at: null,
-	last_error: null,
-	retry_after: null
-};
-async function readSettings() {
-	try {
-		return {
-			...defaults,
-			...JSON.parse(await fs.readFile(join(filePaths().state, 'schedule.json'), 'utf8'))
-		};
-	} catch (e) {
-		if (e.code === 'ENOENT') return { ...defaults };
-		throw e;
-	}
-}
-export async function getFileBackupSettings() {
-	return withFileLock(async () => {
-		const settings = await readSettings();
-		let running = false;
-		try {
-			for (const name of await fs.readdir(join(filePaths().state, 'scheduled.lock'))) {
-				const match = /^(\d+)-[a-f0-9-]+\.owner$/.exec(name);
-				if (match) {
-					try {
-						process.kill(Number(match[1]), 0);
-						running = true;
-					} catch {}
-				}
-			}
-		} catch (e) {
-			if (e.code !== 'ENOENT') throw e;
-		}
-		return { ...settings, running };
-	});
-}
-export async function setFileBackupSettings(input) {
-	if (!Object.keys(input).length) reject('VALIDATION', 'Provide at least one file backup setting.');
-	return withFileLock(async () => {
-		for (const key of Object.keys(input))
-			if (!['enabled', 'interval_hours', 'keep_count'].includes(key))
-				reject('VALIDATION', 'Unknown file backup setting.');
-		if (
-			(input.enabled !== undefined && typeof input.enabled !== 'boolean') ||
-			(input.interval_hours !== undefined &&
-				(!Number.isInteger(input.interval_hours) ||
-					input.interval_hours < 1 ||
-					input.interval_hours > 168)) ||
-			(input.keep_count !== undefined &&
-				(!Number.isInteger(input.keep_count) || input.keep_count < 1 || input.keep_count > 100))
-		)
-			reject('VALIDATION', 'Interval must be 1–168 hours and retention 1–100 backups.');
-		const old = await readSettings();
-		const next = { ...old, ...input };
-		if (next.enabled && (!old.enabled || next.interval_hours !== old.interval_hours))
-			next.next_due_at = new Date().toISOString();
-		if (!next.enabled) next.next_due_at = null;
-		await atomicJson(join(filePaths().state, 'schedule.json'), next);
-		return next;
-	});
-}
-export async function runScheduledFileBackup() {
-	const p = filePaths();
-	await fs.mkdir(p.state, { recursive: true, mode: 0o700 });
-	const release = await acquireDirectoryLock(join(p.state, 'scheduled.lock'), { attempts: 0 });
-	if (!release) return;
-	try {
-		const settings = await getFileBackupSettings();
-		if (
-			!settings.enabled ||
-			Date.parse(settings.next_due_at) > Date.now() ||
-			Date.parse(settings.retry_after) > Date.now()
-		)
-			return;
-		try {
-			const result = await createFileBackup('automatic');
-			await withFileLock(async () => {
-				const current = await readSettings();
-				current.last_success_at = result.created_at;
-				current.next_due_at = current.enabled
-					? new Date(Date.now() + current.interval_hours * 3600000).toISOString()
-					: null;
-				current.last_error = null;
-				current.retry_after = null;
-				await atomicJson(join(p.state, 'schedule.json'), current);
-				let offset = 0,
-					records = [];
-				for (;;) {
-					const page = await listFileBackups({ limit: 100, offset });
-					records.push(...page.backups);
-					if (page.next_offset === null) break;
-					offset = page.next_offset;
-				}
-				const excess = records.filter((b) => b.kind === 'automatic').slice(current.keep_count);
-				const protectedSources = new Set();
-				const previewNames = excess.length ? await fs.readdir(p.state) : [];
-				for (const name of previewNames.filter((n) => n.endsWith('.restore.json'))) {
-					const record = JSON.parse(await fs.readFile(join(p.state, name), 'utf8'));
-					if (!record.consumed && Date.parse(record.expires_at) > Date.now())
-						protectedSources.add(record.backup_id);
-				}
-				for (const b of excess) {
-					// Prepared sources are never pruned.
-					if (!protectedSources.has(b.backup_id)) {
-						await fs.rm(join(p.backups, `${b.backup_id}.zip`));
-						await fs.rm(join(p.backups, `${b.backup_id}.json`));
-					}
-				}
-			});
-			return result;
-		} catch (e) {
-			await withFileLock(async () => {
-				const current = await readSettings();
-				current.last_error = { message: e.message };
-				current.retry_after = new Date(Date.now() + 60000).toISOString();
-				await atomicJson(join(p.state, 'schedule.json'), current);
-			});
-			return { error: { message: e.message } };
-		}
-	} finally {
-		await release();
-	}
-}
-
 async function cleanupPreviews() {
 	const state = filePaths().state;
 	for (const name of await fs.readdir(state)) {
@@ -534,28 +423,38 @@ async function cleanupPreviews() {
 	}
 }
 
-// Retention removes both halves of a completed automatic set. Prepared sources
-// and interrupted recovery sessions keep the entire set available.
-export async function removePairedFileBackup(database, now) {
-	const backupId = managed(database.file_backup_id);
-	return withFileLock(async () => {
-		const p = filePaths();
-		for (const name of await fs.readdir(p.state)) {
-			if (!name.endsWith('.restore.json')) continue;
-			const record = JSON.parse(await fs.readFile(join(p.state, name), 'utf8'));
-			if (!record.consumed && Date.parse(record.expires_at) > now && record.backup_id === backupId)
-				return false;
-		}
-		const { metadata } = await getFileBackup(backupId);
+export async function assertFileBackupDeletionAllowed(backupId) {
+	const file = await getFileBackup(backupId);
+	for (const name of await fs.readdir(filePaths().state)) {
+		if (!name.endsWith('.restore.json')) continue;
+		const record = JSON.parse(await fs.readFile(join(filePaths().state, name), 'utf8'));
 		if (
-			metadata.database_backup_id !== database.backup_id ||
-			metadata.backup_set_id !== database.backup_set_id ||
-			metadata.kind !== 'scheduled'
+			record.backup_id === backupId &&
+			!record.consumed &&
+			Date.parse(record.expires_at) > Date.now()
 		)
-			reject('INTEGRITY', 'Automatic backup membership changed; retention stopped.');
-		await fs.rm(join(p.backups, `${backupId}.zip`));
-		await fs.rm(join(p.backups, `${backupId}.json`));
-		await fs.rm(join(p.backups, `${managed(metadata.backup_set_id)}.pair.json`), { force: true });
-		return true;
+			reject(
+				'BUSY',
+				'This backup has an active restore preview. Wait for it to expire before deleting.'
+			);
+	}
+	try {
+		const record = JSON.parse(
+			await fs.readFile(join(filePaths().state, 'pair-session.json'), 'utf8')
+		);
+		if (record.recovery_files_id === backupId)
+			reject('BUSY', 'This backup is required for interrupted restore recovery.');
+	} catch (e) {
+		if (e.code !== 'ENOENT') throw e;
+	}
+	return file;
+}
+export async function deleteFileBackup(backupId, confirm) {
+	if (confirm !== true) reject('CONFIRMATION', 'Confirm deletion of the selected backup.');
+	return withFileLock(async () => {
+		const file = await assertFileBackupDeletionAllowed(backupId);
+		await fs.rm(file.path);
+		await fs.rm(join(file.path, '..', `${managed(backupId)}.json`));
+		return { deleted: true };
 	});
 }

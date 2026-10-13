@@ -1,81 +1,96 @@
 import { parseArgs } from 'node:util';
 import { resolve } from 'node:path';
+import { createReadStream } from 'node:fs';
 import {
-	createBackup,
-	exportBackup,
-	getBackupFile,
-	getBackupSettings,
-	setBackupSettings,
-	publicBackupError
-} from '../src/lib/server/backups.js';
-let jsonOutput = process.argv.includes('--json');
+	createManualBackup,
+	listBackupHistory,
+	deleteManualBackup,
+	exportManualBackup,
+	importBackupBundle
+} from '../src/lib/server/files/pairs.js';
+import { publicBackupError, getBackupFile } from '../src/lib/server/backups.js';
+import { getFileBackup } from '../src/lib/server/files/backups.js';
+const jsonOutput = process.argv.includes('--json');
 try {
 	const { values, positionals } = parseArgs({
 		options: {
 			output: { type: 'string' },
 			json: { type: 'boolean' },
-			enabled: { type: 'string' },
 			contents: { type: 'string' },
-			'interval-hours': { type: 'string' },
-			keep: { type: 'string' }
+			confirm: { type: 'boolean' },
+			limit: { type: 'string' },
+			offset: { type: 'string' }
 		},
 		allowPositionals: true
 	});
+	const [command = 'create', backup_id] = positionals;
+	const contents = values.contents ?? 'database';
+	const allowed = {
+		create: ['output', 'contents'],
+		list: ['limit', 'offset'],
+		delete: ['contents', 'confirm'],
+		export: ['contents', 'output'],
+		import: []
+	};
+	if (
+		!allowed[command] ||
+		Object.keys(values).some((key) => key !== 'json' && !allowed[command].includes(key)) ||
+		positionals.length > (['delete', 'export', 'import'].includes(command) ? 2 : 1) ||
+		(['delete', 'export', 'import'].includes(command) && !backup_id)
+	)
+		throw new TypeError(
+			'Invalid backup command or arguments. Use create/list/delete/export/import with the documented options.'
+		);
+
 	let result;
-	if (positionals[0] === 'schedule') {
-		if (values.output || positionals.length !== 2)
-			throw new TypeError('Use backup schedule show or backup schedule set.');
-		if (positionals[1] === 'show') {
-			if (
-				values.enabled !== undefined ||
-				values.contents !== undefined ||
-				values['interval-hours'] !== undefined ||
-				values.keep !== undefined
-			)
-				throw new TypeError('show does not accept settings.');
-			result = getBackupSettings();
-		} else if (positionals[1] === 'set') {
-			const input = {};
-			if (values.contents !== undefined) input.contents = values.contents;
-			if (values.enabled !== undefined) {
-				if (!['true', 'false'].includes(values.enabled))
-					throw new TypeError('--enabled must be true or false.');
-				input.enabled = values.enabled === 'true';
-			}
-			if (values['interval-hours'] !== undefined)
-				input.interval_hours = Number(values['interval-hours']);
-			if (values.keep !== undefined) input.keep_count = Number(values.keep);
-			result = setBackupSettings(input);
-		} else throw new TypeError('Use backup schedule show or backup schedule set.');
-	} else {
-		if (
-			positionals.length ||
-			values.enabled !== undefined ||
-			values.contents !== undefined ||
-			values.keep !== undefined ||
-			values['interval-hours'] !== undefined
-		)
-			throw new TypeError('Use backup [--output <new-file>] [--json].');
-		result = createBackup();
-		result = {
-			...result,
-			path: values.output
-				? exportBackup(result.backup_id, resolve(values.output))
-				: getBackupFile(result.backup_id).path
-		};
+	switch (command) {
+		case 'create': {
+			if (positionals.length > 1) throw new TypeError('Unexpected backup arguments.');
+			result = await createManualBackup({ contents });
+			const id = result.database_backup_id ?? result.backup_id;
+			if (values.output)
+				result = {
+					...result,
+					...(await exportManualBackup({ backup_id: id, contents }, resolve(values.output)))
+				};
+			else
+				result = {
+					...result,
+					path: contents === 'files' ? (await getFileBackup(id)).path : getBackupFile(id).path
+				};
+			break;
+		}
+		case 'list':
+			result = await listBackupHistory({
+				limit: values.limit === undefined ? 50 : Number(values.limit),
+				offset: values.offset === undefined ? 0 : Number(values.offset)
+			});
+			break;
+		case 'delete':
+			result = await deleteManualBackup({ backup_id, contents, confirm: values.confirm === true });
+			break;
+		case 'export':
+			if (!values.output) throw new TypeError('Specify --output <new-file>.');
+			result = await exportManualBackup({ backup_id, contents }, resolve(values.output));
+			break;
+		case 'import':
+			if (!backup_id) throw new TypeError('Specify the combined backup ZIP.');
+			result = await importBackupBundle(createReadStream(resolve(backup_id)));
+			break;
+		default:
+			throw new TypeError(
+				'Use backup [create|list|delete <id> --confirm|export <id> --output <new-file>|import <combined.zip>] [--contents all|database|files] [--json].'
+			);
 	}
-	console.log(
-		jsonOutput ? JSON.stringify({ ok: true, ...result }) : JSON.stringify(result, null, 2)
-	);
+	console.log(JSON.stringify({ ok: true, ...result }, null, jsonOutput ? undefined : 2));
 } catch (error) {
-	const usage =
-		error instanceof TypeError ||
-		String(error.code).startsWith('ERR_PARSE_ARGS') ||
-		error.code === 'invalid_request';
-	const result = usage
+	const usage = error instanceof TypeError || String(error.code).startsWith('ERR_PARSE_ARGS');
+	const detail = usage
 		? { code: 'invalid_arguments', message: error.message }
-		: publicBackupError(error);
-	if (jsonOutput) console.log(JSON.stringify({ ok: false, error: result }));
-	else console.error(result.message);
+		: error.code
+			? { code: error.code, message: error.message }
+			: publicBackupError(error);
+	if (jsonOutput) console.log(JSON.stringify({ ok: false, error: detail }));
+	else console.error(detail.message);
 	process.exitCode = usage ? 2 : 1;
 }

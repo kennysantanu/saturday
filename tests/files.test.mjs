@@ -154,37 +154,6 @@ test('ZIP backup/import, add conflicts, Replace recovery and old token invalidat
 		code: 'CONSUMED'
 	});
 });
-test('independent schedule settings and safe failed automatic runs', async () => {
-	const settings = await b.setFileBackupSettings({
-		enabled: true,
-		interval_hours: 2,
-		keep_count: 1
-	});
-	assert.equal(settings.keep_count, 1);
-	await assert.rejects(b.setFileBackupSettings({ interval_hours: 0 }), { code: 'VALIDATION' });
-	const success = await b.runScheduledFileBackup();
-	assert.equal(success.kind, 'automatic');
-	const preview = await b.prepareFileRestore({ backup_id: success.backup_id });
-	await b.setFileBackupSettings({ enabled: false });
-	await b.setFileBackupSettings({ enabled: true });
-	const next = await b.runScheduledFileBackup();
-	assert.equal(next.kind, 'automatic');
-	assert.ok((await b.listFileBackups()).backups.some((x) => x.backup_id === success.backup_id));
-	const previewPath = join(s.filePaths().state, `${preview.restore_id}.restore.json`);
-	const record = JSON.parse(await readFile(previewPath, 'utf8'));
-	await writeFile(previewPath, JSON.stringify({ ...record, expires_at: '2000-01-01T00:00:00Z' }));
-	await b.setFileBackupSettings({ enabled: false });
-	await b.setFileBackupSettings({ enabled: true });
-	const latest = await b.runScheduledFileBackup();
-	const automatic = (await b.listFileBackups()).backups.filter((x) => x.kind === 'automatic');
-	assert.deepEqual(
-		automatic.map((x) => x.backup_id),
-		[latest.backup_id]
-	);
-	await b.setFileBackupSettings({ enabled: false });
-	assert.equal((await b.getFileBackupSettings()).enabled, false);
-	assert.ok((await b.listFileBackups()).backups.some((x) => x.backup_id === backup.backup_id));
-});
 test('symlinks and external changes are rejected without silent repair', async () => {
 	const file = await d.createDocument({ filename: 'integrity.txt', content: 'original' });
 	const path = join(s.filePaths().root, file.key);
@@ -345,18 +314,6 @@ test('delete Master CV requires both acknowledgement and fresh catalog token', a
 	assert.equal((await d.getDocument({ id: current.id, include_content: true })).id, current.id);
 	await assert.rejects(d.getDocument({ designation: 'master_cv' }), { code: 'NOT_CONFIGURED' });
 });
-test('failed scheduled backup keeps previous artifacts and reports status', async () => {
-	const file = await d.createDocument({ filename: 'scheduled-integrity.txt', content: 'healthy' });
-	await writeFile(join(s.filePaths().root, file.key), 'tampered');
-	const before = await b.listFileBackups();
-	await b.setFileBackupSettings({ enabled: true, interval_hours: 1, keep_count: 1 });
-	const result = await b.runScheduledFileBackup();
-	assert.ok(result.error);
-	assert.equal((await b.listFileBackups()).total, before.total);
-	assert.ok((await b.getFileBackupSettings()).last_error);
-	await writeFile(join(s.filePaths().root, file.key), 'healthy');
-	await b.setFileBackupSettings({ enabled: false });
-});
 test('offline recovery preserves damaged store and restores validated contents', async () => {
 	const snapshot = await b.createFileBackup();
 	const { path } = await b.getFileBackup(snapshot.backup_id);
@@ -396,8 +353,8 @@ test('failed coordinated file validation returns both stores to recovery snapsho
 	assert.ok(jobs.getJob(job.id));
 });
 
-test('abandoned file and scheduler locks recover without deleting a new owner', async () => {
-	const script = `import {mkdir,writeFile} from 'node:fs/promises';import {join} from 'node:path';import {randomUUID} from 'node:crypto';for(const name of ['lock','scheduled.lock']){const dir=join(process.env.SATURDAY_FILES_PATH+'.state',name);await mkdir(dir);await writeFile(join(dir,process.pid+'-'+randomUUID()+'.owner'),'');}`;
+test('abandoned file locks recover without deleting a new owner', async () => {
+	const script = `import {mkdir,writeFile} from 'node:fs/promises';import {join} from 'node:path';import {randomUUID} from 'node:crypto';for(const name of ['lock']){const dir=join(process.env.SATURDAY_FILES_PATH+'.state',name);await mkdir(dir);await writeFile(join(dir,process.pid+'-'+randomUUID()+'.owner'),'');}`;
 	await new Promise((resolve, reject) => {
 		const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
 			env: process.env,
@@ -413,10 +370,6 @@ test('abandoned file and scheduler locks recover without deleting a new owner', 
 		d.createDocument({ filename: 'reclaimed-b.txt', content: 'b' })
 	]);
 	assert.equal((await d.listDocuments({ query: 'reclaimed-' })).total, 2);
-	await b.runScheduledFileBackup();
-	await assert.rejects(s.fs.access(join(s.filePaths().state, 'scheduled.lock')), {
-		code: 'ENOENT'
-	});
 	const release = await s.acquireDirectoryLock(join(s.filePaths().state, 'lock'));
 	assert.equal(
 		await s.acquireDirectoryLock(join(s.filePaths().state, 'lock'), { attempts: 0 }),
@@ -786,80 +739,6 @@ test('interrupted cross-dataset pair publication recovers the original database 
 	});
 });
 
-test('one automatic schedule captures and retains complete sets; prepared file halves protect both artifacts', async () => {
-	await isolatedStores(async () => {
-		const backups = await import('../src/lib/server/backups.js');
-		jobs.createJob({ job_title: 'Scheduled', company_name: 'Example' });
-		await d.createDocument({ filename: 'cv.md', content: '# CV' });
-		assert.equal(backups.getBackupSettings().contents, 'all');
-		const manual = await pairs.createBackupPair();
-		const fileOnly = await b.createFileBackup();
-		const now = Date.now();
-		backups.setBackupSettings(
-			{ enabled: true, contents: 'all', interval_hours: 1, keep_count: 1 },
-			{ now }
-		);
-		const first = await backups.runScheduledBackup({ now });
-		assert.equal(first.ran, true);
-		const original = first.backup;
-		assert.ok(original.file_backup_id);
-		await b.prepareFileRestore({ backup_id: original.file_backup_id, mode: 'replace' });
-		assert.equal((await backups.runScheduledBackup({ now: now + 1 })).ran, false);
-		// Re-enabling makes a catch-up run due while the preview is still valid.
-		backups.setBackupSettings({ enabled: false }, { now: now + 2 });
-		backups.setBackupSettings({ enabled: true }, { now: now + 2 });
-		await backups.runScheduledBackup({ now: now + 2 });
-		assert.equal(
-			backups.listBackups({ limit: 50 }).backups.filter((x) => x.kind === 'scheduled').length,
-			2
-		);
-		assert.ok(backups.getBackupFile(original.backup_id));
-		assert.ok(await b.getFileBackup(original.file_backup_id));
-		// Once the preview expires, retention removes both halves and the pair record.
-		await backups.runScheduledBackup({ now: now + 3600002 });
-		assert.equal(
-			backups.listBackups({ limit: 50 }).backups.filter((x) => x.kind === 'scheduled').length,
-			1
-		);
-		assert.throws(() => backups.getBackupFile(original.backup_id));
-		await assert.rejects(b.getFileBackup(original.file_backup_id));
-		await assert.rejects(
-			readFile(join(s.filePaths().backups, `${original.backup_set_id}.pair.json`))
-		);
-		assert.ok(backups.getBackupFile(manual.database_backup_id));
-		assert.ok(await b.getFileBackup(manual.file_backup_id));
-		assert.ok(await b.getFileBackup(fileOnly.backup_id));
-	});
-});
-
-test('a failed complete backup keeps prior sets and database-only mode skips file contents', async () => {
-	await isolatedStores(async () => {
-		const backups = await import('../src/lib/server/backups.js');
-		jobs.createJob({ job_title: 'Retention', company_name: 'Example' });
-		const file = await d.createDocument({ filename: 'cv.md', content: 'healthy' });
-		const now = Date.now();
-		backups.setBackupSettings(
-			{ enabled: true, contents: 'all', interval_hours: 1, keep_count: 1 },
-			{ now }
-		);
-		const first = await backups.runScheduledBackup({ now });
-		await writeFile(join(s.filePaths().root, file.key), 'tampered');
-		const failure = await backups.runScheduledBackup({ now: now + 3600000 });
-		assert.equal(failure.ran, false);
-		assert.ok(failure.error);
-		assert.equal(backups.getBackupSettings().last_backup_id, first.backup.backup_id);
-		assert.ok(backups.getBackupFile(first.backup.backup_id));
-		assert.ok(await b.getFileBackup(first.backup.file_backup_id));
-		backups.setBackupSettings({ contents: 'database' }, { now: now + 7200000 });
-		const databaseOnly = await backups.runScheduledBackup({ now: now + 7200000 });
-		assert.equal(databaseOnly.ran, true);
-		assert.equal(databaseOnly.backup.file_backup_id, undefined);
-		assert.throws(() => backups.setBackupSettings({ contents: 'files' }), {
-			code: 'invalid_request'
-		});
-	});
-});
-
 test('failed atomic metadata publication cleans staging and allows retry', async () => {
 	await isolatedStores(async (scratch) => {
 		const fs = (await import('node:fs/promises')).default;
@@ -1102,5 +981,166 @@ test('version-1 manifest upgrade preserves original metadata and selections', as
 			() => s.validateManifest({ ...original, designations: { resume_template: cv.id } }),
 			{ code: 'FORMAT' }
 		);
+	});
+});
+
+test('manual scopes, grouped history, combined transport import and coordinated restore', async () => {
+	await isolatedStores(async (scratch) => {
+		const job = jobs.createJob({ job_title: 'Manual backup', company_name: 'Example' });
+		const file = await d.createDocument({ filename: 'manual.md', content: '# Original' });
+		const database = await pairs.createManualBackup({ contents: 'database' });
+		const files = await pairs.createManualBackup({ contents: 'files' });
+		const complete = await pairs.createManualBackup({ contents: 'all' });
+		let history = await pairs.listBackupHistory();
+		assert.equal(history.total, 3);
+		const page = await pairs.listBackupHistory({ limit: 2 });
+		assert.equal(page.total, 3);
+		assert.equal(page.next_offset, 2);
+		const second = await pairs.listBackupHistory({ limit: 2, offset: 2 });
+		assert.equal(second.backups.length, 1);
+		assert.equal(second.next_offset, null);
+		assert.ok(!page.backups.some((x) => x.backup_id === second.backups[0].backup_id));
+		assert.deepEqual(
+			new Set(history.backups.map((x) => x.contents)),
+			new Set(['database', 'files', 'all'])
+		);
+		const target = join(scratch, 'portable.zip');
+		await pairs.exportManualBackup(
+			{ backup_id: complete.database_backup_id, contents: 'all' },
+			target
+		);
+		const source = (await import('node:fs')).createReadStream;
+		const imported = await pairs.importBackupBundle(source(target));
+		assert.notEqual(imported.backup_set_id, complete.backup_set_id);
+		assert.notEqual(imported.database_backup_id, complete.database_backup_id);
+		jobs.editJob(job.id, { job_title: 'Changed' });
+		await d.editDocument({ id: file.id, token: file.token, content: 'Changed' });
+		const preview = await pairs.prepareBackupPairRestore({
+			file_backup_id: imported.file_backup_id
+		});
+		await pairs.restoreBackupPair({ restore_id: preview.restore_id, confirm: true });
+		assert.equal(jobs.getJob(job.id).title, 'Manual backup');
+		assert.equal(
+			(await d.getDocument({ id: file.id, include_content: true })).content,
+			'# Original'
+		);
+		await assert.rejects(
+			pairs.deleteManualBackup({
+				backup_id: database.backup_id,
+				contents: 'database',
+				confirm: false
+			}),
+			{ code: 'CONFIRMATION' }
+		);
+		await pairs.deleteManualBackup({
+			backup_id: database.backup_id,
+			contents: 'database',
+			confirm: true
+		});
+		await pairs.deleteManualBackup({
+			backup_id: files.backup_id,
+			contents: 'files',
+			confirm: true
+		});
+		assert.ok(jobs.getJob(job.id));
+		history = await pairs.listBackupHistory();
+		assert.ok(
+			!history.backups.some(
+				(x) => x.backup_id === database.backup_id || x.backup_id === files.backup_id
+			)
+		);
+	});
+});
+test('partial manual capture retains database and prior backups; delete protects prepared sources', async () => {
+	await isolatedStores(async () => {
+		jobs.createJob({ job_title: 'Keep', company_name: 'Example' });
+		const file = await d.createDocument({ filename: 'healthy.txt', content: 'healthy' });
+		const previous = await pairs.createManualBackup({ contents: 'all' });
+		const preview = await pairs.prepareBackupPairRestore({
+			file_backup_id: previous.file_backup_id
+		});
+		await assert.rejects(
+			pairs.deleteManualBackup({
+				backup_id: previous.database_backup_id,
+				contents: 'all',
+				confirm: true
+			}),
+			/active restore preview/
+		);
+		await writeFile(join(s.filePaths().root, file.key), 'tampered');
+		await assert.rejects(pairs.createManualBackup({ contents: 'all' }));
+		const partial = (await pairs.listBackupHistory()).backups.find((x) => x.status === 'partial');
+		assert.ok(partial);
+		assert.equal(partial.contents, 'all');
+		assert.equal(partial.files, null);
+		const { stream } = await pairs.downloadManualBackup({
+			backup_id: partial.backup_id,
+			contents: 'all'
+		});
+		const chunks = [];
+		for await (const chunk of stream) chunks.push(chunk);
+		assert.equal(Buffer.concat(chunks).subarray(0, 16).toString(), 'SQLite format 3\0');
+		await writeFile(join(s.filePaths().root, file.key), 'healthy');
+		await pairs.deleteManualBackup({
+			backup_id: partial.backup_id,
+			contents: 'all',
+			confirm: true
+		});
+		assert.ok(await b.getFileBackup(previous.file_backup_id));
+		assert.ok(preview.restore_id);
+	});
+});
+test('legacy adjacent artifacts remain discoverable, downloadable and restorable', async () => {
+	await isolatedStores(async () => {
+		await d.createDocument({ filename: 'legacy.md', content: 'legacy' });
+		const pair = await pairs.createManualBackup({ contents: 'all' });
+		const database = await import('../src/lib/server/backups.js');
+		const p = database.getBackupPaths(),
+			f = s.filePaths();
+		await s.fs.rename(p.backups, p.legacyBackups);
+		await s.fs.rename(f.backups, f.legacyBackups);
+		assert.equal((await pairs.listBackupHistory()).backups[0].contents, 'all');
+		const output = await pairs.downloadManualBackup({
+			backup_id: pair.database_backup_id,
+			contents: 'all'
+		});
+		for await (const chunk of output.stream) assert.ok(chunk.length);
+		const preview = await pairs.prepareBackupPairRestore({ file_backup_id: pair.file_backup_id });
+		assert.ok(preview.restore_id);
+	});
+});
+test('combined import rejects unexpected entries without publishing artifacts', async () => {
+	await isolatedStores(async (scratch) => {
+		const yazl = (await import('yazl')).default;
+		const zip = new yazl.ZipFile();
+		zip.addBuffer(Buffer.from('unsafe'), 'unexpected.txt');
+		zip.end();
+		await assert.rejects(pairs.importBackupBundle(zip.outputStream), { code: 'VALIDATION' });
+		assert.equal((await pairs.listBackupHistory()).total, 0);
+	});
+});
+
+test('backup deletion refuses untrusted set paths before removing either artifact', async () => {
+	await isolatedStores(async () => {
+		const pair = await pairs.createManualBackup({ contents: 'all' });
+		const database = await import('../src/lib/server/backups.js');
+		const file = database.getBackupFile(pair.database_backup_id);
+		const metadataPath = join(file.path, '..', `${pair.database_backup_id}.json`);
+		const original = await readFile(metadataPath, 'utf8');
+		await writeFile(
+			metadataPath,
+			JSON.stringify({ ...JSON.parse(original), backup_set_id: '../../unrelated' })
+		);
+		await assert.rejects(
+			pairs.deleteManualBackup({
+				backup_id: pair.database_backup_id,
+				contents: 'all',
+				confirm: true
+			}),
+			{ code: 'VALIDATION' }
+		);
+		assert.ok(database.getBackupFile(pair.database_backup_id));
+		assert.ok(await b.getFileBackup(pair.file_backup_id));
+		await writeFile(metadataPath, original);
 	});
 });

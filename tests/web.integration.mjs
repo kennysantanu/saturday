@@ -9,10 +9,10 @@ import { createServer } from 'node:net';
 import { parse } from 'devalue';
 import { migrateDatabase } from '../src/lib/server/database.js';
 import { createJob, getJob, setJobScore } from '../src/lib/server/services.js';
-import { setBackupSettings, listBackups } from '../src/lib/server/backups.js';
+import { listBackups } from '../src/lib/server/backups.js';
 import { readBuildInfo } from '../scripts/build-info.mjs';
 
-test('production Settings download/upload/preview/confirm and supervised worker lifecycle', async () => {
+test('production Settings download/upload/preview/confirm and manual backups without a worker', async () => {
 	const scratch = mkdtempSync(join(tmpdir(), 'saturday-web-backup-'));
 	const previous = process.env.SATURDAY_DB_PATH;
 	const previousFiles = process.env.SATURDAY_FILES_PATH;
@@ -20,7 +20,6 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 	process.env.SATURDAY_DB_PATH = join(scratch, 'career.sqlite');
 	migrateDatabase();
 	const job = createJob({ job_title: 'Backup QA', company_name: 'Example' });
-	setBackupSettings({ enabled: true, interval_hours: 1, keep_count: 2 });
 	const socket = createServer();
 	await new Promise((r) => socket.listen(0, '127.0.0.1', r));
 	const port = socket.address().port;
@@ -54,17 +53,12 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 		assert.ok(settings.includes('Database schema'));
 		assert.ok(settings.includes('saturday.database.numeric'));
 		assert.ok(settings.includes('saturday.files.numeric'));
-		assert.ok(settings.includes(process.env.SATURDAY_DB_PATH + '.backups'));
+		assert.ok(settings.includes(join(scratch, 'backups', 'database')));
 		assert.ok(settings.includes(process.env.SATURDAY_DB_PATH + '.restore'));
-		assert.ok(settings.includes(process.env.SATURDAY_FILES_PATH + '.backups'));
+		assert.ok(settings.includes(join(scratch, 'backups', 'files')));
 		assert.ok(settings.includes(process.env.SATURDAY_FILES_PATH + '.state'));
-		assert.ok(settings.replace(/\s+/g, ' ').includes('Automatic backups'));
-		for (let i = 0; i < 30 && !listBackups().backups.some((b) => b.kind === 'scheduled'); i++)
-			await new Promise((r) => setTimeout(r, 100));
-		assert.ok(
-			listBackups().backups.some((b) => b.kind === 'scheduled'),
-			'supervisor starts the backup worker'
-		);
+		assert.ok(!settings.includes('Automatic backups'));
+		assert.equal(listBackups().backups.length, 0);
 		const created = await fetch(`${base}/settings?/download`, {
 			method: 'POST',
 			headers: {
@@ -112,10 +106,6 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 		const invalid = new FormData();
 		invalid.set('backup_file', new File(['bad file'], 'bad.sqlite'));
 		assert.equal((await post('prepare', invalid)).type, 'failure');
-		const schedule = new FormData();
-		schedule.set('interval_hours', '24');
-		schedule.set('keep_count', '10');
-		assert.equal((await post('schedule', schedule)).type, 'redirect');
 		const postJob = async (path, values) => {
 			const response = await fetch(`${base}${path}`, {
 				method: 'POST',
@@ -415,14 +405,31 @@ test('production Settings download/upload/preview/confirm and supervised worker 
 		assert.ok(savedSet);
 		const backupPage = await (await fetch(`${base}/settings`)).text();
 		assert.ok(backupPage.includes('Back up now'));
-		assert.ok(backupPage.includes('Back up files only'));
+		assert.ok(backupPage.includes('Files only'));
+		assert.ok(backupPage.includes('Delete'));
+		assert.ok(backupPage.includes('Import a combined backup ZIP'));
 		assert.ok(!backupPage.includes('Automatic file backups'));
 		assert.ok(backupPage.includes('Advanced file recovery'));
-		assert.equal(backupPage.split(`href="/settings/backups/${savedSet.backup_id}"`).length - 1, 1);
 		assert.equal(
-			backupPage.split(`href="/settings/files/${savedSet.file_backup_id}"`).length - 1,
+			backupPage.split(`href="/settings/backups/${savedSet.backup_id}?contents=all"`).length - 1,
 			1
 		);
+		const combined = await fetch(`${base}/settings/backups/${savedSet.backup_id}?contents=all`);
+		assert.equal(combined.status, 200);
+		const bundle = await combined.arrayBuffer();
+		const importedBundle = await fetch(`${base}/settings/files/import?bundle=true`, {
+			method: 'POST',
+			headers: { origin: base, 'content-type': 'application/zip' },
+			body: bundle
+		});
+		assert.equal(importedBundle.status, 200);
+		const importedEntry = await importedBundle.json();
+		const deletion = new FormData();
+		deletion.set('backup_id', importedEntry.database_backup_id);
+		deletion.set('contents', 'all');
+		assert.equal((await post('deleteBackup', deletion)).type, 'failure');
+		deletion.set('confirm', 'true');
+		assert.equal((await post('deleteBackup', deletion)).type, 'redirect');
 		const selection = new FormData();
 		selection.set('backup_id', `all:${savedSet.backup_id}`);
 		const pairPreview = await post('prepare', selection);

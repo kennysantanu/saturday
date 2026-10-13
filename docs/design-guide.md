@@ -269,7 +269,7 @@ a badge beside the title.
 
 ## Settings patterns
 
-Settings opens with a section navigation (Assistant, Backups, Storage) and one `SectionCard` per section. Backup and restore has one primary Back up now action, a contents select (Database and files by default, Database only optional), and a secondary Back up files only button. One `SchedulePanel` selects contents, interval and retained sets. One `BackupList` groups paired artifacts into a single entry with separate database/file downloads; `RestorePreview` shows the selected contents. Independent file import, additive restore and unmatched folders live in Advanced file recovery. Timestamps use `formatDateTime` and sizes use `formatBytes`.
+Settings opens with a section navigation (Assistant, Backups, Storage) and one `SectionCard` per section. Backup and restore has one primary Back up now action and a contents select (Database and files, Database only, Files only). `BackupList` groups paired artifacts into one entry with Download, Restore and confirmed Delete actions; incomplete entries have a Partial badge and an independent artifact download. Combined downloads are importable ZIPs. No scheduling/retention panel is present. `RestorePreview` shows the selected contents. Independent file import, additive restore and unmatched folders live in Advanced file recovery. Timestamps use `formatDateTime` and sizes use `formatBytes`.
 
 ## Building a new page or feature
 

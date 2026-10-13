@@ -32,21 +32,9 @@ const child = spawn(process.execPath, [entry], {
 	}
 });
 
-const worker = spawn(process.execPath, [join(root, 'scripts', 'backup-worker.mjs')], {
-	cwd: root,
-	stdio: ['ignore', 'ignore', 'inherit'],
-	env: { ...process.env, SATURDAY_PROJECT_ROOT: root }
-});
-worker.on('error', (error) => console.error(`Automatic backups could not start: ${error.message}`));
-
 for (const signal of ['SIGINT', 'SIGTERM']) {
 	process.on(signal, () => {
 		child.kill(signal);
-		worker.kill(signal);
 	});
 }
-child.on('exit', (code) => {
-	worker.kill('SIGTERM');
-	worker.once('exit', () => process.exit(code ?? 0));
-	if (worker.exitCode !== null || worker.signalCode !== null) process.exit(code ?? 0);
-});
+child.on('exit', (code) => process.exit(code ?? 0));

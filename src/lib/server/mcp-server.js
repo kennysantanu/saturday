@@ -1,3 +1,4 @@
+import { createReadStream } from 'node:fs';
 import { extensionRegistry } from './extensions.generated.js';
 import {
 	extensionStatus,
@@ -20,18 +21,24 @@ import {
 	networkUpdateSearchSchema
 } from './validation.js';
 import { publicFileError } from './files/store.js';
-import { createBackupPair, prepareBackupPairRestore, restoreBackupPair } from './files/pairs.js';
+import {
+	importBackupBundle,
+	createManualBackup,
+	listBackupHistory,
+	deleteManualBackup,
+	exportManualBackup,
+	createBackupPair,
+	prepareBackupPairRestore,
+	restoreBackupPair
+} from './files/pairs.js';
 import * as documents from './files/documents.js';
 import * as backups from './files/backups.js';
 import { generateDocumentPdf } from './files/pdf.js';
-import { getFileBackupSettings, setFileBackupSettings } from './files/backups.js';
 import {
 	createBackup,
 	listBackups,
 	prepareRestore,
 	restoreBackup,
-	getBackupSettings,
-	setBackupSettings,
 	publicBackupError
 } from './backups.js';
 import { McpServer } from '@modelcontextprotocol/server';
@@ -249,16 +256,24 @@ for (const [name, description, inputSchema, operation] of jobTools) {
 // Backup tools intentionally accept managed IDs rather than arbitrary filesystem paths.
 const backupTools = [
 	[
+		'import_backup_bundle',
+		'Import a user-requested local combined backup ZIP into managed history. Validates both artifacts; does not restore live data. Preview and authorize a separate restore.',
+		z.object({ source: z.string().min(1) }),
+		({ source }) => importBackupBundle(createReadStream(source)),
+		false,
+		false
+	],
+	[
 		'create_backup',
 		'Create a local Saturday backup. Contains private career data; returns an ID, not file contents.',
-		z.object({}),
-		() => createBackup(),
+		z.object({ contents: z.enum(['all', 'database', 'files']).optional() }),
+		({ contents = 'database' }) => createManualBackup({ contents }),
 		false,
 		false
 	],
 	[
 		'list_backups',
-		'List managed local backups, including automatic and recovery backups.',
+		'List database backup artifacts, including retained older backups and recovery snapshots. Use list_backup_history for grouped database/files entries.',
 		z.object({
 			limit: z.number().int().min(1).max(50).optional(),
 			offset: z.number().int().min(0).optional()
@@ -284,37 +299,39 @@ const backupTools = [
 		true
 	],
 	[
-		'get_backup_settings',
-		'Read automatic backup settings and status. Automatic backups run only while the web app runs through npm start or npm run dev.',
-		z.object({ kind: z.enum(['database', 'files']).optional() }),
-		({ kind }) =>
-			kind === 'files'
-				? getFileBackupSettings().then((settings) => ({ ...settings, kind }))
-				: getBackupSettings(),
+		'list_backup_history',
+		'List manual database/files/both backup entries with persisted status, sizes and recovery backups. Core backups exclude extension databases.',
+		z.object({
+			limit: z.number().int().min(1).max(50).optional(),
+			offset: z.number().int().min(0).optional()
+		}),
+		listBackupHistory,
 		true,
 		false
 	],
 	[
-		'set_backup_settings',
-		'Configure automatic backups; contents selects database and files (all) or database only. File-only legacy schedules remain available using kind files. Enabling authorizes deletion of older automatic backups beyond keep_count. Manual and recovery backups are preserved. Obtain user authorization for this policy before changing it.',
-		z
-			.object({
-				kind: z.enum(['database', 'files']).optional(),
-				contents: z.enum(['all', 'database']).optional(),
-				enabled: z.boolean().optional(),
-				interval_hours: z.number().int().min(1).max(168).optional(),
-				keep_count: z.number().int().min(1).max(100).optional()
-			})
-			.refine(
-				(input) => Object.keys(input).some((key) => key !== 'kind'),
-				'Provide at least one setting.'
-			),
-		({ kind, ...input }) =>
-			kind === 'files'
-				? setFileBackupSettings(input).then((settings) => ({ ...settings, kind }))
-				: setBackupSettings(input),
+		'delete_backup',
+		'Permanently delete a selected local backup entry and its artifacts, preserving live data. Obtain explicit user authorization. Active restore sources cannot be deleted.',
+		z.object({
+			backup_id: z.string().uuid(),
+			contents: z.enum(['all', 'database', 'files']),
+			confirm: z.literal(true)
+		}),
+		deleteManualBackup,
 		false,
 		true
+	],
+	[
+		'export_backup',
+		'Export a managed backup to a new local file requested by the user. Combined entries export one importable ZIP. Never overwrite an existing file.',
+		z.object({
+			backup_id: z.string().uuid(),
+			contents: z.enum(['all', 'database', 'files']),
+			destination: z.string().min(1)
+		}),
+		({ destination, ...input }) => exportManualBackup(input, destination),
+		false,
+		false
 	]
 ];
 const fileScope = z.union([z.literal('documents'), recordIdSchema]);
@@ -637,12 +654,7 @@ for (const [tools, formatError] of [
 					destructiveHint,
 					idempotentHint:
 						readOnlyHint ||
-						[
-							'set_backup_settings',
-							'link_job_network',
-							'unlink_job_network',
-							'set_network_follow_up'
-						].includes(name),
+						['link_job_network', 'unlink_job_network', 'set_network_follow_up'].includes(name),
 					openWorldHint: false
 				}
 			},

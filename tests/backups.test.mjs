@@ -234,60 +234,6 @@ test('oversized, symlink and overwrite destinations are rejected', () => {
 	symlinkSync(output, link);
 	assert.throws(() => backups.importBackup(link), failure('invalid_backup'));
 });
-test('automatic schedule defaults, catch-up, idempotent updates and retention', async () => {
-	populated();
-	assert.equal(backups.getBackupSettings().enabled, false);
-	assert.equal((await backups.runScheduledBackup({ now: 1000 })).ran, false);
-	const manual = backups.createBackup();
-	backups.setBackupSettings(
-		{ contents: 'database', enabled: true, interval_hours: 1, keep_count: 2 },
-		{ now: 1000 }
-	);
-	assert.equal((await backups.runScheduledBackup({ now: 1000 })).ran, true);
-	assert.equal((await backups.runScheduledBackup({ now: 2000 })).ran, false);
-	const due = backups.getBackupSettings().next_due_at;
-	backups.setBackupSettings(
-		{ contents: 'database', enabled: true, interval_hours: 1 },
-		{ now: 3000 }
-	);
-	assert.equal(backups.getBackupSettings().next_due_at, due);
-	assert.equal((await backups.runScheduledBackup({ now: 86401000 })).ran, true);
-	assert.equal((await backups.runScheduledBackup({ now: 86401001 })).ran, false);
-	await backups.runScheduledBackup({ now: 90001000 });
-	const catalog = backups.listBackups().backups;
-	assert.equal(catalog.filter((b) => b.kind === 'scheduled').length, 2);
-	assert.ok(catalog.some((b) => b.backup_id === manual.backup_id));
-	backups.setBackupSettings({ enabled: false });
-	assert.equal((await backups.runScheduledBackup({ now: 999999999 })).ran, false);
-	assert.throws(() => backups.setBackupSettings({ interval_hours: 0 }), failure('invalid_request'));
-});
-test('retention protects a backup with a prepared restore, preserves settings after restore', async () => {
-	backups.setBackupSettings(
-		{ contents: 'database', enabled: true, interval_hours: 1, keep_count: 1 },
-		{ now: 1000 }
-	);
-	const first = (await backups.runScheduledBackup({ now: 1000 })).backup;
-	const p = backups.prepareRestore(first.backup_id, { now: 3600999 });
-	await backups.runScheduledBackup({ now: 3601000 });
-	assert.equal(backups.listBackups().backups.filter((b) => b.kind === 'scheduled').length, 2);
-	backups.restoreBackup(p.restore_id, true, { now: 3601001 });
-	assert.equal(backups.getBackupSettings().enabled, true);
-	await backups.runScheduledBackup({ now: 7201000 });
-	assert.equal(backups.listBackups().backups.filter((b) => b.kind === 'scheduled').length, 1);
-	assert.equal(backups.listBackups().backups.filter((b) => b.kind === 'recovery').length, 1);
-});
-test('backup publication failure preserves last success and defers retry', async () => {
-	backups.setBackupSettings({ contents: 'database', enabled: true }, { now: 1000 });
-	// Existing metadata is sound but a live content invariant is broken after enabling.
-	const job = createJob({ job_title: 'Broken', company_name: 'State' });
-	const db = raw();
-	db.prepare('UPDATE jobs SET is_active=0 WHERE id=?').run(job.id);
-	db.close();
-	assert.equal((await backups.runScheduledBackup({ now: 1000 })).error.code, 'invalid_backup');
-	assert.equal(backups.getBackupSettings().retry_after, new Date(301000).toISOString());
-	assert.equal((await backups.runScheduledBackup({ now: 2000 })).ran, false);
-	assert.equal(backups.getBackupSettings().last_success_at, null);
-});
 function childScript(code) {
 	return spawn(process.execPath, ['--input-type=module', '-e', code], {
 		cwd: resolve('.'),
@@ -357,12 +303,7 @@ test('restore preserves deleted allocation counters, dataset identity and stale 
 	assert.equal(check.prepare('SELECT dataset_id FROM app_metadata').get().dataset_id, identity);
 	check.close();
 });
-test('two processes coordinate one scheduled backup and concurrent migrations', async () => {
-	backups.setBackupSettings({ contents: 'database', enabled: true }, { now: 1000 });
-	const code =
-		"import {runScheduledBackup} from './src/lib/server/backups.js';console.log(JSON.stringify(await runScheduledBackup({now:1000})));";
-	const results = await Promise.all([completed(childScript(code)), completed(childScript(code))]);
-	assert.equal(results.map(JSON.parse).filter((r) => r.ran).length, 1);
+test('two processes coordinate concurrent migrations', async () => {
 	const newDb = join(scratch, 'new.sqlite');
 	const migration = `process.env.SATURDAY_DB_PATH=${JSON.stringify(newDb)};const {migrateDatabase}=await import('./src/lib/server/database.js');migrateDatabase();`;
 	await Promise.all([completed(childScript(migration)), completed(childScript(migration))]);
@@ -432,18 +373,8 @@ test('CLI exports, previews, confirms and emits structured errors', () => {
 	const invalid = run('restore', [output]);
 	assert.equal(invalid.status, 2);
 	assert.equal(JSON.parse(invalid.stdout).error.code, 'invalid_arguments');
-	const settings = run('backup', [
-		'schedule',
-		'set',
-		'--enabled',
-		'true',
-		'--interval-hours',
-		'1',
-		'--keep',
-		'2'
-	]);
-	assert.equal(settings.status, 0);
-	assert.equal(JSON.parse(settings.stdout).enabled, true);
+	const removed = run('backup', ['schedule', 'show']);
+	assert.equal(removed.status, 2);
 });
 test('development build identity handles clean, dirty and non-Git sources', () => {
 	const source = join(scratch, 'source');
@@ -575,7 +506,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			score_comment: 'Initial fit'
 		});
 		assert.equal(job.id, 1);
-		assert.equal(listing.tools.length, 40);
+		assert.equal(listing.tools.length, 42);
 		for (const name of [
 			'list_networks',
 			'get_network',
@@ -794,17 +725,10 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			});
 			assert.equal(result.isError, true);
 		}
-		const settings = await call('set_backup_settings', {
-			enabled: true,
-			contents: 'all',
-			keep_count: 2
-		});
-		assert.equal(settings.contents, 'all');
-		assert.equal(
-			(await call('set_backup_settings', { contents: 'database' })).contents,
-			'database'
+		assert.ok(
+			!listing.tools.some((t) => ['set_backup_settings', 'get_backup_settings'].includes(t.name))
 		);
-		assert.equal(settings.keep_count, 2);
+		assert.ok((await call('list_backup_history')).backups.length);
 		const doc = await call('create_document', { filename: 'master.md', content: '# Career' });
 		assert.equal(doc.created_via, 'mcp');
 		const catalog = await call('list_documents');
@@ -865,14 +789,6 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			'# Career'
 		);
 		assert.equal((await call('get_document', { id: copied.id })).error.code, 'NOT_FOUND');
-		const fileSettings = await call('set_backup_settings', {
-			kind: 'files',
-			enabled: true,
-			interval_hours: 3,
-			keep_count: 4
-		});
-		assert.equal(fileSettings.keep_count, 4);
-		assert.equal((await call('get_backup_settings')).keep_count, 2);
 		const fileBackup = await call('create_file_backup');
 		const filePreview = await call('prepare_file_restore', { backup_id: fileBackup.backup_id });
 		assert.ok(
@@ -922,7 +838,7 @@ test('disk-full metadata publication keeps existing backups and database intact,
 	const { syncBuiltinESMExports } = await import('node:module');
 	const job = createJob({ job_title: 'Preserve me', company_name: 'Example' });
 	const previous = backups.createBackup();
-	const directory = fs.realpathSync(process.env.SATURDAY_DB_PATH + '.backups');
+	const directory = fs.realpathSync(backups.getBackupPaths().backups);
 	const before = readdirSync(directory).sort();
 	const write = fs.writeFileSync;
 	try {

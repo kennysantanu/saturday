@@ -13,6 +13,8 @@
 		fileHref?: string;
 		downloadLabel?: string;
 		contents?: string;
+		scope?: string;
+		status?: string;
 	};
 
 	/** Saved backups as rows: kind, when, what it holds, and a download link. */
@@ -35,6 +37,7 @@
 							{formatDateTime(item.createdAt)}
 							<Badge variant="secondary" class="capitalize">{item.kind}</Badge>
 							{#if item.contents}<Badge variant="outline">{item.contents}</Badge>{/if}
+							{#if item.status === 'partial'}<Badge variant="outline">Partial backup</Badge>{/if}
 						</p>
 						<p class="text-muted-foreground">{item.detail}</p>
 					</div>

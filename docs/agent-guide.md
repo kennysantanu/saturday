@@ -90,19 +90,17 @@ Use the same `SATURDAY_DB_PATH` as the web/MCP process. CLI file arguments resol
 npm run backup -- --output ./career-backup.sqlite --json
 npm run restore -- ./career-backup.sqlite --inspect --json
 npm run restore -- --restore-id <preview-id> --confirm --json
-npm run backup -- schedule show --json
-npm run backup -- schedule set --enabled true --contents all --interval-hours 24 --keep 10 --json
 ```
 
 When parsing program output, use `node scripts/backup.mjs ... --json` or `node scripts/restore.mjs ... --json` directly; npm may print its own script banner. Backup retains a managed copy even when exporting. Export never overwrites an existing file. Show the preview to the user and obtain authorization before committing a restore; record the recovery backup location returned on success. Never automatically retry after an uncertain response. Do not send backup contents or private paths to unrelated services.
 
-The main schedule accepts `--contents all` (database and files) or `--contents database`; new schedules default to all and existing schedules without this field retain database-only behavior. Retention counts complete sets and removes both automatic artifacts after a successful replacement. The manual `backup` command remains database-only; use the file CLI pair command for a complete set. Enabling/changing automatic backup retention requires user authorization to delete older automatic sets under that policy. Manual/imported/recovery backups remain. Start the web app through the documented npm scripts to run the scheduler; MCP alone does not schedule backups. Custom launches of `build/index.js` must set `BODY_SIZE_LIMIT=105906176` to support the documented 100 MiB uploads, and do not automatically start the scheduler.
+Manual commands work without the UI server. `npm run backup -- --contents all --json` captures both; `--contents files` captures files only; omitted contents retains database-only behavior. Use `npm run backup -- list --json`, `export <id> --contents all --output <new-file>`, `import <combined.zip>`, or `delete <id> --contents all --confirm`. Delete requires explicit user authorization. Combined exports are importable ZIPs; existing file CLI and restore commands remain. There is no scheduler/retention. Extensions require independent backups. Documented web scripts support streaming imports; database multipart uploads retain their 100 MiB bound.
 
 The current app rejects newer migration histories. Do not alter migration records to bypass this check: upgrade the app instead. In-app/CLI restore requires a healthy target database; offline replacement of a corrupt database requires stopping web/MCP processes first and preserving the original database and sidecars for recovery.
 
 ## File storage and recovery commands
 
-`SATURDAY_FILES_PATH` defaults to `data/files/` relative to the project and is independent of SQLite. The root contains `manifest.json`, `documents/`, and lazy `jobs/<id>/` content. Do not edit files/manifest directly; use web/MCP to preserve hashes, identity and conflict tokens. State/journals and backup archives are private sibling directories `.state` and `.backups`, outside the backed-up root. Configure identical paths for web/worker/MCP.
+`SATURDAY_FILES_PATH` defaults to `data/files/` relative to the project and is independent of SQLite. The root contains `manifest.json`, `documents/`, and lazy `jobs/<id>/` content. Do not edit files/manifest directly; use web/MCP to preserve hashes, identity and conflict tokens. State/journals stay in the private sibling `.state` directory. New file archives live under `backups/files/` beside the file store; older sibling `.backups` archives remain readable. Both are outside the backed-up root. Configure identical paths for web/CLI/MCP.
 
 ```sh
 npm run setup:pdf
@@ -112,7 +110,6 @@ npm run files -- import ./files.zip
 npm run files -- export <backup-id> ./export.zip
 npm run files -- prepare <backup-id> --replace
 npm run files -- restore <preview-id> --confirm
-npm run files -- schedule set --enabled true --contents all --interval-hours 24 --keep 10
 npm run files -- pair
 npm run files -- prepare-pair <file-backup-id>
 npm run files -- restore-pair <preview-id> --confirm
@@ -120,7 +117,7 @@ npm run files -- restore-pair <preview-id> --confirm
 
 Commands emit JSON; for parsing without npm's banner use `node scripts/files.mjs ...` directly. Preview expires after ten minutes and is single-use. Show it before authorization. File ZIPs have no total-size cap and stream to private staging, but disk space and upstream request constraints apply. Managed imports validate keys, exact contents and hashes. Manifest processing has a 16 MiB metadata bound; archive contents are never loaded whole into memory.
 
-For a missing/malformed manifest, stop every web/MCP/worker process, retain the original, then run `npm run files -- recover ./known-good.zip --confirm`. Recovery validates the archive first and preserves the damaged tree in private sibling recovery directories before replacement. Check the returned locations and recovered contents before deleting recovery copies or restarting. Newer manifest formats require an application upgrade instead. For an interrupted coordinated restore, stop all processes and run `npm run files -- recover-pair --confirm` to return both stores to their recovery snapshots. Never remove the blocking session marker to bypass recovery.
+For a missing/malformed manifest, stop every web/MCP process, retain the original, then run `npm run files -- recover ./known-good.zip --confirm`. Recovery validates the archive first and preserves the damaged tree in private sibling recovery directories before replacement. Check the returned locations and recovered contents before deleting recovery copies or restarting. Newer manifest formats require an application upgrade instead. For an interrupted coordinated restore, stop all processes and run `npm run files -- recover-pair --confirm` to return both stores to their recovery snapshots. Never remove the blocking session marker to bypass recovery.
 
 Puppeteer uses managed Chrome installed by `npm run setup` or `npm run setup:pdf`. Its cache must be readable by the same runtime user; install required Chrome platform libraries/fonts on Linux and retain the browser sandbox. Chrome is required only for PDF generation, not basic documents/jobs. Build/MCP externalize Puppeteer and ZIP packages, so deploy production `node_modules` too. Production startup permits streamed file archives without the former SQLite-sized request ceiling; document/provide upstream proxy allowances for large/long imports. Smaller upload/SQLite limits remain enforced in their handlers.
 
