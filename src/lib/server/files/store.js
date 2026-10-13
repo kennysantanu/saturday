@@ -45,7 +45,12 @@ export function reject(code, message) {
 }
 export function filePaths() {
 	const root = resolve(getProjectRoot(), process.env.SATURDAY_FILES_PATH || 'data/files');
-	return { root, state: `${root}.state`, backups: `${root}.backups` };
+	return {
+		root,
+		state: `${root}.state`,
+		backups: join(dirname(root), 'backups', 'files'),
+		legacyBackups: `${root}.backups`
+	};
 }
 export function filename(value) {
 	if (typeof value !== 'string') reject('VALIDATION', 'Enter a filename.');

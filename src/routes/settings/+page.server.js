@@ -6,9 +6,6 @@ import {
 } from '$lib/server/extensions.js';
 import {
 	getFileBackup,
-	getFileBackupSettings,
-	setFileBackupSettings,
-	createFileBackup,
 	listFileBackups,
 	prepareFileRestore,
 	restoreFiles
@@ -17,7 +14,9 @@ import { storageSummary } from '$lib/server/files/documents.js';
 import { filePaths } from '$lib/server/files/store.js';
 import { pdfReadiness } from '$lib/server/files/pdf.js';
 import {
-	createBackupPair,
+	createManualBackup,
+	listBackupHistory,
+	deleteManualBackup,
 	prepareBackupPairRestore,
 	restoreBackupPair
 } from '$lib/server/files/pairs.js';
@@ -26,9 +25,6 @@ import {
 	createBackup,
 	getBackupPaths,
 	getBackupFile,
-	listBackups,
-	getBackupSettings,
-	setBackupSettings,
 	importBackupBytes,
 	prepareRestore,
 	restoreBackup,
@@ -41,17 +37,14 @@ import { join } from 'node:path';
 import { getDatabasePath, getProjectRoot, openDatabase } from '$lib/server/database.js';
 import { buildInfo, storageCompatibility } from '$lib/server/compatibility.js';
 
-export async function load({ setHeaders }) {
+export async function load({ setHeaders, url }) {
 	setHeaders({ 'x-saturday-build': buildInfo.id });
 	let filesError = null,
 		fileSummary = null,
 		fileBackups = [];
-	/** @type {Awaited<ReturnType<typeof getFileBackupSettings>>} */
-	let fileSettings = { enabled: false, interval_hours: 24, keep_count: 10 };
 	try {
 		fileSummary = await storageSummary();
 		fileBackups = (await listFileBackups()).backups;
-		fileSettings = await getFileBackupSettings();
 	} catch (e) {
 		filesError = e.code ? e.message : 'File store unavailable.';
 	}
@@ -79,33 +72,15 @@ export async function load({ setHeaders }) {
 			}
 		}
 	};
-	const backups = listBackups({ limit: 50 }).backups;
-	const fileByDatabase = new Map(
-		fileBackups.filter((b) => b.database_backup_id).map((b) => [b.database_backup_id, b])
-	);
-	const databaseHistory = await Promise.all(
-		backups.map(async (b) => {
-			let files = fileByDatabase.get(b.backup_id) ?? null;
-			if (!files && b.file_backup_id) {
-				try {
-					files = (await getFileBackup(b.file_backup_id)).metadata;
-				} catch {}
-			}
-			const fileId = b.file_backup_id ?? files?.backup_id;
-			return { ...b, file_backup_id: fileId, contents: fileId ? 'all' : 'database', files };
-		})
-	);
-	const pairedFiles = new Set(databaseHistory.map((b) => b.file_backup_id).filter(Boolean));
-	const backupHistory = [
-		...databaseHistory,
-		...fileBackups
-			.filter((b) => !pairedFiles.has(b.backup_id))
-			.map((b) => ({ ...b, contents: 'files' }))
-	]
-		.sort(
-			(a, b) => b.created_at.localeCompare(a.created_at) || a.backup_id.localeCompare(b.backup_id)
-		)
-		.slice(0, 50);
+	const requestedPage = Number(url.searchParams.get('backup_page') ?? 1);
+	let backupPage = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+	let history = await listBackupHistory({ offset: (backupPage - 1) * 50 });
+	const backupPages = Math.max(1, Math.ceil(history.total / 50));
+	if (backupPage > backupPages) {
+		backupPage = backupPages;
+		history = await listBackupHistory({ offset: (backupPage - 1) * 50 });
+	}
+	const backupHistory = history.backups;
 	const db = openDatabase({ migrate: false });
 	let diagnostics;
 	try {
@@ -126,24 +101,27 @@ export async function load({ setHeaders }) {
 		extensionsError,
 		diagnostics,
 		backupHistory,
+		backupPage,
+		backupPages,
+		backupTotal: history.total,
 		buildInfo,
 		storageCompatibility,
 		databasePath,
 		filesError,
 		fileSummary,
 		fileBackups,
-		fileSettings,
 		pdfStatus: await pdfReadiness(),
 		mcpPath,
 		mcpReady: existsSync(mcpPath),
-		configuration: JSON.stringify(config, null, 2),
-		backupSettings: getBackupSettings(),
-		backups
+		configuration: JSON.stringify(config, null, 2)
 	};
 }
 
 function actionFailure(error) {
-	const detail = publicBackupError(error);
+	const detail =
+		error.code && !(error instanceof BackupError)
+			? { code: error.code, message: error.message }
+			: publicBackupError(error);
 	return fail(detail.code === 'backup_too_large' ? 413 : 400, { backupError: detail.message });
 }
 // Bound multipart buffering in development too; production also has BODY_SIZE_LIMIT.
@@ -185,10 +163,11 @@ export const actions = {
 		try {
 			const values = await request.formData();
 			const contents = values.get('contents') ?? 'all';
-			if (!['all', 'database'].includes(String(contents)))
-				return fail(400, { backupError: 'Choose database and files or database only.' });
-			if (contents === 'all') await createBackupPair();
-			else createBackup();
+			if (!['all', 'database', 'files'].includes(String(contents)))
+				return fail(400, {
+					backupError: 'Choose database and files, database only, or files only.'
+				});
+			await createManualBackup({ contents: String(contents) });
 		} catch (error) {
 			return actionFailure(error);
 		}
@@ -224,7 +203,7 @@ export const actions = {
 	},
 	fileBackup: async () => {
 		try {
-			await createFileBackup();
+			await createManualBackup({ contents: 'files' });
 		} catch (e) {
 			return fail(400, { fileError: e.code ? e.message : 'File backup failed. Check disk space.' });
 		}
@@ -268,20 +247,18 @@ export const actions = {
 		}
 		redirect(303, `/settings/backups/${backup.backup_id}`);
 	},
-	schedule: async ({ request }) => {
+	deleteBackup: async ({ request }) => {
 		try {
 			const values = await request.formData();
-			setBackupSettings({
-				contents: String(values.get('contents') ?? 'all'),
-				enabled: values.get('enabled') === 'on',
-				interval_hours: Number(values.get('interval_hours')),
-				keep_count: Number(values.get('keep_count'))
+			await deleteManualBackup({
+				backup_id: String(values.get('backup_id')),
+				contents: String(values.get('contents')),
+				confirm: values.get('confirm') === 'true'
 			});
-			await setFileBackupSettings({ enabled: false });
-		} catch (error) {
-			return actionFailure(error);
+		} catch (e) {
+			return actionFailure(e);
 		}
-		redirect(303, '/settings?saved=backup-settings');
+		redirect(303, '/settings?saved=backup-deleted');
 	},
 	prepare: async ({ request }) => {
 		try {

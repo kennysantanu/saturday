@@ -19,9 +19,7 @@ import {
 	importFileBackup,
 	prepareFileRestore,
 	restoreFiles,
-	extractArchive,
-	getFileBackupSettings,
-	setFileBackupSettings
+	extractArchive
 } from '../src/lib/server/files/backups.js';
 import {
 	createBackupPair,
@@ -75,20 +73,8 @@ try {
 			break;
 		case 'recover-pair':
 			if (!args.includes('--confirm'))
-				throw new Error('Stop web/MCP/worker and pass --confirm to recover the interrupted pair.');
+				throw new Error('Stop web/MCP and pass --confirm to recover the interrupted pair.');
 			result = await recoverBackupPair();
-			break;
-		case 'schedule':
-			result =
-				args[0] === 'set'
-					? await setFileBackupSettings({
-							...(args.includes('--enabled') ? { enabled: value('--enabled') === 'true' } : {}),
-							...(args.includes('--interval-hours')
-								? { interval_hours: Number(value('--interval-hours')) }
-								: {}),
-							...(args.includes('--keep') ? { keep_count: Number(value('--keep')) } : {})
-						})
-					: await getFileBackupSettings();
 			break;
 		case 'recover': {
 			if (!args.includes('--confirm'))
@@ -133,7 +119,7 @@ try {
 		}
 		default:
 			throw new Error(
-				'Usage: npm run files -- backup|list|import <zip>|export <id> <path>|prepare <id> [--replace]|restore <preview> --confirm|pair|prepare-pair <file-id>|restore-pair <preview> --confirm|schedule show|schedule set --enabled true --interval-hours 24 --keep 10|recover <zip> --confirm|recover-pair --confirm'
+				'Usage: npm run files -- backup|list|import <zip>|export <id> <path>|prepare <id> [--replace]|restore <preview> --confirm|pair|prepare-pair <file-id>|restore-pair <preview> --confirm|recover <zip> --confirm|recover-pair --confirm'
 			);
 	}
 	console.log(JSON.stringify({ ok: true, ...result }, null, 2));

@@ -37,17 +37,6 @@ import { storageCompatibility, buildInfo } from './compatibility.js';
 
 export const MAX_BACKUP_BYTES = 100 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const defaults = {
-	enabled: false,
-	contents: 'all',
-	interval_hours: 24,
-	keep_count: 10,
-	last_success_at: null,
-	last_backup_id: null,
-	next_due_at: null,
-	retry_after: null,
-	last_error: null
-};
 const columns = {
 	job_updates: [
 		'id',
@@ -72,6 +61,12 @@ function fail(code, message) {
 }
 export function publicBackupError(error) {
 	if (error instanceof BackupError) return { code: error.code, message: error.message };
+	if (
+		['VALIDATION', 'BUSY', 'CONFIRMATION', 'NOT_FOUND', 'INTEGRITY', 'DATASET_MISMATCH'].includes(
+			error?.code
+		)
+	)
+		return { code: error.code, message: error.message };
 	if (error?.code === 'FORMAT') return { code: 'unsupported_file_format', message: error.message };
 	if (String(error?.message).includes('locked') || String(error?.message).includes('busy'))
 		return { code: 'database_busy', message: 'Saturday is busy. Try again shortly.' };
@@ -95,7 +90,12 @@ function root() {
 }
 function paths() {
 	const p = root();
-	return { database: p, backups: `${p}.backups`, restore: `${p}.restore` };
+	return {
+		database: p,
+		backups: join(dirname(p), 'backups', 'database'),
+		legacyBackups: `${p}.backups`,
+		restore: `${p}.restore`
+	};
 }
 export function getBackupPaths() {
 	return paths();
@@ -400,15 +400,18 @@ function inspectPath(path) {
 	}
 }
 function backupPath(backupId) {
-	return join(storage().backups, `${id(backupId)}.sqlite`);
+	const name = `${id(backupId)}.sqlite`;
+	const p = storage();
+	return existsSync(join(p.backups, name)) ? join(p.backups, name) : join(p.legacyBackups, name);
 }
-export function getBackupFile(backupId) {
+export function getBackupFile(backupId, { verify = true } = {}) {
 	return safe(() => {
 		const p = backupPath(backupId);
-		const metadataPath = join(storage().backups, `${id(backupId)}.json`);
+		const metadataPath = join(dirname(p), `${id(backupId)}.json`);
 		if (!existsSync(metadataPath)) fail('not_found', 'Backup file not found.');
 		const metadata = json(metadataPath);
-		if (digest(p) !== metadata.sha256) fail('invalid_backup', 'The backup file has changed.');
+		if (verify && digest(p) !== metadata.sha256)
+			fail('invalid_backup', 'The backup file has changed.');
 		return { path: p, metadata };
 	});
 }
@@ -495,18 +498,22 @@ export function listBackups({ limit = 20, offset = 0 } = {}) {
 		)
 			fail('invalid_request', 'Invalid backup pagination.');
 		const p = storage();
-		const all = readdirSync(p.backups)
-			.filter((n) => UUID.test(n.replace(/\.json$/, '')) && n.endsWith('.json'))
-			.flatMap((name) => {
-				try {
-					const m = json(join(p.backups, name));
-					if (m.backup_id !== name.slice(0, -5)) return [];
-					regular(join(p.backups, `${m.backup_id}.sqlite`));
-					return [m];
-				} catch {
-					return [];
-				}
-			})
+		const all = [p.backups, p.legacyBackups]
+			.filter(existsSync)
+			.flatMap((directory) =>
+				readdirSync(directory)
+					.filter((n) => UUID.test(n.replace(/\.json$/, '')) && n.endsWith('.json'))
+					.flatMap((name) => {
+						try {
+							const m = json(join(directory, name));
+							if (m.backup_id !== name.slice(0, -5)) return [];
+							regular(join(directory, `${m.backup_id}.sqlite`));
+							return [m];
+						} catch {
+							return [];
+						}
+					})
+			)
 			.sort(
 				(a, b) => b.created_at.localeCompare(a.created_at) || b.backup_id.localeCompare(a.backup_id)
 			);
@@ -695,158 +702,15 @@ export function restoreBackup(restoreId, confirm, { now = Date.now(), beforeComm
 		}
 	});
 }
-function settingsPath() {
-	return join(storage().backups, 'schedule.json');
-}
-export function getBackupSettings() {
-	return safe(() =>
-		existsSync(settingsPath())
-			? { ...defaults, contents: 'database', ...json(settingsPath()) }
-			: { ...defaults }
-	);
-}
-export function setBackupSettings(input, { now = Date.now() } = {}) {
-	return safe(() => {
-		const keys = Object.keys(input);
-		if (
-			!keys.length ||
-			keys.some((key) => !['enabled', 'contents', 'interval_hours', 'keep_count'].includes(key)) ||
-			('enabled' in input && typeof input.enabled !== 'boolean') ||
-			('contents' in input && !['all', 'database'].includes(input.contents)) ||
-			('interval_hours' in input &&
-				(!Number.isInteger(input.interval_hours) ||
-					input.interval_hours < 1 ||
-					input.interval_hours > 168)) ||
-			('keep_count' in input &&
-				(!Number.isInteger(input.keep_count) || input.keep_count < 1 || input.keep_count > 100))
-		)
-			fail(
-				'invalid_request',
-				'Use contents all/database, enabled true/false, an interval of 1–168 whole hours, and a count of 1–100.'
-			);
-		return locked(() => {
-			const old = getBackupSettings();
-			const updated = { ...old, ...input };
-			if (
-				(!old.enabled && updated.enabled) ||
-				old.interval_hours !== updated.interval_hours ||
-				old.contents !== updated.contents
-			) {
-				updated.next_due_at = new Date(
-					(!old.enabled && updated.enabled) || !old.last_success_at
-						? now
-						: Date.parse(old.last_success_at) + updated.interval_hours * 3600000
-				).toISOString();
-				updated.retry_after = null;
-			}
-			atomicJSON(settingsPath(), updated);
-			return updated;
-		}, false);
-	});
-}
-async function prune(keep, now) {
-	const p = storage();
-	const protectedIds = new Set();
-	for (const name of readdirSync(p.restore).filter(
-		(n) => n.endsWith('.json') && UUID.test(n.slice(0, -5))
-	)) {
-		const r = json(join(p.restore, name));
-		if (
-			Date.parse(r.expires_at) > now ||
-			(existsSync(join(p.restore, `${r.restore_id}.claim`)) && !r.status)
-		)
-			protectedIds.add(r.backup_id);
-	}
-	let offset = 0;
-	const all = [];
-	do {
-		const page = listBackups({ limit: 50, offset });
-		all.push(...page.backups);
-		offset = page.next_offset;
-	} while (offset !== null);
-	const scheduled = all.filter((m) => m.kind === 'scheduled');
-	for (const m of scheduled.slice(keep)) {
-		if (protectedIds.has(m.backup_id)) continue;
-		if (m.file_backup_id) {
-			const { removePairedFileBackup } = await import('./files/backups.js');
-			if (!(await removePairedFileBackup(m, now))) continue;
-		}
-		regular(join(p.backups, `${m.backup_id}.sqlite`));
-		unlinkSync(join(p.backups, `${m.backup_id}.sqlite`));
-		unlinkSync(join(p.backups, `${m.backup_id}.json`));
-	}
-}
-// Hold the database write gate across a complete scheduled set, including file capture.
-export async function runScheduledBackup({ now = Date.now() } = {}) {
-	let db;
-	try {
-		assertDatabaseAvailable();
-		db = connect(paths().database, false);
-		db.exec('BEGIN IMMEDIATE');
-		validateSchema(db);
-		assertFileStorageCompatible();
-		const settings = getBackupSettings();
-		if (
-			!settings.enabled ||
-			Date.parse(settings.next_due_at ?? '') > now ||
-			Date.parse(settings.retry_after ?? '') > now
-		) {
-			db.exec('ROLLBACK');
-			return { ran: false };
-		}
-		let backup;
-		try {
-			if (settings.contents === 'all') {
-				const { createBackupPair } = await import('./files/pairs.js');
-				const pair = await createBackupPair({ kind: 'scheduled', now, gateHeld: true });
-				backup = getBackupFile(pair.database_backup_id).metadata;
-			} else backup = snapshot('scheduled', now);
-		} catch (error) {
-			const detail = error.code
-				? { code: error.code, message: error.message }
-				: publicBackupError(error);
-			atomicJSON(settingsPath(), {
-				...settings,
-				retry_after: new Date(now + 300000).toISOString(),
-				last_error: { ...detail, at: new Date(now).toISOString() }
-			});
-			db.exec('COMMIT');
-			return { ran: false, error: detail };
-		}
-		let lastError = null;
-		try {
-			await prune(settings.keep_count, now);
-		} catch (error) {
-			lastError = { ...publicBackupError(error), at: new Date(now).toISOString() };
-		}
-		atomicJSON(settingsPath(), {
-			...settings,
-			last_success_at: new Date(now).toISOString(),
-			last_backup_id: backup.backup_id,
-			next_due_at: new Date(now + settings.interval_hours * 3600000).toISOString(),
-			retry_after: null,
-			last_error: lastError
-		});
-		db.exec('COMMIT');
-		return { ran: true, backup };
-	} catch (error) {
-		try {
-			db?.exec('ROLLBACK');
-		} catch {}
-		const detail = publicBackupError(error);
-		throw new BackupError(detail.code, detail.message);
-	} finally {
-		db?.close();
-	}
-}
-
 // Publish pair membership only after both independently downloadable artifacts exist.
 export function completeBackupPair(backupId, pair, kind, now) {
 	const metadata = getBackupFile(backupId).metadata;
-	atomicJSON(join(storage().backups, `${id(backupId)}.json`), {
+	atomicJSON(join(dirname(getBackupFile(backupId).path), `${id(backupId)}.json`), {
 		...metadata,
 		kind,
 		created_at: new Date(now).toISOString(),
+		status: 'complete',
+		contents: 'all',
 		backup_set_id: pair.backup_set_id,
 		file_backup_id: pair.file_backup_id
 	});
@@ -981,4 +845,52 @@ function fileFolderImpact(incoming) {
 	} catch {
 		return null;
 	}
+}
+
+export function markIncompleteBackup(backupId, message) {
+	const file = getBackupFile(backupId);
+	atomicJSON(join(dirname(file.path), `${id(backupId)}.json`), {
+		...file.metadata,
+		contents: 'all',
+		status: 'partial',
+		error: message
+	});
+}
+export const inspectBackupPath = (path) => safe(() => inspectPath(path));
+export function assertBackupDeletionAllowed(backupId) {
+	const pairSession = join(
+		`${resolve(getProjectRoot(), process.env.SATURDAY_FILES_PATH || 'data/files')}.state`,
+		'pair-session.json'
+	);
+	if (existsSync(pairSession) && json(pairSession).recovery_database_id === backupId)
+		fail('database_busy', 'This backup is required for interrupted restore recovery.');
+
+	const file = getBackupFile(backupId, { verify: false }),
+		p = storage();
+	for (const name of readdirSync(p.restore).filter(
+		(n) => UUID.test(n.slice(0, -5)) && n.endsWith('.json')
+	)) {
+		const preview = json(join(p.restore, name));
+		if (
+			preview.backup_id === backupId &&
+			((!preview.status && existsSync(join(p.restore, `${preview.restore_id}.claim`))) ||
+				(!preview.status && Date.parse(preview.expires_at) > Date.now()))
+		)
+			fail(
+				'database_busy',
+				'This backup has an active restore preview. Wait for it to expire before deleting.'
+			);
+		if (preview.recovery_backup_id === backupId && preview.status === 'failed_or_uncertain')
+			fail('database_busy', 'This backup is required for interrupted restore recovery.');
+	}
+	return file;
+}
+export function deleteBackup(backupId, confirm) {
+	if (confirm !== true) fail('confirmation_required', 'Confirm deletion of the selected backup.');
+	return locked(() => {
+		const file = assertBackupDeletionAllowed(backupId);
+		unlinkSync(file.path);
+		unlinkSync(join(dirname(file.path), `${id(backupId)}.json`));
+		return { deleted: true };
+	}, false);
 }

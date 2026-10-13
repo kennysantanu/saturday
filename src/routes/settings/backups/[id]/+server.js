@@ -1,20 +1,22 @@
 import { error } from '@sveltejs/kit';
-import { readFileSync } from 'node:fs';
-import { getBackupFile, publicBackupError } from '$lib/server/backups.js';
-
-export function GET({ params }) {
+import { Readable } from 'node:stream';
+import { downloadManualBackup } from '$lib/server/files/pairs.js';
+export async function GET({ params, url }) {
 	try {
-		const file = getBackupFile(params.id);
-		return new Response(readFileSync(file.path), {
+		const file = await downloadManualBackup({
+			backup_id: params.id,
+			contents: url.searchParams.get('contents') ?? 'database'
+		});
+		return new Response(Readable.toWeb(file.stream), {
 			headers: {
-				'Content-Type': 'application/vnd.sqlite3',
-				'Content-Disposition': `attachment; filename="${file.metadata.filename}"`,
+				'Content-Type':
+					file.contents === 'database' ? 'application/vnd.sqlite3' : 'application/zip',
+				'Content-Disposition': `attachment; filename="${file.filename}"`,
 				'Cache-Control': 'no-store',
 				'X-Content-Type-Options': 'nosniff'
 			}
 		});
-	} catch (cause) {
-		const detail = publicBackupError(cause);
-		error(detail.code === 'not_found' ? 404 : 400, detail.message);
+	} catch (e) {
+		error(e.code === 'NOT_FOUND' ? 404 : 400, e.code ? e.message : 'Backup download failed.');
 	}
 }

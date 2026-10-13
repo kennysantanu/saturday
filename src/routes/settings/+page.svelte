@@ -1,14 +1,16 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { toast } from '$lib/toast.svelte';
 	import { enhance } from '$app/forms';
-	import { enhanceWithFocus } from '$lib/forms';
+	import { withPending, enhanceWithFocus, focusFirstError } from '$lib/forms';
 	import { page } from '$app/state';
 	import { formatBytes, formatDateTime } from '$lib/format';
 	import { documentDesignations } from '$lib/file-types';
 	import Clipboard from '@lucide/svelte/icons/clipboard';
 	import Check from '@lucide/svelte/icons/check';
 	import Archive from '@lucide/svelte/icons/archive';
+	import Pagination from '$lib/components/app/pagination.svelte';
 	import BackupList from '$lib/components/app/backup-list.svelte';
 	import ConfirmDialog from '$lib/components/app/confirm-dialog.svelte';
 	import Field from '$lib/components/app/field.svelte';
@@ -17,13 +19,14 @@
 	import PageHeader from '$lib/components/app/page-header.svelte';
 	import PageShell from '$lib/components/app/page-shell.svelte';
 	import RestorePreview from '$lib/components/app/restore-preview.svelte';
-	import SchedulePanel from '$lib/components/app/schedule-panel.svelte';
 	import Checkbox from '$lib/components/app/checkbox.svelte';
 	import SectionCard from '$lib/components/app/section-card.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 
 	let { data, form } = $props();
+	let deleteOpen = $state(false);
+	let confirmDelete = $state<{ id: string; contents: string } | null>(null);
 	let confirmRestore = $state(false);
 	let confirmFiles = $state(false);
 	let confirmPair = $state(false);
@@ -42,20 +45,20 @@
 			copyError = 'Select the text and copy it manually.';
 		}
 	}
-	async function importArchive(e: Event) {
+	async function importArchive(e: Event, bundle = false) {
 		const file = (e.currentTarget as HTMLInputElement).files?.[0];
 		if (!file) return;
 		uploading = true;
 		uploadError = '';
 		try {
-			const r = await fetch('/settings/files/import', {
+			const r = await fetch(`/settings/files/import${bundle ? '?bundle=true' : ''}`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/zip' },
 				body: file
 			});
 			const body = await r.json();
 			if (!r.ok) throw new Error(body.error);
-			toast.show('File backup imported. Choose it in Saved backup to preview restore.');
+			toast.show('Backup imported. Choose it in Saved backup to preview restore.');
 			await invalidateAll();
 		} catch (e) {
 			uploadError = (e as Error).message;
@@ -89,12 +92,10 @@
 			id: b.backup_id,
 			kind: b.kind,
 			createdAt: b.created_at,
-			detail: `${b.contents === 'files' ? `${b.file_count} files` : `${b.job_count} jobs`}${b.files ? ` · ${b.files.file_count} files` : ''} · ${formatBytes(b.bytes + (b.files?.bytes ?? 0))}`,
-			href:
-				b.contents === 'files'
-					? `/settings/files/${b.backup_id}`
-					: `/settings/backups/${b.backup_id}`,
-			fileHref: b.file_backup_id ? `/settings/files/${b.file_backup_id}` : undefined,
+			detail: `${b.status === 'partial' ? 'Incomplete set · ' : ''}${b.contents === 'files' ? `${b.file_count} files` : `${b.job_count} jobs`}${b.files ? ` · ${b.files.file_count} files` : ''} · ${formatBytes(b.bytes + (b.files?.bytes ?? 0))}`,
+			href: `/settings/backups/${b.backup_id}?contents=${b.contents}`,
+			status: b.status,
+			scope: b.contents,
 			filename: b.filename,
 			contents:
 				b.contents === 'all'
@@ -102,7 +103,7 @@
 					: b.contents === 'files'
 						? 'Files only'
 						: 'Database only',
-			downloadLabel: b.contents === 'files' ? 'Download files' : 'Download database'
+			downloadLabel: b.status === 'partial' ? 'Download available artifact' : 'Download'
 		}))
 	);
 </script>
@@ -198,7 +199,7 @@
 	<SectionCard
 		id="backups"
 		title="Backup and restore"
-		description="Back up your records and files together, or save the database only. Backups contain private data and are not encrypted."
+		description="Back up your Saturday database and documents together or separately. Extension databases have separate backups. Backups contain private data and are not encrypted."
 	>
 		{#if form?.backupError}<Notice tone="error" title="Backup operation failed"
 				>{form.backupError}</Notice
@@ -232,56 +233,31 @@
 		<form method="POST" action="?/backup" use:enhance={enhanceWithFocus} class="space-y-4">
 			<Field id="backup_contents" label="Include">
 				{#snippet control(attrs)}<NativeSelect {...attrs} name="contents">
-						<option value="all">Database and files</option><option value="database"
-							>Database only</option
-						>
+						<option value="all">Database and files</option><option value="files">Files only</option
+						><option value="database">Database only</option>
 					</NativeSelect>{/snippet}
 			</Field>
 			<div class="form-actions">
 				<Button type="submit"><Archive data-icon="inline-start" />Back up now</Button>
-				<Button type="submit" variant="outline" formaction="?/fileBackup">Back up files only</Button
-				>
 			</div>
 		</form>
-		<SchedulePanel
-			action="?/schedule"
-			idPrefix="db_schedule"
-			enabled={data.backupSettings.enabled}
-			intervalHours={data.backupSettings.interval_hours}
-			keepCount={data.backupSettings.keep_count}
-			enabledLabel="Automatic backups"
-			description="Runs while Saturday is running and your computer is awake. One catch-up backup is made after downtime. Older automatic backups are deleted after a new backup succeeds; manual, imported and recovery backups are kept. Retention counts complete backup sets, not individual archives or total storage."
-			saveLabel="Save backup settings"
+		<p class="meta-text text-muted-foreground">
+			Backups are saved locally and kept until you delete them. Download a copy to another drive to
+			protect against disk failure.
+		</p>
+		<Field
+			id="bundle_import"
+			label={uploading ? 'Importing backup…' : 'Import a combined backup ZIP'}
 		>
-			{#snippet contents()}
-				<Field id="schedule_contents" label="Include in automatic backups">
-					{#snippet control(attrs)}<NativeSelect
-							{...attrs}
-							name="contents"
-							value={data.backupSettings.contents}
-						>
-							<option value="all">Database and files</option><option value="database"
-								>Database only</option
-							>
-						</NativeSelect>{/snippet}
-				</Field>
-			{/snippet}
-			{#snippet status()}
-				<p>
-					Last automatic backup: {data.backupSettings.last_success_at
-						? formatDateTime(data.backupSettings.last_success_at)
-						: 'None yet'}
-				</p>
-				<p>
-					Next due: {data.backupSettings.enabled && data.backupSettings.next_due_at
-						? formatDateTime(data.backupSettings.next_due_at)
-						: 'Disabled'}
-				</p>
-				{#if data.backupSettings.last_error}<p role="alert" class="text-destructive">
-						{data.backupSettings.last_error.message}
-					</p>{/if}
-			{/snippet}
-		</SchedulePanel>
+			{#snippet control(attrs)}<Input
+					{...attrs}
+					type="file"
+					accept=".zip"
+					disabled={uploading}
+					onchange={(e) => importArchive(e, true)}
+				/>{/snippet}
+		</Field>
+		{#if uploadError}<Notice tone="error" title="Backup import failed">{uploadError}</Notice>{/if}
 
 		<form
 			method="POST"
@@ -297,12 +273,15 @@
 					<NativeSelect {...attrs} name="backup_id">
 						<option value="">Choose a backup</option>
 						{#each data.backupHistory as backup (backup.backup_id)}
-							<option value={`${backup.contents}:${backup.backup_id}`}
-								>{formatDateTime(backup.created_at)} · {backup.contents === 'all'
-									? 'Database and files'
-									: backup.contents === 'files'
-										? 'Files only'
-										: 'Database only'}</option
+							<option
+								value={`${backup.status === 'partial' ? (backup.contents === 'files' ? 'files' : 'database') : backup.contents}:${backup.backup_id}`}
+								>{formatDateTime(backup.created_at)} · {backup.status === 'partial'
+									? `Partial — ${backup.contents === 'files' ? 'files only' : 'database only'}`
+									: backup.contents === 'all'
+										? 'Database and files'
+										: backup.contents === 'files'
+											? 'Files only'
+											: 'Database only'}</option
 							>
 						{/each}
 					</NativeSelect>
@@ -447,14 +426,59 @@
 		<BackupList
 			title="Saved backups"
 			items={backupRows}
-			note="Showing up to 50 recent backups. Manual, imported and recovery backups are kept."
+			note={`${data.backupTotal} saved backups. Delete only backups you no longer need.`}
+		>
+			{#snippet extra(item)}
+				<form method="POST" action="?/prepare" use:enhance={enhanceWithFocus}>
+					<input
+						type="hidden"
+						name="backup_id"
+						value={`${item.status === 'partial' ? (item.scope === 'files' ? 'files' : 'database') : item.scope}:${item.id}`}
+					/>
+					<Button type="submit" variant="outline" size="sm">Restore</Button>
+				</form>
+				<Button
+					variant="ghost"
+					size="sm"
+					onclick={() => {
+						confirmDelete = { id: item.id, contents: item.scope ?? 'database' };
+						deleteOpen = true;
+					}}>Delete</Button
+				>
+			{/snippet}
+		</BackupList>
+		<Pagination
+			page={data.backupPage}
+			totalPages={data.backupPages}
+			label="Backup history pages"
+			previous={`/settings?backup_page=${data.backupPage - 1}#backups`}
+			next={`/settings?backup_page=${data.backupPage + 1}#backups`}
+		/>
+		<form
+			method="POST"
+			action="?/deleteBackup"
+			id="delete-backup"
+			use:enhance={withPending(() => async ({ update }) => {
+				deleteOpen = false;
+				await update();
+				await tick();
+				focusFirstError();
+			})}
+		>
+			<input type="hidden" name="backup_id" value={confirmDelete?.id ?? ''} />
+			<input type="hidden" name="contents" value={confirmDelete?.contents ?? ''} />
+			<input type="hidden" name="confirm" value="true" />
+		</form>
+		<ConfirmDialog
+			bind:open={deleteOpen}
+			title="Delete this backup?"
+			description="The selected backup artifacts will be permanently deleted. Your current records and documents will remain."
+			confirmLabel="Delete backup"
+			formId="delete-backup"
+			destructive
 		/>
 		<details class="disclosure" open={Boolean(form?.fileError || uploadError)}>
 			<summary>Advanced file recovery</summary>
-			{#if data.fileSettings.enabled}<Notice title="Separate file schedule is active"
-					>An existing file-only schedule is still running. Saving the automatic backup settings
-					above disables it and uses the single schedule.</Notice
-				>{/if}
 			<div class="disclosure-body space-y-4">
 				{#if data.fileSummary}<p class="inset-surface p-3 font-mono text-sm break-all">
 						{data.fileSummary.root}

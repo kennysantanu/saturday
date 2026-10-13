@@ -64,11 +64,13 @@ For beta verification, use disposable paths for both stores. Verify discovery; c
 | `add_job_update`    | Records a dated progress step or note on an existing job                   | Yes          |
 
 | `create_backup` | Saves a local backup and returns its ID | Creates a file |
-| `list_backups` | Lists backups, including recovery backups | No |
+| `list_backups` | Lists database artifacts, including recovery backups | No |
+| `list_backup_history` | Lists grouped database/files entries and completion status | No |
+| `export_backup` | Writes a selected entry to a new local export file | Creates a file |
+| `import_backup_bundle` | Validates/imports a combined ZIP without restoring live data | Creates files |
+| `delete_backup` | Deletes explicitly authorized local backup artifacts | Yes |
 | `prepare_restore` | Validates a backup ID and previews replacement | Creates temporary staging |
 | `restore_backup` | Replaces records using the prepared ID and explicit confirmation | Yes |
-| `get_backup_settings` | Reads automatic backup settings/status | No |
-| `set_backup_settings` | Configures enablement, interval, and contents and retained automatic-set count | Yes; authorizes retention |
 
 Records created this way are labeled **Added by assistant**. Editing or removing job history updates, dismissing jobs, and reopening jobs stay in the web app. Your assistant app may ask you to approve changes before it makes them.
 
@@ -123,7 +125,7 @@ Saturday stores your data on your computer and does not collect or send it anywh
 
 Ask “Back up Saturday” to create a managed local snapshot, or ask it to list backups and their dates/counts. To restore, the assistant calls `prepare_restore` with a backup ID, shows current versus incoming counts and the replacement warning, and waits for your explicit authorization before `restore_backup` with `confirm: true`. The preview expires after ten minutes and is rejected if current records change. Confirmation flags and tool hints alone are not evidence of your consent; the assistant must obtain it in the conversation. Never automatically retry a restore after an interrupted response.
 
-To enable automatic backups, specify the interval and retained file count, for example “Enable daily automatic backups and keep 10.” This authorizes deletion of older automatic files after new snapshots succeed. Manual and recovery backups stay. The worker runs with the web app, not the MCP process. Configuration can be changed through MCP while the web app is stopped, but backups wait until it runs.
+Backups are manual. `create_backup` accepts optional `contents: "database"|"files"|"all"`; omitted contents preserves the database-only call. `list_backup_history` returns grouped entries and completion status; `list_backups` remains the database-artifact list. `export_backup` writes a selected entry to a new user-requested local destination; complete combined entries export an importable ZIP. `delete_backup` requires the ID, contents and explicit user authorization with `confirm:true`; it preserves live data and rejects active restore sources. No scheduling or automatic deletion runs. Manual backups work with the UI server stopped.
 
 MCP accepts managed IDs rather than filesystem paths and returns no backup bytes or raw database paths. Upload a downloaded backup in Settings or import it through the CLI before asking the assistant to restore it. See [Backup and restore](user-guide.md#backup-and-restore) for privacy, limits, and recovery details.
 
@@ -183,7 +185,7 @@ Profile documents resolve directly through `get_document({designation:"master_cv
 
 To tailor a resume, identify the job with existing job tools, read `master_cv` and `resume_template` by designation (or `cover_letter_template` for a letter), read optional career direction/preferences when relevant, create job-scoped HTML, review/edit source, then generate a PDF with its ID/scope/token. Report saved filenames and job; a successful render is not visual verification. Existing PDFs remain snapshots. Binary files support metadata, rename/copy/delete, with UI download.
 
-`get_backup_settings` and `set_backup_settings` accept optional `kind:"files"`; omitted kind selects the main schedule. Its optional `contents:"all"|"database"` chooses coordinated database/files sets or database-only snapshots. New schedules default to all; existing schedules without a contents field retain database-only behavior. `keep_count` counts complete automatic sets, including both artifacts. `create_backup` remains database-only; use the existing coordinated-pair tool for both. File settings are independent and the MCP process starts no scheduler. Restore requires showing the preview and obtaining explicit authorization. Confirmation flags alone are not consent. After an interrupted mutation, inspect current state before deciding what remains; never automatically retry create/copy/generate/delete/restore.
+Independent/coordinated restore tools remain unchanged. Show the preview and obtain explicit authorization; confirmation flags alone are not consent. After an uncertain mutation, inspect history/current state before retrying. Partial combined backups retain available artifacts for recovery. Extension databases are outside core backups.
 
 ## Numeric references and recovery namespaces
 
