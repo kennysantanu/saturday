@@ -39,7 +39,7 @@ The development installer prepares a private Node/npm runtime, builds Saturday, 
 
 **Install with your assistant:** give an assistant with local process/filesystem access this repository and the following request:
 
-> Read Saturday's README and docs/agent-guide.md. Install Saturday using the installer for my OS, preserve any existing workspace, and open the Dashboard. Help me connect my assistant using its supported local MCP configuration. Report the local address, data path and whether a real MCP tool call succeeded.
+> Read Saturday's README and docs/agent-guide.md. Install Saturday using the installer for my OS, preserve any existing workspace, and open the Dashboard. Help me connect my assistant using its supported local MCP configuration. Report the local address, data path and whether a real get_saturday_info call matched the installation, dataset and build shown in Settings. If local MCP is unavailable in this client, say so and leave app installation usable.
 
 **Install manually:** download this revision's repository archive, extract it, and open Terminal or Command Prompt in that folder. During development, use its local source snapshot:
 
@@ -80,6 +80,12 @@ Settings → Saturday server provides Restart, confirmed Stop, and **Start at lo
 
 ## Updating
 
+**Update with your assistant:**
+
+> Read Saturday's README and agent guide. Check for updates using my existing installation descriptor, show me the target, and update after my confirmation. Preserve my workspace. Disconnect Saturday's MCP before publication; report the completed operation and help me reconnect and verify the same installation, dataset and build with get_saturday_info.
+
+**Update manually:**
+
 Use **Settings → Updates and installation → Check for updates**, review the selected release or main commit, then confirm **Update Saturday**. There are no unattended checks or updates. Disconnect Saturday's MCP connection before publication; reconnect afterward to load the new code. The page shows progress through the external controller and reloads after readiness. If the Node path changes, copy the current assistant configuration from Settings too.
 
 Manual and assistant commands use the same controller. From a source checkout:
@@ -112,7 +118,7 @@ Backups are on demand: choose Database and files, Database only, or Files only i
 
 ## Connect your assistant (optional)
 
-Saturday includes a local MCP connection so an assistant can use the same job records you see in the browser. In short: open **Settings → Connect an assistant**, copy the configuration into your assistant app's MCP settings, reconnect, and ask it to list your jobs. The assistant's app starts the connection itself; you do not need to run another server. The web app and the assistant share one database, so changes from either appear in both. Refresh the browser to see an assistant's latest changes.
+Saturday includes a local MCP connection so an assistant can use the same job records you see in the browser. Open **Settings → Connect an assistant**, choose JSON or the local ChatGPT/Codex TOML snippet for your supported client, preserve existing settings and reconnect. Ask it to call `get_saturday_info` and compare the installation, dataset and build identities displayed in Settings; then read a known job. Configuration prepared does not mean connection verified. The assistant's app starts the connection itself; you do not need to run another server. The web app and the assistant share one database, so changes from either appear in both. Refresh the browser to see an assistant's latest changes.
 
 An assistant can find and read jobs, create or edit job details, schedule follow-ups, and add a dated update. It can also set a numeric assessment and explanation, which are read-only in the UI. Its records are labeled **Added by assistant**. It can also create/list/export/delete manual backups, and preview/confirm a restore. Ask it to show the restore preview before authorizing replacement. Job history corrections/removals, dismissal and reopening remain in the browser. Network tools also find/edit people, link jobs, manage follow-ups and add/correct/delete scoped interactions. The web app does not need an AI account or API key. Keep the generated configuration private because it contains paths on your computer.
 

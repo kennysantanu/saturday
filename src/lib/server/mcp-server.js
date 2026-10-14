@@ -1,3 +1,5 @@
+import { getInstallation } from './installation.js';
+import { openDatabase } from './database.js';
 import { withServerActivity } from './server-lifecycle.js';
 import { createReadStream } from 'node:fs';
 import { extensionRegistry } from './extensions.generated.js';
@@ -84,6 +86,36 @@ function toolError(error) {
 function toolResult(value) {
 	return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
 }
+
+server.registerTool(
+	'get_saturday_info',
+	{
+		description:
+			'Read this Saturday installation and database identity, build and record counts. Compare with Settings before using a newly configured or reconnected client. Works with an empty dataset. This is a read, not certification of an assistant client.',
+		inputSchema: z.object({}),
+		annotations: { readOnlyHint: true, destructiveHint: false }
+	},
+	async () => {
+		try {
+			const installation = getInstallation();
+			const db = openDatabase({ migrate: false });
+			try {
+				const identity = db.prepare('SELECT dataset_id FROM app_metadata WHERE id=1').get();
+				return toolResult({
+					installation_id: installation.installation_id,
+					dataset_id: identity.dataset_id,
+					build: buildInfo,
+					jobs: db.prepare('SELECT COUNT(*) AS count FROM jobs').get().count,
+					networks: db.prepare('SELECT COUNT(*) AS count FROM networks').get().count
+				});
+			} finally {
+				db.close();
+			}
+		} catch (error) {
+			return toolError(error);
+		}
+	}
+);
 
 server.registerTool(
 	'create_job',

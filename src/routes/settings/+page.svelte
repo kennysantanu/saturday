@@ -47,12 +47,12 @@
 	let confirmRestore = $state(false);
 	let confirmFiles = $state(false);
 	let confirmPair = $state(false);
-	let copied = $state<'path' | 'config' | null>(null);
+	let copied = $state<'path' | 'config' | 'toml' | null>(null);
 	let copyError = $state('');
 	let uploading = $state(false),
 		uploadError = $state('');
 
-	async function copy(kind: 'path' | 'config', text: string) {
+	async function copy(kind: 'path' | 'config' | 'toml', text: string) {
 		try {
 			await navigator.clipboard.writeText(text);
 			copied = kind;
@@ -251,12 +251,18 @@
 			>
 		{/if}
 		<ol class="list-decimal space-y-1.5 pl-5 text-sm text-muted-foreground">
-			<li>Build the MCP entry point with <code>npm run build:mcp</code>.</li>
 			<li>
-				Use the configuration below in a desktop client that accepts <code>mcpServers</code> JSON. ChatGPT
-				Work desktop uses the same command, arguments and environment values in its TOML MCP settings.
+				If the entry point is missing, use Repair installation or <code>npm run build:mcp</code>.
 			</li>
-			<li>Reconnect the client, then ask it to list your jobs to check the connection.</li>
+			<li>
+				Use the configuration below in a desktop client that accepts <code>mcpServers</code> JSON. Local
+				ChatGPT/Codex clients use the TOML snippet below where their execution mode permits local MCP.
+				Hosted-only chats cannot launch this stdio server.
+			</li>
+			<li>
+				Preserve other server entries. Reconnect, then ask for <code>get_saturday_info</code> and compare
+				the identities below.
+			</li>
 		</ol>
 		<div class="space-y-2">
 			<div class="flex flex-wrap items-center justify-between gap-3">
@@ -279,11 +285,37 @@
 				absolute paths for the current project and Node installation.
 			</p>
 		</div>
+
+		<details class="inset-surface px-4 py-3 text-sm">
+			<summary class="cursor-pointer font-medium"
+				>ChatGPT / Codex local configuration (TOML)</summary
+			>
+			<div class="mt-3 space-y-3">
+				<p class="text-muted-foreground">
+					Merge into the client’s supported config.toml, preserving other settings. If saturday
+					already exists, review and replace only its tables. Reconnect after changes.
+				</p>
+				<Button variant="outline" size="sm" onclick={() => copy('toml', data.configurationToml)}
+					>{copied === 'toml' ? 'Copied' : 'Copy TOML'}</Button
+				>
+				<pre class="overflow-x-auto text-sm whitespace-pre"><code>{data.configurationToml}</code
+					></pre>
+				<a
+					class="link"
+					href="https://learn.chatgpt.com/docs/extend/mcp"
+					target="_blank"
+					rel="noreferrer">Client setup documentation</a
+				>
+			</div>
+		</details>
 		<div class="inset-surface px-4 py-3 text-sm">
-			<p class="font-medium">Connection check</p>
+			<p class="font-medium">Connection verification pending</p>
 			<p class="mt-1 text-muted-foreground">
-				In ChatGPT Work, ask: “List my jobs in Saturday.” A result from <code>list_jobs</code> confirms
-				the local MCP process can read this database.
+				Ask the client to call <code>get_saturday_info</code>, even when you have no jobs. Compare
+				installation <code class="break-all">{data.installation.installation_id}</code>, dataset
+				<code class="break-all">{data.diagnostics.datasetId}</code>, and build
+				<code>{data.buildInfo.id}</code>. Then read a known job with <code>get_job</code>. Copying
+				configuration does not verify a connection. Repeat after updates or changing clients.
 			</p>
 		</div>
 	</SectionCard>

@@ -14,54 +14,76 @@ You do not need to keep Saturday's web server running for the assistant to work.
 ## Connect
 
 1. Open Saturday and go to **Settings → Connect an assistant**.
-2. Copy the **Local desktop configuration**. It looks like this, with the paths for your computer:
+2. Copy the **Local desktop configuration**. Use the generated values for your computer, including the optional PDF cache. The structure is:
 
-   ```json
-   {
-   	"mcpServers": {
-   		"saturday": {
-   			"command": "/path/to/node",
-   			"args": ["/path/to/saturday/build/mcp/index.js"],
-   			"env": { "SATURDAY_DB_PATH": "/path/to/saturday/data/saturday.db" }
-   		}
-   	}
-   }
-   ```
+```json
+{
+	"mcpServers": {
+		"saturday": {
+			"command": "/path/to/node",
+			"args": ["/path/to/saturday/build/mcp/index.js"],
+			"env": {
+				"SATURDAY_INSTALLATION_PATH": "/path/to/data/installation.json",
+				"SATURDAY_PROJECT_ROOT": "/path/to/saturday",
+				"SATURDAY_DB_PATH": "/path/to/data/saturday.db",
+				"SATURDAY_FILES_PATH": "/path/to/data/files",
+				"SATURDAY_EXTENSION_STATE_PATH": "/path/to/data/extensions",
+				"SATURDAY_EXTENSIONS_PATH": "/path/to/extension-packages"
+			}
+		}
+	}
+}
+```
 
 3. Add it to your assistant app's MCP server settings under the name `saturday`, then reconnect or restart the app.
-4. Ask the assistant to list your jobs in Saturday. If it returns the jobs you see in the browser, the connection works.
+4. Ask the assistant to call `get_saturday_info` and compare installation, dataset and build identities shown in Settings. This works even with no jobs. Then read a known numbered job when available. Copying configuration alone does not verify a connection.
 
 If **Settings** says the MCP entry point is missing, run `npm run build` and reload the page.
 
 ## ChatGPT Work (local desktop)
 
-ChatGPT Work is the selected beta verification target, but its real-client connection and workflows are not yet certified. Settings' JSON is not a universal client configuration. OpenAI documents that the desktop app shares `~/.codex/config.toml` with Codex; append a server table using your actual absolute paths, preserving existing configuration:
+ChatGPT Work is the selected beta target; real-client connection and reconnect remain pending. For clients/modes that support local execution, Settings provides a complete **ChatGPT / Codex local configuration (TOML)** snippet with this installation's absolute runtime, descriptor and storage paths. Merge only the Saturday tables, keeping all other settings and a private recovery copy; replace existing Saturday tables rather than appending duplicates. OpenAI documents the shared local `config.toml` and its client MCP controls. Availability depends on execution mode and managed policy. Hosted ChatGPT Work chats do not read local configuration; Saturday exposes local stdio, not a remote MCP URL. See [OpenAI's current MCP configuration documentation](https://learn.chatgpt.com/docs/extend/mcp).
 
-```toml
-[mcp_servers.saturday]
-command = "/absolute/path/to/node"
-args = ["/absolute/path/to/saturday/build/mcp/index.js"]
+Configuration can also be generated without opening the UI:
 
-[mcp_servers.saturday.env]
-SATURDAY_DB_PATH = "/absolute/path/to/saturday/data/saturday.db"
-SATURDAY_FILES_PATH = "/absolute/path/to/saturday/data/files"
+```sh
+npm run assistant -- config --format toml
+npm run assistant -- config --format json
 ```
 
-Use local execution, reconnect, and verify a Saturday tool call. Hosted Work chats use plugins/remote connections and do not read this local configuration. Saturday currently exposes local stdio, so a hosted connection would need additional transport/deployment work. See [OpenAI's MCP configuration documentation](https://learn.chatgpt.com/docs/extend/mcp).
+For a managed installation use its absolute Node path and `<code_root>/scripts/assistant.mjs`, adding `--installation <absolute-descriptor>`. Generation does not modify a client or certify connectivity.
+
+## Claude Desktop and other JSON clients
+
+Use Settings' JSON for clients accepting `mcpServers`. Claude Desktop's documented file is `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, or `%APPDATA%\Claude\claude_desktop_config.json` on Windows. Claude Code has separate configuration; do not assume the desktop chat entry connects Code. Linux app support does not imply Claude Desktop availability. See the [MCP local-client guide](https://modelcontextprotocol.io/docs/2026-07-28/develop/connect-local-servers).
+
+After reviewing the client file, optionally use the explicit merge helper:
+
+```sh
+npm run assistant -- connect --config "/absolute/client/config.json" --confirm
+npm run assistant -- disconnect --config "/absolute/client/config.json" --confirm
+```
+
+Only the Saturday entry changes; other settings/servers remain. Existing files receive a private byte-for-byte recovery copy. Invalid JSON, linked paths, concurrent helper operations and conflicting entries fail instead of overwriting. A reviewed replacement requires `--replace --confirm`; removal refuses a changed or different-installation entry. Reconnect afterward. Stop the client process before updates, and regenerate configuration when runtime paths change. Remove authorized client entries before app uninstall; uninstall retains client configuration by default.
+
+## Verify the connection
+
+Settings always labels the real-client check **pending** until you perform it; it does not infer success from copying or building. Ask the client to call `get_saturday_info` and compare installation/dataset/build identities. Then read a known job when available. Repeat after reconnecting following an update. Do not share private paths/configuration publicly. A protocol smoke result proves Saturday's stdio response, not the real client's access.
 
 For beta verification, use disposable paths for both stores. Verify discovery; create/read/edit/search a numbered job; create and link a person; create/read/edit a document and select/read Master CV; provoke a validation error; create a backup, review its restore preview and confirm restoration of the disposable data. Restart/rebuild Saturday and reconnect the client, then read the same numbered records. Record the client version, execution mode and exact Saturday build. Passing automated MCP protocol tests does not certify these client workflows.
 
 ## What your assistant can do
 
-| Tool                | What it does                                                               | Changes data |
-| ------------------- | -------------------------------------------------------------------------- | ------------ |
-| `list_jobs`         | Filters and sorts jobs with counts and pagination (50 per page by default) | No           |
-| `get_job`           | Reads one job with its notes and dated update history                      | No           |
-| `create_job`        | Adds a job with a title, company, and optional details                     | Yes          |
-| `edit_job`          | Updates job details; omitted fields are preserved                          | Yes          |
-| `set_job_follow_up` | Sets/reschedules one follow-up, or clears it with a null date              | Yes          |
-| `set_job_score`     | Sets assistant score and its explanation, read-only in the UI              | Yes          |
-| `add_job_update`    | Records a dated progress step or note on an existing job                   | Yes          |
+| Tool                | What it does                                                                       | Changes data |
+| ------------------- | ---------------------------------------------------------------------------------- | ------------ |
+| `get_saturday_info` | Reads installation/dataset identity, build and record counts for connection checks | No           |
+| `list_jobs`         | Filters and sorts jobs with counts and pagination (50 per page by default)         | No           |
+| `get_job`           | Reads one job with its notes and dated update history                              | No           |
+| `create_job`        | Adds a job with a title, company, and optional details                             | Yes          |
+| `edit_job`          | Updates job details; omitted fields are preserved                                  | Yes          |
+| `set_job_follow_up` | Sets/reschedules one follow-up, or clears it with a null date                      | Yes          |
+| `set_job_score`     | Sets assistant score and its explanation, read-only in the UI                      | Yes          |
+| `add_job_update`    | Records a dated progress step or note on an existing job                           | Yes          |
 
 | `create_backup` | Saves a local backup and returns its ID | Creates a file |
 | `list_backups` | Lists database artifacts, including recovery backups | No |

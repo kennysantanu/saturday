@@ -632,3 +632,105 @@ export async function refreshLoginStartup(previous, next, enabled) {
 	);
 	// The updated file is loaded at the next sign-in. Do not run a login job now or revive a stopped UI.
 }
+
+// Only resolved installation values are exposed; never inherit unrelated process secrets.
+export function assistantConfiguration(value = getInstallation()) {
+	const env = {
+		...(value.descriptor_path ? { SATURDAY_INSTALLATION_PATH: value.descriptor_path } : {}),
+		SATURDAY_PROJECT_ROOT: value.code_root,
+		SATURDAY_DB_PATH: value.database,
+		SATURDAY_FILES_PATH: value.files,
+		SATURDAY_EXTENSION_STATE_PATH: value.extension_state,
+		SATURDAY_EXTENSIONS_PATH: value.extension_code,
+		...(value.pdf_cache ? { PUPPETEER_CACHE_DIR: value.pdf_cache } : {})
+	};
+	const entry = {
+		command: value.node_path,
+		args: [join(value.code_root, 'build', 'mcp', 'index.js')],
+		env
+	};
+	const toml = [
+		'[mcp_servers.saturday]',
+		`command = ${JSON.stringify(entry.command)}`,
+		`args = ${JSON.stringify(entry.args)}`,
+		'',
+		'[mcp_servers.saturday.env]',
+		...Object.entries(env).map(([key, val]) => `${key} = ${JSON.stringify(val)}`)
+	].join('\n');
+	return { entry, json: JSON.stringify({ mcpServers: { saturday: entry } }, null, 2), toml };
+}
+
+// Explicit caller-selected JSON clients only. TOML stays client-managed to preserve its syntax.
+export async function configureAssistantJson(
+	path,
+	{ remove = false, replace = false, confirm = false, value = getInstallation() } = {}
+) {
+	if (!confirm) throw new Error('Review the client file and authorize this change with --confirm.');
+	if (!isAbsolute(path)) throw new Error('Choose an absolute client configuration path.');
+	// Reject linked parents as well as a linked target; never redirect a config write.
+	for (let current = path; ; current = dirname(current)) {
+		try {
+			if (lstatSync(current).isSymbolicLink())
+				throw new Error('Linked client configuration paths are not supported.');
+		} catch (error) {
+			if (error.code !== 'ENOENT') throw error;
+		}
+		if (dirname(current) === current) break;
+	}
+	await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 });
+	const lock = await fs.open(`${path}.saturday.lock`, 'wx', 0o600);
+	try {
+		const original = existsSync(path) ? await fs.readFile(path, 'utf8') : null;
+		const config = original === null ? {} : JSON.parse(original);
+		const object = (v) => v && typeof v === 'object' && !Array.isArray(v);
+		if (!object(config) || (config.mcpServers !== undefined && !object(config.mcpServers)))
+			throw new Error('Expected a JSON object with an optional mcpServers object.');
+		const entry = assistantConfiguration(value).entry;
+		const existing = config.mcpServers?.saturday;
+		const canonical = (v) =>
+			Array.isArray(v)
+				? v.map(canonical)
+				: object(v)
+					? Object.fromEntries(
+							Object.keys(v)
+								.sort()
+								.map((key) => [key, canonical(v[key])])
+						)
+					: v;
+		const same =
+			existing && JSON.stringify(canonical(existing)) === JSON.stringify(canonical(entry));
+		if (remove && existing && !same)
+			throw new Error(
+				'The Saturday entry belongs to another installation or has changed. Review it manually.'
+			);
+		if (!remove && existing && !same && !replace)
+			throw new Error(
+				'A different Saturday entry exists. Review it before using --replace --confirm.'
+			);
+		if ((remove && !existing) || (!remove && same)) return { status: 'unchanged', verified: false };
+		if (remove) delete config.mcpServers.saturday;
+		else {
+			config.mcpServers ??= {};
+			config.mcpServers.saturday = entry;
+		}
+		const backup = original === null ? null : `${path}.saturday-${randomUUID()}.bak`;
+		if (backup) await fs.writeFile(backup, original, { flag: 'wx', mode: 0o600 });
+		// Detect an external editor before publication; recovery copy retains original bytes.
+		const latest = existsSync(path) ? await fs.readFile(path, 'utf8') : null;
+		if (latest !== original)
+			throw new Error(
+				'Client configuration changed during preparation. Retry after closing the editor.'
+			);
+		await atomicJson(path, config);
+		return {
+			status: remove ? 'removed' : 'prepared',
+			path,
+			backup,
+			verified: false,
+			next: 'Reconnect the client and call get_saturday_info; compare installation and dataset identities in Settings.'
+		};
+	} finally {
+		await lock.close();
+		await fs.unlink(`${path}.saturday.lock`);
+	}
+}

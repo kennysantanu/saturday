@@ -8,6 +8,7 @@
 	},
 	"scripts": {
 		"setup": "node scripts/setup.mjs",
+		"assistant": "node scripts/assistant.mjs",
 		"dev": "node scripts/dev.mjs",
 		"build": "vite build && npm run build:mcp",
 		"build:mcp": "node scripts/build-mcp.mjs",
