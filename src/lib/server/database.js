@@ -1,27 +1,17 @@
+import { getInstallation, assertInstallationStorage } from './installation.js';
 import { migrations, applyMigrations, assertMigrationHistory } from './migrations.js';
 import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { assertManifestCompatibility } from './compatibility.js';
 import { ServiceError } from './validation.js';
-import { dirname, isAbsolute, resolve, join, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, resolve, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 export function getProjectRoot() {
-	if (process.env.SATURDAY_PROJECT_ROOT) return resolve(process.env.SATURDAY_PROJECT_ROOT);
-	const entry = process.argv[1] ? resolve(process.argv[1]) : '';
-	if (entry.endsWith(`${sep}build${sep}mcp${sep}index.js`)) return resolve(dirname(entry), '../..');
-	if (entry.endsWith(`${sep}build${sep}index.js`)) return resolve(dirname(entry), '..');
-	return fileURLToPath(new URL('../../../', import.meta.url));
+	return getInstallation().code_root;
 }
-
-const projectRoot = getProjectRoot();
-
 export function getDatabasePath() {
-	const configuredPath = process.env.SATURDAY_DB_PATH;
-	if (!configuredPath) return resolve(projectRoot, 'data', 'saturday.db');
-	return isAbsolute(configuredPath) ? configuredPath : resolve(projectRoot, configuredPath);
+	return getInstallation().database;
 }
-
 let recoveringFiles = false;
 export function withDatabaseRecovery(operation) {
 	recoveringFiles = true;
@@ -32,8 +22,7 @@ export function withDatabaseRecovery(operation) {
 	}
 }
 export function assertDatabaseAvailable() {
-	const filesRoot = resolve(getProjectRoot(), process.env.SATURDAY_FILES_PATH || 'data/files');
-	if (!recoveringFiles && existsSync(`${filesRoot}.state/pair-session.json`))
+	if (!recoveringFiles && existsSync(join(getInstallation().files_state, 'pair-session.json')))
 		throw Object.assign(
 			new Error(
 				'An interrupted coordinated restore requires offline recovery: npm run files -- recover-pair'
@@ -44,6 +33,7 @@ export function assertDatabaseAvailable() {
 
 export function openDatabase({ migrate = true } = {}) {
 	assertDatabaseAvailable();
+	assertInstallationStorage();
 	const path = getDatabasePath();
 	mkdirSync(dirname(path), { recursive: true });
 	const db = new DatabaseSync(path);
@@ -101,11 +91,7 @@ export function databaseIdentity() {
 }
 
 export function assertFileStorageCompatible() {
-	const path = resolve(
-		getProjectRoot(),
-		process.env.SATURDAY_FILES_PATH || 'data/files',
-		'manifest.json'
-	);
+	const path = resolve(getInstallation().files, 'manifest.json');
 	try {
 		assertManifestCompatibility(JSON.parse(readFileSync(path, 'utf8')));
 	} catch (error) {
@@ -124,12 +110,7 @@ export function assertFileStorageCompatible() {
 export function reserveJobFileIds(db) {
 	let manifest;
 	try {
-		manifest = JSON.parse(
-			readFileSync(
-				resolve(getProjectRoot(), process.env.SATURDAY_FILES_PATH || 'data/files', 'manifest.json'),
-				'utf8'
-			)
-		);
+		manifest = JSON.parse(readFileSync(join(getInstallation().files, 'manifest.json'), 'utf8'));
 	} catch (e) {
 		if (e.code === 'ENOENT') return;
 		throw e;

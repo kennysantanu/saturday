@@ -1,3 +1,10 @@
+import {
+	atomicJson,
+	syncDirectory,
+	acquireDirectoryLock as acquireInstallationLock
+} from '../installation.js';
+export { atomicJson } from '../installation.js';
+import { getInstallation, assertInstallationStorage } from '../installation.js';
 import * as fs from 'node:fs/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { resolve, dirname, join, basename } from 'node:path';
@@ -44,11 +51,12 @@ export function reject(code, message) {
 	throw new FileError(code, message);
 }
 export function filePaths() {
-	const root = resolve(getProjectRoot(), process.env.SATURDAY_FILES_PATH || 'data/files');
+	const config = getInstallation(),
+		root = config.files;
 	return {
 		root,
-		state: `${root}.state`,
-		backups: join(dirname(root), 'backups', 'files'),
+		state: config.files_state,
+		backups: config.file_backups,
 		legacyBackups: `${root}.backups`
 	};
 }
@@ -104,32 +112,6 @@ export async function regularPath(root, key, allowMissing = false) {
 		}
 	}
 	return join(root, key);
-}
-async function syncDirectory(path) {
-	const h = await fs.open(path, 'r');
-	try {
-		await h.sync();
-	} finally {
-		await h.close();
-	}
-}
-export async function atomicJson(path, value) {
-	await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 });
-	const temp = `${path}.${randomUUID()}.tmp`;
-	try {
-		const h = await fs.open(temp, 'wx', 0o600);
-		try {
-			await h.writeFile(JSON.stringify(value, null, 2));
-			await h.sync();
-		} finally {
-			await h.close();
-		}
-		await fs.rename(temp, path);
-		await syncDirectory(dirname(path));
-	} catch (error) {
-		await fs.rm(temp, { force: true });
-		throw error;
-	}
 }
 export async function ensureDiskSpace(bytes) {
 	try {
@@ -332,65 +314,16 @@ async function recover() {
 	await fs.rm(join(p.state, 'journal.json'));
 	await fs.rm(join(p.state, 'pending'), { recursive: true, force: true });
 }
-// Unique owner filenames prevent two stale-lock reclaimers from deleting a new owner.
-export async function acquireDirectoryLock(lock, { attempts = 100 } = {}) {
-	const owner = `${process.pid}-${randomUUID()}.owner`;
-	for (let attempt = 0; ; attempt++) {
-		try {
-			await fs.mkdir(lock);
-			await fs.writeFile(join(lock, owner), '', { flag: 'wx' });
-			return async () => {
-				await fs.unlink(join(lock, owner));
-				await fs.rmdir(lock);
-			};
-		} catch (e) {
-			if (e.code === 'ENOENT') continue;
-			if (e.code !== 'EEXIST') throw e;
-			let names;
-			try {
-				names = await fs.readdir(lock);
-			} catch (e) {
-				if (e.code === 'ENOENT') continue;
-				throw e;
-			}
-			let reclaimed = false;
-			for (const name of names) {
-				const match = /^(\d+)-[a-f0-9-]+\.owner$/.exec(name);
-				if (!match) continue;
-				try {
-					process.kill(Number(match[1]), 0);
-				} catch (e) {
-					if (e.code !== 'ESRCH') continue;
-					try {
-						await fs.unlink(join(lock, name));
-						await fs.rmdir(lock);
-						reclaimed = true;
-					} catch (e) {
-						if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(e.code)) throw e;
-					}
-				}
-			}
-			// A process can die between mkdir and publishing its owner file.
-			if (!names.length) {
-				try {
-					if (Date.now() - (await fs.stat(lock)).mtimeMs > 30000) {
-						await fs.rmdir(lock);
-						reclaimed = true;
-					}
-				} catch (e) {
-					if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(e.code)) throw e;
-				}
-			}
-			if (reclaimed) continue;
-			if (attempt >= attempts) {
-				if (!attempts) return null;
-				reject('BUSY', 'File store is busy. Try again after the current operation completes.');
-			}
-			await new Promise((r) => setTimeout(r, 50));
-		}
+export async function acquireDirectoryLock(lock, options) {
+	try {
+		return await acquireInstallationLock(lock, options);
+	} catch (e) {
+		if (e.code === 'BUSY') reject('BUSY', e.message);
+		throw e;
 	}
 }
 export async function withFileLock(operation, { initialize = true, allowSession = false } = {}) {
+	assertInstallationStorage({ allowFileRecovery: !initialize || allowSession });
 	const p = filePaths();
 	for (const path of [p.root, p.state, p.backups]) {
 		try {

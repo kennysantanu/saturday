@@ -1,3 +1,5 @@
+import { getInstallation } from '$lib/server/installation.js';
+import { spawn } from 'node:child_process';
 import {
 	extensionCatalog,
 	extensionPaths,
@@ -56,7 +58,8 @@ export async function load({ setHeaders, url }) {
 		extensionsError = extensionError(e).message;
 	}
 	const databasePath = getDatabasePath();
-	const nodePath = process.execPath;
+	const installation = getInstallation();
+	const nodePath = installation.node_path;
 	const mcpPath = join(getProjectRoot(), 'build', 'mcp', 'index.js');
 	const config = {
 		mcpServers: {
@@ -64,6 +67,9 @@ export async function load({ setHeaders, url }) {
 				command: nodePath,
 				args: [mcpPath],
 				env: {
+					...(installation.descriptor_path
+						? { SATURDAY_INSTALLATION_PATH: installation.descriptor_path }
+						: {}),
 					SATURDAY_DB_PATH: databasePath,
 					SATURDAY_FILES_PATH: filePaths().root,
 					SATURDAY_EXTENSION_STATE_PATH: extensionPaths().state,
@@ -100,6 +106,8 @@ export async function load({ setHeaders, url }) {
 		extensionsEnabled,
 		extensionsError,
 		diagnostics,
+		installation,
+		folderSupported: ['darwin', 'win32', 'linux'].includes(process.platform),
 		backupHistory,
 		backupPage,
 		backupPages,
@@ -150,6 +158,34 @@ async function boundedForm(request) {
 	}).formData();
 }
 export const actions = {
+	openFolder: async () => {
+		try {
+			const path = getInstallation().data_root;
+			if (!existsSync(path)) throw new Error('The data directory is unavailable.');
+			const command =
+				process.platform === 'darwin'
+					? 'open'
+					: process.platform === 'win32'
+						? 'explorer.exe'
+						: process.platform === 'linux'
+							? 'xdg-open'
+							: null;
+			if (!command)
+				throw new Error('Opening a folder is unavailable on this platform. Copy its path instead.');
+			await new Promise((resolve, reject) => {
+				const child = spawn(command, [path], { stdio: 'ignore', shell: false });
+				child.once('error', reject);
+				child.once('close', (code) =>
+					code === 0
+						? resolve()
+						: reject(new Error('Could not open the folder. Copy its path instead.'))
+				);
+			});
+			return { folderOpened: true };
+		} catch (e) {
+			return fail(400, { storageError: e.message });
+		}
+	},
 	extensions: async ({ request }) => {
 		try {
 			const v = await request.formData();

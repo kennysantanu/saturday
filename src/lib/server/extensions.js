@@ -1,3 +1,4 @@
+import { getInstallation, assertInstallationStorage } from './installation.js';
 // Shared extension lifecycle, database, and recovery. Extension code is trusted, not sandboxed.
 import * as fs from 'node:fs/promises';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
@@ -33,14 +34,14 @@ export const extensionError = (e) =>
 					message: 'The extension failed. Check its compatibility and diagnostics.'
 				};
 export function extensionPaths() {
-	const state = resolve(
-		process.env.SATURDAY_EXTENSION_STATE_PATH || join(dirname(getDatabasePath()), 'extensions')
-	);
+	assertInstallationStorage();
+	const config = getInstallation(),
+		state = config.extension_state;
 	return {
 		state,
 		catalog: join(state, 'catalog.json'),
-		code: resolve(process.env.SATURDAY_EXTENSIONS_PATH || join(getProjectRoot(), 'extensions')),
-		backups: `${state}.backups`
+		code: config.extension_code,
+		backups: config.extension_backups
 	};
 }
 export function extensionId(id) {

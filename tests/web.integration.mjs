@@ -45,6 +45,11 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 			await new Promise((r) => setTimeout(r, 100));
 		}
 		assert.ok(ready, logs);
+		const health = await (await fetch(`${base}/health`)).json();
+		assert.equal(health.app, 'saturday');
+		assert.equal(health.status, 'ready');
+		assert.ok(health.installation_id);
+		assert.ok(!JSON.stringify(health).includes(scratch));
 		const settingsResponse = await fetch(`${base}/settings`);
 		assert.equal(settingsResponse.headers.get('x-saturday-build'), readBuildInfo().id);
 		const settings = await settingsResponse.text();

@@ -838,7 +838,7 @@ test('disk-full metadata publication keeps existing backups and database intact,
 	const { syncBuiltinESMExports } = await import('node:module');
 	const job = createJob({ job_title: 'Preserve me', company_name: 'Example' });
 	const previous = backups.createBackup();
-	const directory = fs.realpathSync(backups.getBackupPaths().backups);
+	const directory = backups.getBackupPaths().backups;
 	const before = readdirSync(directory).sort();
 	const write = fs.writeFileSync;
 	try {

@@ -155,6 +155,8 @@ export async function installExtension(
 			} else if (existing?.manifest.database)
 				rejectExtension('COMPATIBILITY', 'An update cannot discard an existing database.');
 			await build(candidateRoot, {
+				SATURDAY_INSTALLATION_PATH: '',
+				SATURDAY_SETUP_STAGING: '1',
 				SATURDAY_PROJECT_ROOT: candidateRoot,
 				SATURDAY_EXTENSION_STATE_PATH: candidateState,
 				SATURDAY_EXTENSIONS_PATH: candidateCode

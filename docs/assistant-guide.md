@@ -200,3 +200,5 @@ Users can read job/person numbers from lists and detail headings. When a user sa
 ## Extension tools
 
 Enabled compatible extensions expose `extension_<id>_<local_tool>` tools through the same Saturday MCP server. Installing code requires restarting/reconnecting; enable/disable is checked on each call and tool discovery refreshes within a second. Reconnect if your client caches discovery. Interview Practice has list/get/create/edit/delete question tools; use fresh revisions for edits/deletes, confirm deletion, and save proposed answers only when requested. Core backups exclude extension databases. See the [extension guide](extension-guide.md).
+
+Settings-generated configuration includes `SATURDAY_INSTALLATION_PATH` after setup. Keep that descriptor shared with CLI/web so every client uses the same installation. Conflicting path overrides are rejected; source installations without a descriptor retain their existing developer paths. Use `npm run setup -- --json` and `npm run status -- --json` for local setup/readiness. An installation-ready HTTP check is separate from verifying an actual assistant tool call.

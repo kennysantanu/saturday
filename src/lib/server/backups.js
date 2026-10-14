@@ -1,3 +1,4 @@
+import { getInstallation } from './installation.js';
 import { z } from 'zod';
 import {
 	networkInputSchema,
@@ -92,9 +93,9 @@ function paths() {
 	const p = root();
 	return {
 		database: p,
-		backups: join(dirname(p), 'backups', 'database'),
+		backups: getInstallation().database_backups,
 		legacyBackups: `${p}.backups`,
-		restore: `${p}.restore`
+		restore: getInstallation().database_restore
 	};
 }
 export function getBackupPaths() {
@@ -808,15 +809,8 @@ export async function restoreDatabaseWithFiles(restoreId, fileOperation) {
 function fileDatasetId() {
 	assertFileStorageCompatible();
 	try {
-		return JSON.parse(
-			readFileSync(
-				join(
-					resolve(getProjectRoot(), process.env.SATURDAY_FILES_PATH || 'data/files'),
-					'manifest.json'
-				),
-				'utf8'
-			)
-		).dataset_id;
+		return JSON.parse(readFileSync(join(getInstallation().files, 'manifest.json'), 'utf8'))
+			.dataset_id;
 	} catch (e) {
 		if (e.code === 'ENOENT') return null;
 		throw e;
@@ -824,7 +818,7 @@ function fileDatasetId() {
 }
 function fileFolderImpact(incoming) {
 	try {
-		const root = resolve(getProjectRoot(), process.env.SATURDAY_FILES_PATH || 'data/files');
+		const root = getInstallation().files;
 		const m = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
 		const ids = new Set(
 			incoming
@@ -858,10 +852,7 @@ export function markIncompleteBackup(backupId, message) {
 }
 export const inspectBackupPath = (path) => safe(() => inspectPath(path));
 export function assertBackupDeletionAllowed(backupId) {
-	const pairSession = join(
-		`${resolve(getProjectRoot(), process.env.SATURDAY_FILES_PATH || 'data/files')}.state`,
-		'pair-session.json'
-	);
+	const pairSession = join(getInstallation().files_state, 'pair-session.json');
 	if (existsSync(pairSession) && json(pairSession).recovery_database_id === backupId)
 		fail('database_busy', 'This backup is required for interrupted restore recovery.');
 
