@@ -1,5 +1,5 @@
 import { serverSummary, controlServer, validServerSession } from '$lib/server/server-lifecycle.js';
-import { getInstallation } from '$lib/server/installation.js';
+import { getInstallation, loginStartupStatus, setLoginStartup } from '$lib/server/installation.js';
 import { spawn } from 'node:child_process';
 import {
 	extensionCatalog,
@@ -77,6 +77,7 @@ export async function load({ setHeaders, url }) {
 					...(installation.descriptor_path
 						? { SATURDAY_INSTALLATION_PATH: installation.descriptor_path }
 						: {}),
+					...(installation.pdf_cache ? { PUPPETEER_CACHE_DIR: installation.pdf_cache } : {}),
 					SATURDAY_DB_PATH: databasePath,
 					SATURDAY_FILES_PATH: filePaths().root,
 					SATURDAY_EXTENSION_STATE_PATH: extensionPaths().state,
@@ -115,6 +116,7 @@ export async function load({ setHeaders, url }) {
 		diagnostics,
 		installation,
 		server,
+		loginStartup: await loginStartupStatus(),
 		folderSupported: ['darwin', 'win32', 'linux'].includes(process.platform),
 		backupHistory,
 		backupPage,
@@ -166,6 +168,24 @@ async function boundedForm(request) {
 	}).formData();
 }
 export const actions = {
+	loginStartup: async ({ request, cookies, url }) => {
+		if (
+			request.headers.get('origin') !== url.origin ||
+			url.origin !== process.env.ORIGIN ||
+			!validServerSession(cookies.get('saturday-server-session'))
+		)
+			return fail(403, {
+				loginError: 'Startup controls require this installation’s local browser session.'
+			});
+		try {
+			const values = await request.formData();
+			const result = await setLoginStartup(values.get('enabled') === 'on');
+			if (!result.available) throw new Error(result.error);
+			return { loginSaved: true };
+		} catch (e) {
+			return fail(409, { loginError: e.message });
+		}
+	},
 	serverControl: async ({ request, cookies, url, setHeaders }) => {
 		if (
 			request.headers.get('origin') !== url.origin ||

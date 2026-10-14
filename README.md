@@ -35,33 +35,52 @@ To get started in the app, choose **Add job**. Only the job title and company ar
 
 Saturday is in unversioned development toward `0.1.0`. Breaking changes may require an explicit data reset; development databases and backups have no cross-build compatibility guarantee. Formal release versioning and supported migrations begin at `0.1.0`. See the [development policy and provisional support matrix](docs/contributing.md#development-toward-010) before testing with important data.
 
-Saturday runs from source with Node.js; a packaged installer is not available yet. You need Node.js 22.13 or newer and npm 10 or newer. Check with `node -v` and `npm -v`. No separate database is required. Setup also installs managed Chrome for HTML-to-PDF generation; basic jobs/documents work without Chrome. Commands below use macOS and Linux shell syntax.
+The development installer prepares a private Node/npm runtime, builds Saturday, prepares optional PDF export and opens the Dashboard. No paid license, administrator access, global Node replacement or Git installation is required for this installer. Git is needed separately for Git-sourced extensions.
+
+**Install with your assistant:** give an assistant with local process/filesystem access this repository and the following request:
+
+> Read Saturday's README and docs/agent-guide.md. Install Saturday using the installer for my OS, preserve any existing workspace, and open the Dashboard. Help me connect my assistant using its supported local MCP configuration. Report the local address, data path and whether a real MCP tool call succeeded.
+
+**Install manually:** download this revision's repository archive, extract it, and open Terminal or Command Prompt in that folder. During development, use its local source snapshot:
+
+```sh
+# macOS or Linux
+sh install.sh --source .
+```
+
+```bat
+rem Windows Command Prompt
+install.bat --source .
+```
+
+The first install still uses a terminal. The installer creates an **Open Saturday** desktop shortcut where the OS permits it; use that shortcut for daily access. If shortcut creation is blocked, the installer reports an exact reopen command. Linux desktops may require **Allow Launching** for the generated desktop file. Installation never bypasses OS protections. A failed PDF setup can continue without PDF; rerun the same installer with `--retry-pdf` to download and validate Chrome again. `--skip-pdf` deliberately omits PDF setup.
+
+Without `--source`, installation resolves official GitHub `main` to one exact commit and verifies the downloaded source against its Git blob hashes. Use this remote path after this installer revision is available on `main`; public standalone download commands are not published yet. Reinstall reopens/repairs the existing installation without replacing its code, relocating data, or changing login startup. Automatic updates are not implemented; the updater is a later phase.
+
+Initial implementation targets are macOS 14+ (Apple silicon/x64), Windows 11 x64, and Ubuntu 22.04/24.04 x64 with a graphical GNOME session. macOS has light disposable-install evidence; Windows/Linux runtime, reboot/login, desktop launch and full accessibility certification remain pending. Other architectures, distributions and headless sessions are not advertised installer targets yet. Shell prerequisites: curl/tar and shasum (macOS) or sha256sum (Linux); Windows requires curl.exe, tar.exe, certutil.exe and Windows Script Host for shortcuts. Restricted devices receive a fallback/error, not elevated installation.
+
+**Source development:** Node.js 22.13+ and npm 10+ are still supported for the existing source commands:
 
 ```sh
 git clone https://github.com/kennysantanu/saturday.git
 cd saturday
 npm run setup
-npm run start
+npm run open
 ```
 
-`npm run setup` installs dependencies, builds web/MCP, validates PDF export (optional on failure), and safely prepares existing/missing stores. It persists an installation descriptor outside application code; repeat setup preserves existing data. Use `npm run setup -- --json` for a machine-readable result. Saturday listens only on this computer.
-
-For daily use, run `npm run open`: it starts Saturday in the background and opens your browser after readiness, or reuses the running server. Closing the browser or launch terminal leaves it running. `npm run start` keeps a foreground terminal with Ctrl-C to stop the server it created; attaching to an existing server leaves it running.
+`npm run setup` safely prepares existing/missing stores and persists an installation descriptor; repeat setup preserves data. `npm run open` starts or reuses Saturday in the background and opens your browser after readiness. Closing the browser or launch terminal leaves it running. `npm run start` retains foreground developer use; Ctrl-C stops the server it created.
 
 ```sh
-npm run open       # start/reuse in the background and open the Dashboard
-npm run status     # report this installation's actual address and readiness
-npm run restart    # acknowledge a restart; check status for readiness
+npm run status     # this installation's actual address and readiness
+npm run restart    # request a restart; status confirms readiness
 npm run stop       # stop only this installation's UI server
 ```
 
-Settings → Saturday server also provides Restart and confirmed Stop. Busy data operations block both controls. Stopping the UI leaves client-owned MCP access available. Start again with `npm run open`. If the preferred port is occupied by another app, Saturday chooses a free local port and reports it; status uses the saved address. You can request a preferred port with `PORT=3100 npm run open` (macOS/Linux) or `set PORT=3100` before the command in Windows Command Prompt. Desktop shortcuts and optional start at login remain planned.
-
-If you want an assistant to install Saturday into a folder you choose, give it this repository URL and the [agent setup guide](docs/agent-guide.md).
+Settings → Saturday server provides Restart, confirmed Stop, and **Start at login**, off by default. Login startup starts web after you sign in without opening the browser; Stop leaves it stopped until you reopen or sign in again. Active data operations block lifecycle controls. Client-owned MCP remains available with web off. Occupied preferred ports fall back to another local port without stopping unrelated apps.
 
 ## Updating
 
-Stop the UI with `npm run stop` and disconnect assistant MCP sessions before updating, then run:
+For source checkouts, stop the UI with `npm run stop` and disconnect assistant MCP sessions before updating, then run:
 
 ```sh
 git pull
@@ -69,11 +88,11 @@ npm run setup
 npm run start
 ```
 
-`npm run setup` is safe to repeat against compatible storage and never intentionally resets your data. During unversioned development, breaking format changes may instead require a documented explicit reset. Keep backups with the matching build if you need to retain development data.
+Managed-install updates are not implemented yet; do not run Git commands in an archive-based installation. Reinstall preserves its current code. `npm run setup` is safe to repeat against compatible storage and never intentionally resets your data. During unversioned development, breaking format changes may instead require a documented explicit reset. Keep backups with the matching build if you need to retain development data.
 
 ## Your data and privacy
 
-Saturday saves your jobs in `data/saturday.db` inside the cloned repository. **Settings** shows the file's full path. To choose another location, set `SATURDAY_DB_PATH` before setup and startup. An absolute path is used as given; a relative path is resolved from the repository folder. The `data/` folder is excluded from Git.
+Managed installation keeps code, runtime and data separate: macOS uses `~/Library/Application Support/Saturday`, Windows `%LOCALAPPDATA%\Saturday`, and Linux `${XDG_DATA_HOME:-~/.local/share}/saturday`. Source setup keeps `data/saturday.db` inside the cloned repository. **Settings** shows the file's full path. To choose another location, set `SATURDAY_DB_PATH` before setup and startup. An absolute path is used as given; a relative path is resolved from the repository folder. The `data/` folder is excluded from Git.
 
 Your data stays on your computer, and Saturday does not collect anything. If you connect an assistant, the privacy of what it reads depends on that assistant's provider, so review their terms before sharing sensitive details.
 
@@ -120,4 +139,4 @@ Jobs and Network show readable record numbers for assistant requests. Settings �
 
 Optional trusted extensions add one page, an independent SQLite database, and namespaced MCP tools. Enable the master switch in Settings; manage installed extensions in Extensions. Interview Practice is included as a portable starter package. See the [extension guide](docs/extension-guide.md) for installation, authoring and independent backup/restore. Core backups exclude extension databases.
 
-Source setup keeps existing paths and stores `installation.json` beside the database. Web, CLI and MCP share it via `SATURDAY_INSTALLATION_PATH`. Setup records progress/logs for retry; missing initialized storage fails instead of creating an empty replacement. `npm run status -- --json` verifies the installation through `/health`, not just HTTP success. Default per-user OS roots are defined for future bootstrap installation; desktop installers/shortcuts and login startup remain planned. Background UI launch and authenticated Settings Stop/Restart are available.
+Source setup keeps existing paths and stores `installation.json` beside the database. Web, CLI and MCP share it via `SATURDAY_INSTALLATION_PATH`. Setup records progress/logs for retry; missing initialized storage fails instead of creating an empty replacement. `npm run status -- --json` verifies the installation through `/health`, not just HTTP success. Managed bootstrap uses the per-user OS roots listed above. Private runtime provisioning, desktop shortcuts and optional login startup are implemented. Full platform verification and the updater remain planned.

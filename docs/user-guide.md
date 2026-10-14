@@ -106,4 +106,12 @@ Settings shows your data directory with **Open folder** and selectable installat
 
 Settings → Saturday server shows whether the UI is managed and provides Restart and Stop server. Stop asks for confirmation; active data or backup operations must finish first. Closing your browser does not stop Saturday. Stopping the UI leaves an already connected assistant's MCP process available.
 
-Run `npm run open` from the repository to start or reuse Saturday and open the Dashboard. `npm run stop` stops the owned UI; `npm run restart` requests a restart and `npm run status` checks readiness and its actual local address. The Settings page reconnects after a restart, with a timeout and recovery instructions if startup fails. Without JavaScript, reopen or reload once status is ready. Keep the displayed log path when troubleshooting. Desktop shortcuts and optional start at login are not available yet.
+Run `npm run open` from the repository to start or reuse Saturday and open the Dashboard. `npm run stop` stops the owned UI; `npm run restart` requests a restart and `npm run status` checks readiness and its actual local address. The Settings page reconnects after a restart, with a timeout and recovery instructions if startup fails. Without JavaScript, reopen or reload once status is ready. Keep the displayed log path when troubleshooting. Desktop shortcuts and optional Start at login are available through the development installer.
+
+## Installing and reopening Saturday
+
+The development installer uses a private runtime and a separate managed workspace. Follow the OS commands in [README](../README.md#install-and-start); first installation uses Terminal or Command Prompt. Use the created **Open Saturday** desktop shortcut afterward. If permissions or Windows Script Host block shortcut creation, the installer reports a command that opens the same workspace. Linux may ask you to allow launching its desktop file.
+
+Settings → Saturday server → **Start at login** is off by default. Save the checkbox to start the UI after signing in, without opening a browser. Reinstall preserves the actual startup registration. Explicit Stop keeps Saturday stopped until you reopen it or sign in again. If the OS reports startup unavailable, use the shortcut/CLI and retain the diagnostic message.
+
+PDF setup can continue without export. Retry using the same installer with `--retry-pdf`; Chrome stays in the managed runtime cache. Reinstall preserves installed code and data; it is not an update command. Managed updates/removal and full platform verification are still later installation phases.

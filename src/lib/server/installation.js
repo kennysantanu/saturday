@@ -130,6 +130,13 @@ export function validateInstallation(value) {
 			resolve(value[key]) !== value[key]
 		)
 			throw new Error(`Installation ${key} must be an absolute resolved path.`);
+	if (
+		value.pdf_cache !== undefined &&
+		(typeof value.pdf_cache !== 'string' ||
+			!isAbsolute(value.pdf_cache) ||
+			resolve(value.pdf_cache) !== value.pdf_cache)
+	)
+		throw new Error('PDF cache must be an absolute resolved path.');
 	return value;
 }
 export function getInstallation() {
@@ -181,7 +188,8 @@ export function installationEnvironment(value = getInstallation()) {
 		SATURDAY_DB_PATH: value.database,
 		SATURDAY_FILES_PATH: value.files,
 		SATURDAY_EXTENSION_STATE_PATH: value.extension_state,
-		SATURDAY_EXTENSIONS_PATH: value.extension_code
+		SATURDAY_EXTENSIONS_PATH: value.extension_code,
+		...(value.pdf_cache ? { PUPPETEER_CACHE_DIR: value.pdf_cache } : {})
 	};
 }
 
@@ -276,4 +284,293 @@ export async function acquireDirectoryLock(lock, { attempts = 100 } = {}) {
 			await new Promise((r) => setTimeout(r, 50));
 		}
 	}
+}
+
+// Platform launchers use fixed operations and a descriptor, never caller-provided shell code.
+const shellQuote = (s) => "'" + String(s).replaceAll("'", "'\\''") + "'";
+const xml = (s) =>
+	String(s)
+		.replaceAll('&', '&amp;')
+		.replaceAll('<', '&lt;')
+		.replaceAll('>', '&gt;')
+		.replaceAll('"', '&quot;');
+const windowsArg = (s) =>
+	'"' +
+	String(s)
+		.replace(/(\\*)"/g, '$1$1\\"')
+		.replace(/(\\+)$/g, '$1$1') +
+	'"';
+const desktopArg = (s) =>
+	'"' +
+	String(s)
+		.replaceAll('\\', '\\\\')
+		.replaceAll('"', '\\"')
+		.replaceAll('`', '\\`')
+		.replaceAll('$', '\\$')
+		.replaceAll('%', '%%') +
+	'"';
+export function launcherArtifacts(
+	value,
+	{ platform = process.platform, home = homedir(), env = process.env, desktop } = {}
+) {
+	if (!value.descriptor_path)
+		throw new Error('Run setup first to prepare an installation descriptor.');
+	for (const path of [value.node_path, value.code_root, value.descriptor_path, home, desktop || ''])
+		if (/[\r\n\0]/.test(path)) throw new Error('Launcher paths cannot contain line breaks.');
+	const platformPath = platform === 'win32' ? win32 : posix;
+	const id = value.installation_id,
+		short = id.slice(0, 8),
+		label = `app.saturday.${id}`;
+	const script = platformPath.join(value.code_root, 'scripts', 'start.mjs');
+	const args = (operation) => [
+		script,
+		...(operation === 'open' ? ['open'] : ['--background']),
+		'--installation',
+		value.descriptor_path
+	];
+	const marker = `Saturday installation ${id}`;
+	const configHome =
+		env.XDG_CONFIG_HOME && isAbsolute(env.XDG_CONFIG_HOME)
+			? env.XDG_CONFIG_HOME
+			: platformPath.join(home, '.config');
+	const desktopRoot = desktop || platformPath.join(home, 'Desktop');
+	const shell = `#!/bin/sh\n# ${marker}\nexec ${shellQuote(value.node_path)} ${args('open').map(shellQuote).join(' ')}\n`;
+	const loginArgs = [value.node_path, ...args('login')];
+	const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array>${loginArgs.map((a) => `<string>${xml(a)}</string>`).join('')}</array><key>RunAtLoad</key><true/><key>KeepAlive</key><false/><key>AbandonProcessGroup</key><true/><key>StandardOutPath</key><string>${xml(platformPath.join(value.logs, 'login.log'))}</string><key>StandardErrorPath</key><string>${xml(platformPath.join(value.logs, 'login.log'))}</string></dict></plist>\n`;
+	const desktopFile = (operation) =>
+		`[Desktop Entry]\n# ${marker}\nType=Application\nName=Open Saturday\nComment=Open your local career dashboard\nExec=${[value.node_path, ...args(operation)].map(desktopArg).join(' ').replaceAll('\\', '\\\\')}\nTerminal=false\nCategories=Office;\n`;
+	return {
+		marker,
+		label,
+		args,
+		shell,
+		desktop:
+			platform === 'darwin'
+				? platformPath.join(desktopRoot, `Open Saturday ${short}.app`)
+				: platform === 'win32'
+					? `Open Saturday ${short}.lnk`
+					: platformPath.join(desktopRoot, `saturday-${id}.desktop`),
+		login:
+			platform === 'darwin'
+				? platformPath.join(home, 'Library', 'LaunchAgents', `${label}.plist`)
+				: platform === 'win32'
+					? `Saturday ${id}.lnk`
+					: platformPath.join(configHome, 'autostart', `saturday-${id}.desktop`),
+		loginContent: platform === 'darwin' ? plist : desktopFile('login'),
+		desktopContent: desktopFile('open')
+	};
+}
+async function native(command, args, encoding = 'utf8') {
+	const { execFile } = await import('node:child_process');
+	return new Promise((res, rej) =>
+		execFile(command, args, { encoding, windowsHide: true, timeout: 15000 }, (e, stdout) =>
+			e
+				? rej(
+						new Error(
+							`OS integration failed (${command}). Check permissions/policy; use the CLI fallback.`
+						)
+					)
+				: res(stdout.trim())
+		)
+	);
+}
+async function ownedText(path, content, marker, mode = 0o600) {
+	await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 });
+	if (existsSync(path)) {
+		const stat = await fs.lstat(path);
+		if (
+			!stat.isFile() ||
+			stat.isSymbolicLink() ||
+			!(await fs.readFile(path, 'utf8')).includes(marker)
+		)
+			throw new Error('A launcher path is occupied by an unowned file. It was preserved.');
+	}
+	const temp = `${path}.${randomUUID()}.tmp`;
+	try {
+		await fs.writeFile(
+			temp,
+			path.endsWith('.js')
+				? content.replace(
+						/[^\x00-\x7F]/g,
+						(c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')
+					)
+				: content,
+			{ flag: 'wx', mode }
+		);
+		await fs.rename(temp, path);
+	} finally {
+		await fs.rm(temp, { force: true });
+	}
+}
+async function linuxDesktop(home) {
+	try {
+		const path = await native('xdg-user-dir', ['DESKTOP']);
+		if (isAbsolute(path) && path !== home) return path;
+	} catch {}
+	throw new Error('Desktop folder could not be resolved with xdg-user-dir. Use the CLI fallback.');
+}
+async function windowsShortcut(value, artifact, action, folder) {
+	const state = join(value.data_root, 'server.state');
+	await fs.mkdir(state, { recursive: true, mode: 0o700 });
+	const release = await acquireDirectoryLock(join(state, 'shortcut.lock'));
+	try {
+		const launcher = join(state, folder === 'Desktop' ? 'open-saturday.js' : 'login-saturday.js');
+		const command = [value.node_path, ...artifact.args(folder === 'Desktop' ? 'open' : 'login')]
+			.map(windowsArg)
+			.join(' ');
+		await ownedText(
+			launcher,
+			`// ${artifact.marker}\nvar shell = new ActiveXObject("WScript.Shell");\nvar code = shell.Run(${JSON.stringify(command)}, 0, true);\nif (code !== 0) WScript.Echo("Saturday could not start. Check the server log or reopen from Command Prompt.");\n`,
+			artifact.marker
+		);
+		const helper = join(state, 'shortcut-helper.js');
+		const helperContent = `// ${artifact.marker}\nvar a=WScript.Arguments, s=new ActiveXObject("WScript.Shell"), f=new ActiveXObject("Scripting.FileSystemObject");\nvar p=s.SpecialFolders(a(1))+"\\\\"+a(2), target=s.ExpandEnvironmentStrings("%SystemRoot%\\\\System32\\\\wscript.exe"), args=${JSON.stringify(windowsArg(launcher))};\nif(f.FileExists(p)){var old=s.CreateShortcut(p);if(old.Description!==a(3)||old.TargetPath.toLowerCase()!==target.toLowerCase()||old.Arguments!==args){WScript.Echo("foreign");WScript.Quit(0);}}\nif(a(0)==="read"){WScript.Echo(f.FileExists(p)?"enabled":"disabled");}\nelse if(a(0)==="remove"){if(f.FileExists(p))f.DeleteFile(p);WScript.Echo("disabled");}\nelse {var l=s.CreateShortcut(p);l.TargetPath=target;l.Arguments=args;l.Description=a(3);l.WorkingDirectory=${JSON.stringify(value.code_root)};l.Save();WScript.Echo(p);}\n`;
+		await ownedText(helper, helperContent, artifact.marker);
+		const result = await native(
+			'cscript.exe',
+			[
+				'//Nologo',
+				'//U',
+				helper,
+				action,
+				folder,
+				folder === 'Desktop' ? artifact.desktop : artifact.login,
+				artifact.marker
+			],
+			'utf16le'
+		);
+		if (result === 'foreign')
+			throw new Error('An unrelated shortcut occupies the path and was preserved.');
+		return result;
+	} finally {
+		await release();
+	}
+}
+export async function createDesktopShortcut({ desktop } = {}) {
+	const value = getInstallation();
+	const artifact = launcherArtifacts(value, {
+		...(desktop
+			? { desktop: resolve(desktop) }
+			: process.platform === 'linux'
+				? { desktop: await linuxDesktop(homedir()) }
+				: {})
+	});
+	if (process.platform === 'darwin') {
+		for (const path of [
+			artifact.desktop,
+			join(artifact.desktop, 'Contents'),
+			join(artifact.desktop, 'Contents', 'MacOS')
+		]) {
+			if (
+				existsSync(path) &&
+				((await fs.lstat(path)).isSymbolicLink() || !(await fs.lstat(path)).isDirectory())
+			)
+				throw new Error('Unsafe desktop application path. Existing files were preserved.');
+		}
+		if (
+			existsSync(artifact.desktop) &&
+			!(
+				await fs.readFile(join(artifact.desktop, 'Contents', 'MacOS', 'open-saturday'), 'utf8')
+			).includes(artifact.marker)
+		)
+			throw new Error('An unrelated application occupies the desktop path.');
+		await ownedText(
+			join(artifact.desktop, 'Contents', 'MacOS', 'open-saturday'),
+			artifact.shell,
+			artifact.marker,
+			0o700
+		);
+		const plist = `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${artifact.label}</string><key>CFBundleName</key><string>Open Saturday</string><key>CFBundleExecutable</key><string>open-saturday</string><key>CFBundlePackageType</key><string>APPL</string><key>SaturdayOwner</key><string>${artifact.marker}</string></dict></plist>`;
+		await ownedText(join(artifact.desktop, 'Contents', 'Info.plist'), plist, artifact.marker);
+	} else if (process.platform === 'win32')
+		return windowsShortcut(value, artifact, 'create', 'Desktop');
+	else if (process.platform === 'linux')
+		await ownedText(artifact.desktop, artifact.desktopContent, artifact.marker, 0o700);
+	else throw new Error('Desktop integration is unavailable on this OS.');
+	return artifact.desktop;
+}
+export async function loginStartupStatus() {
+	const value = getInstallation();
+	if (!value.descriptor_path)
+		return {
+			available: false,
+			enabled: false,
+			error: 'Run npm run setup before enabling login startup.'
+		};
+	const artifact = launcherArtifacts(value);
+	if (!['darwin', 'win32', 'linux'].includes(process.platform))
+		return { available: false, enabled: false, error: 'Login startup is unavailable on this OS.' };
+	try {
+		if (process.platform === 'win32')
+			return {
+				available: true,
+				enabled: (await windowsShortcut(value, artifact, 'read', 'Startup')) === 'enabled'
+			};
+		if (!existsSync(artifact.login)) return { available: true, enabled: false };
+		const stat = await fs.lstat(artifact.login);
+		if (
+			!stat.isFile() ||
+			stat.isSymbolicLink() ||
+			(await fs.readFile(artifact.login, 'utf8')) !== artifact.loginContent
+		)
+			throw new Error(
+				'Login registration differs from this installation. Repair it before changing startup.'
+			);
+		if (process.platform === 'darwin') {
+			const disabled = await native('launchctl', ['print-disabled', `gui/${process.getuid()}`]);
+			if (disabled.includes(`\"${artifact.label}\" => true`))
+				throw new Error(
+					'This login registration is disabled by macOS. Review its launchctl override before changing startup.'
+				);
+		}
+		return { available: true, enabled: true };
+	} catch (e) {
+		return { available: false, enabled: false, error: e.message };
+	}
+}
+export async function setLoginStartup(enabled) {
+	if (typeof enabled !== 'boolean') throw new Error('Choose whether to start at login.');
+	const { withServerActivity } = await import('./server-lifecycle.js');
+	return withServerActivity(async () => {
+		const value = getInstallation(),
+			artifact = launcherArtifacts(value);
+		const release = await acquireDirectoryLock(`${value.descriptor_path}.lock`, { attempts: 0 });
+		if (!release) throw new Error('Setup is running. Retry after it finishes.');
+		try {
+			const before = await loginStartupStatus();
+			if (!before.available) throw new Error(before.error);
+			if (before.enabled === enabled) return before;
+			if (process.platform === 'win32')
+				await windowsShortcut(value, artifact, enabled ? 'create' : 'remove', 'Startup');
+			else if (enabled) {
+				await fs.mkdir(value.logs, { recursive: true, mode: 0o700 });
+				await ownedText(
+					artifact.login,
+					artifact.loginContent,
+					process.platform === 'darwin' ? artifact.label : artifact.marker
+				);
+				// RunAtLoad only; KeepAlive is false. The short launch command exits and never respawns after Stop.
+				if (process.platform === 'darwin') {
+					try {
+						await native('launchctl', ['bootstrap', `gui/${process.getuid()}`, artifact.login]);
+					} catch (e) {
+						await fs.rm(artifact.login, { force: true });
+						throw e;
+					}
+				}
+			} else {
+				if (process.platform === 'darwin') {
+					try {
+						await native('launchctl', ['bootout', `gui/${process.getuid()}/${artifact.label}`]);
+					} catch {
+						/* An unloaded registration can still be removed for next login. */
+					}
+				}
+				await fs.rm(artifact.login);
+			}
+			return loginStartupStatus();
+		} finally {
+			await release();
+		}
+	});
 }
