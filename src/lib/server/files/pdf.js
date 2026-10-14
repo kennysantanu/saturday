@@ -1,4 +1,5 @@
 import puppeteer from 'puppeteer';
+import { getInstallation } from '../installation.js';
 import { existsSync } from 'node:fs';
 import { fileType } from '../../file-types.js';
 import {
@@ -12,12 +13,19 @@ import {
 } from './store.js';
 let rendering = false;
 export async function pdfReadiness() {
-	const ready = existsSync(await puppeteer.executablePath());
+	const installation = getInstallation();
+	const cache = installation.pdf_cache;
+	if (cache) process.env.PUPPETEER_CACHE_DIR = cache;
+	const ready =
+		existsSync(await puppeteer.executablePath()) &&
+		!(installation.mode === 'managed' && installation.setup?.pdf?.status === 'failed');
 	return {
 		ready,
 		message: ready
 			? 'PDF renderer is installed.'
-			: 'Install Chrome with npx puppeteer browsers install chrome, then restart Saturday.'
+			: getInstallation().mode === 'managed'
+				? 'Retry your installer with --retry-pdf to prepare managed Chrome.'
+				: 'Install Chrome with npx puppeteer browsers install chrome, then restart Saturday.'
 	};
 }
 export async function generateDocumentPdf({ id, scope = 'documents', token }, origin = 'manual') {

@@ -194,3 +194,105 @@ test('managed layout is separate from source data and descriptor works without l
 		extensions: descriptor.extension_state
 	});
 });
+
+test('platform launchers preserve literal paths and use one-shot login startup', async () => {
+	const { launcherArtifacts } = await import('../src/lib/server/installation.js');
+	const value = {
+		installation_id: '12345678-1234-1234-1234-123456789012',
+		code_root: '/tmp/code with ü $cash',
+		node_path: '/tmp/private runtime/bin/node',
+		descriptor_path: "/tmp/user's data/installation.json",
+		logs: '/tmp/logs'
+	};
+	const mac = launcherArtifacts(value, { platform: 'darwin', home: '/tmp/home', env: {} });
+	assert.match(mac.shell, /user'\\''s data/);
+	assert.match(mac.loginContent, /<key>KeepAlive<\/key><false\/>/);
+	assert.match(mac.loginContent, /<key>AbandonProcessGroup<\/key><true\/>/);
+	assert.ok(mac.loginContent.includes('--background'));
+	assert.ok(!mac.loginContent.includes('<string>open</string>'));
+	const linux = launcherArtifacts(value, {
+		platform: 'linux',
+		home: '/tmp/home',
+		env: { XDG_CONFIG_HOME: '/tmp/config' },
+		desktop: '/tmp/redirected desktop'
+	});
+	assert.match(linux.desktop, /redirected desktop/);
+	assert.match(linux.login, /^\/tmp\/config\/autostart/);
+	assert.ok(linux.desktopContent.includes('\\\\$cash'));
+	const win = launcherArtifacts(
+		{
+			...value,
+			code_root: 'C:\\Users\\Example\\Saturday\\app',
+			node_path: 'C:\\runtime\\node.exe',
+			descriptor_path: 'C:\\user data\\installation.json',
+			logs: 'C:\\logs'
+		},
+		{ platform: 'win32', home: 'C:\\Users\\Example', env: {} }
+	);
+	assert.equal(win.args('open')[0], 'C:\\Users\\Example\\Saturday\\app\\scripts\\start.mjs');
+	assert.match(win.login, /^Saturday .*\.lnk$/);
+});
+
+test('GitHub snapshots are verified against exact Git blobs before setup', async () => {
+	const { verifySource } = await import('../scripts/install.mjs');
+	const { createHash } = await import('node:crypto');
+	const path = join(root, 'verified-source');
+	const { mkdir, writeFile } = await import('node:fs/promises');
+	await mkdir(path);
+	await writeFile(join(path, 'README.md'), 'source');
+	const tree = {
+		tree: [
+			{
+				path: 'README.md',
+				type: 'blob',
+				mode: '100644',
+				sha: createHash('sha1').update('blob 6\0source').digest('hex')
+			}
+		]
+	};
+	await verifySource(path, tree);
+	await writeFile(join(path, 'README.md'), 'changed');
+	await assert.rejects(verifySource(path, tree), /integrity/);
+	await assert.rejects(verifySource(path, { ...tree, truncated: true }), /Incomplete/);
+});
+
+test('interrupted first-install publication recovers its descriptor without resetting stores', async () => {
+	const { recoverPublication } = await import('../scripts/install.mjs');
+	const { mkdir, cp, writeFile } = await import('node:fs/promises');
+	const { sourceInstallation } = await import('../src/lib/server/installation.js');
+	const base = join(root, 'publication'),
+		stage = join(base, 'install-stage-fixture'),
+		candidate = join(stage, 'app'),
+		app = join(base, 'app');
+	await mkdir(join(candidate, 'src/lib/server'), { recursive: true });
+	await cp('src/lib/server/installation.js', join(candidate, 'src/lib/server/installation.js'));
+	await writeFile(join(candidate, 'package.json'), '{"type":"module"}');
+	const config = {
+		...sourceInstallation(),
+		mode: 'managed',
+		installation_id: '12345678-1234-1234-1234-123456789012',
+		code_root: app,
+		data_root: join(base, 'data'),
+		database: join(base, 'data', 'saturday.db'),
+		files: join(base, 'data', 'files'),
+		files_state: join(base, 'data', 'files.state'),
+		database_backups: join(base, 'data', 'backups', 'database'),
+		database_restore: join(base, 'data', 'saturday.db.restore'),
+		file_backups: join(base, 'data', 'backups', 'files'),
+		extension_state: join(base, 'data', 'extensions'),
+		extension_code: join(base, 'extensions'),
+		extension_backups: join(base, 'data', 'extensions.backups'),
+		logs: join(base, 'logs'),
+		pdf_cache: join(base, 'runtime', 'chrome')
+	};
+	await writeFile(
+		join(base, 'install-publication.json'),
+		JSON.stringify({ format: 'saturday.install-publication', version: 1, app, candidate, config })
+	);
+	await recoverPublication(base);
+	assert.ok(existsSync(join(base, 'installation.json')));
+	assert.ok(!existsSync(stage));
+	const descriptor = readFileSync(join(base, 'installation.json'));
+	await recoverPublication(base);
+	assert.deepEqual(readFileSync(join(base, 'installation.json')), descriptor);
+});

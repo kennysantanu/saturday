@@ -101,6 +101,21 @@ test('owned background server reuses, handles collisions, protects active work a
 			(await post('restart', { cookie, origin: 'https://unrelated.example' })).status,
 			403
 		);
+		const startup = (cookieHeader) =>
+			fetch(`${first.url}/settings?/loginStartup`, {
+				method: 'POST',
+				headers: {
+					origin: first.url,
+					'content-type': 'application/x-www-form-urlencoded',
+					'x-sveltekit-action': 'true',
+					...(cookieHeader ? { cookie: cookieHeader } : {})
+				},
+				body: ''
+			});
+		const deniedStartup = await (await startup()).json();
+		assert.equal(deniedStartup.status, 403);
+		const unchangedStartup = await (await startup(cookie)).json();
+		assert.equal(unchangedStartup.type, 'success'); // Already disabled: no real login registration is created.
 		const restarted = await post('restart', { cookie });
 		assert.equal(restarted.status, 200);
 		const response = await restarted.json();

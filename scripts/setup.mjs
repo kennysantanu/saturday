@@ -1,4 +1,4 @@
-// Resumable source setup; bootstrap wrappers will call this same engine in Phase 4.
+// Resumable source setup; bootstrap wrappers call this same engine.
 import { parseArgs } from 'node:util';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -112,9 +112,9 @@ try {
 			);
 		});
 	const npm = [
-		process.env.npm_execpath,
 		join(dirname(config.node_path), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-		join(dirname(config.node_path), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')
+		join(dirname(config.node_path), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+		process.env.npm_execpath
 	]
 		.filter(Boolean)
 		.find(existsSync);
@@ -124,7 +124,7 @@ try {
 		);
 	async function step(name, skip, work, optional = false) {
 		if (skip) {
-			config.setup[name] = { status: 'skipped' };
+			config.setup[name] ??= { status: 'skipped' };
 			await persist();
 			return;
 		}
@@ -206,7 +206,7 @@ try {
 	else {
 		say('Saturday workspace is ready.');
 		say(`Data: ${config.data_root}`);
-		say('Open the UI with npm run start; reconnect your assistant if its configuration changed.');
+		say('Open the UI with npm run open; reconnect your assistant if its configuration changed.');
 	}
 } catch (e) {
 	if (json)

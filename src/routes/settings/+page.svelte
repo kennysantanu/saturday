@@ -649,6 +649,43 @@
 				formId="stop-server"
 			/>
 		{/if}
+		{#if form?.loginSaved}<Notice title="Startup setting saved"
+				>Login startup now matches the setting below.</Notice
+			>{/if}
+		{#if form?.loginError}<Notice tone="error" title="Startup setting failed"
+				>{form.loginError}</Notice
+			>{/if}
+		{#if data.loginStartup.error}<Notice title="Login startup unavailable"
+				>{data.loginStartup.error}</Notice
+			>{/if}
+		<form
+			method="POST"
+			action="?/loginStartup"
+			use:enhance={withPending(() => async ({ update }) => {
+				await update();
+				await tick();
+				focusFirstError();
+			})}
+		>
+			<Checkbox
+				name="enabled"
+				label="Start at login"
+				checked={data.loginStartup.enabled}
+				disabled={!data.loginStartup.available || !data.server.controlsAvailable}
+			/>
+			<p class="mt-2 text-sm text-muted-foreground">
+				Start the UI server after you sign in, without opening a browser. Stopping Saturday keeps it
+				stopped until you reopen it or sign in again.
+			</p>
+			<div class="mt-3">
+				<Button
+					type="submit"
+					variant="outline"
+					disabled={!data.loginStartup.available || !data.server.controlsAvailable}
+					>Save startup setting</Button
+				>
+			</div>
+		</form>
 	</SectionCard>
 
 	<SectionCard
