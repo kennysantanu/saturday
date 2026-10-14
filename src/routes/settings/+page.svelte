@@ -2,7 +2,7 @@
 	import { tick } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { toast } from '$lib/toast.svelte';
-	import { enhance } from '$app/forms';
+	import { applyAction, enhance } from '$app/forms';
 	import { withPending, enhanceWithFocus, focusFirstError } from '$lib/forms';
 	import { page } from '$app/state';
 	import { formatBytes, formatDateTime } from '$lib/format';
@@ -27,6 +27,9 @@
 	let { data, form } = $props();
 	let deleteOpen = $state(false);
 	let confirmDelete = $state<{ id: string; contents: string } | null>(null);
+	let stopDialog = $state(false),
+		serverState = $state(''),
+		serverMessage = $state('');
 	let confirmRestore = $state(false);
 	let confirmFiles = $state(false);
 	let confirmPair = $state(false);
@@ -66,6 +69,40 @@
 			uploading = false;
 		}
 	}
+	async function reconnectServer(operation: any) {
+		serverState = operation.operation === 'stop' ? 'stopped' : 'restarting';
+		serverMessage =
+			operation.operation === 'stop'
+				? 'The UI server is stopped. Use npm run open to return. Your assistant connection remains independent.'
+				: 'Restarting Saturday…';
+		if (operation.operation !== 'restart') return;
+		const deadline = Date.now() + 25000;
+		while (Date.now() < deadline) {
+			try {
+				const response = await fetch('/health', {
+					cache: 'no-store',
+					signal: AbortSignal.timeout(1500)
+				});
+				const health = await response.json();
+				if (
+					response.ok &&
+					health.status === 'ready' &&
+					health.installation_id === operation.installation_id &&
+					health.server_generation === operation.generation
+				) {
+					window.location.assign('/settings#server');
+					return;
+				}
+			} catch {}
+			await new Promise((resolve) => setTimeout(resolve, 500));
+		}
+		serverState = 'failed';
+		serverMessage =
+			'Saturday has not reconnected. Try refreshing or use npm run open, then check the server log in Diagnostics.';
+	}
+	$effect(() => {
+		if (form?.serverOperation) void reconnectServer(form.serverOperation);
+	});
 	const records = (counts: Record<string, number | undefined>) => ({
 		jobs: counts.job_count ?? 0,
 		updates: counts.update_count ?? 0,
@@ -117,7 +154,7 @@
 	<nav aria-label="Settings sections" class="section-nav">
 		<a href="#assistant">Assistant</a>
 		<a href="#backups">Backups</a>
-		<a href="#storage">Storage</a><a href="#extensions">Extensions</a>
+		<a href="#storage">Storage</a><a href="#server">Server</a><a href="#extensions">Extensions</a>
 	</nav>
 
 	<SectionCard
@@ -538,6 +575,80 @@
 					</p>{/if}
 			</div>
 		</details>
+	</SectionCard>
+
+	<SectionCard
+		id="server"
+		title="Saturday server"
+		description="Control the UI server. MCP is managed separately by your assistant."
+	>
+		{#if form?.serverError}<Notice tone="error" title="Server operation failed"
+				>{form.serverError}</Notice
+			>{/if}
+		{#if serverState || form?.serverOperation}
+			<Notice
+				title={serverState === 'restarting'
+					? 'Restarting Saturday'
+					: serverState === 'failed'
+						? 'Reconnect needed'
+						: 'Saturday stopped'}
+				>{serverMessage ||
+					'The server operation was accepted. Refresh after restart, or use Open Saturday to start it again.'}</Notice
+			>
+		{:else}
+			<p class="text-sm text-muted-foreground">
+				{data.server.controlsAvailable
+					? 'The UI server stays running when you close the browser.'
+					: 'Start through npm run start or npm run open to use these controls.'}
+			</p>
+			{#if data.server.error}<Notice title="Server status">{data.server.error}</Notice>{/if}
+			<div class="flex flex-wrap gap-2">
+				<form
+					method="POST"
+					action="?/serverControl"
+					use:enhance={withPending(() => async ({ result }) => {
+						await applyAction(result);
+						await tick();
+						focusFirstError();
+					})}
+				>
+					<input type="hidden" name="operation" value="restart" /><Button
+						type="submit"
+						variant="outline"
+						disabled={!data.server.controlsAvailable}>Restart server</Button
+					>
+				</form>
+				<Button
+					variant="outline"
+					disabled={!data.server.controlsAvailable}
+					onclick={() => (stopDialog = true)}>Stop server</Button
+				>
+			</div>
+			<form
+				method="POST"
+				action="?/serverControl"
+				id="stop-server"
+				use:enhance={withPending(() => async ({ result }) => {
+					stopDialog = false;
+					await applyAction(result);
+					await tick();
+					focusFirstError();
+				})}
+			>
+				<input type="hidden" name="operation" value="stop" /><input
+					type="hidden"
+					name="confirm"
+					value="true"
+				/>
+			</form>
+			<ConfirmDialog
+				bind:open={stopDialog}
+				title="Stop Saturday’s UI server?"
+				description="The dashboard will become unavailable. Use Open Saturday or npm run open to start it again. Your assistant’s MCP connection will remain independent."
+				confirmLabel="Stop server"
+				formId="stop-server"
+			/>
+		{/if}
 	</SectionCard>
 
 	<SectionCard

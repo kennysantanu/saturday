@@ -44,22 +44,24 @@ npm run setup
 npm run start
 ```
 
-`npm run setup` installs dependencies, builds web/MCP, validates PDF export (optional on failure), and safely prepares existing/missing stores. It persists an installation descriptor outside application code; repeat setup preserves existing data. Use `npm run setup -- --json` for a machine-readable result. Then open <http://127.0.0.1:3000>. Saturday listens only on this computer. Keep the terminal running while you use the app; press Ctrl-C to stop it.
+`npm run setup` installs dependencies, builds web/MCP, validates PDF export (optional on failure), and safely prepares existing/missing stores. It persists an installation descriptor outside application code; repeat setup preserves existing data. Use `npm run setup -- --json` for a machine-readable result. Saturday listens only on this computer.
 
-If port 3000 is in use:
+For daily use, run `npm run open`: it starts Saturday in the background and opens your browser after readiness, or reuses the running server. Closing the browser or launch terminal leaves it running. `npm run start` keeps a foreground terminal with Ctrl-C to stop the server it created; attaching to an existing server leaves it running.
 
 ```sh
-PORT=3100 npm run start    # then open http://127.0.0.1:3100
-PORT=3100 npm run status   # check that it is answering
+npm run open       # start/reuse in the background and open the Dashboard
+npm run status     # report this installation's actual address and readiness
+npm run restart    # acknowledge a restart; check status for readiness
+npm run stop       # stop only this installation's UI server
 ```
 
-In PowerShell, set the port first with `$env:PORT = 3100`. `npm run status` checks port 3000 unless `PORT` is set. Running Saturday in the background or at login is not covered yet.
+Settings â†’ Saturday server also provides Restart and confirmed Stop. Busy data operations block both controls. Stopping the UI leaves client-owned MCP access available. Start again with `npm run open`. If the preferred port is occupied by another app, Saturday chooses a free local port and reports it; status uses the saved address. You can request a preferred port with `PORT=3100 npm run open` (macOS/Linux) or `set PORT=3100` before the command in Windows Command Prompt. Desktop shortcuts and optional start at login remain planned.
 
 If you want an assistant to install Saturday into a folder you choose, give it this repository URL and the [agent setup guide](docs/agent-guide.md).
 
 ## Updating
 
-Stop the app, then run:
+Stop the UI with `npm run stop` and disconnect assistant MCP sessions before updating, then run:
 
 ```sh
 git pull
@@ -118,4 +120,4 @@ Jobs and Network show readable record numbers for assistant requests. Settings â
 
 Optional trusted extensions add one page, an independent SQLite database, and namespaced MCP tools. Enable the master switch in Settings; manage installed extensions in Extensions. Interview Practice is included as a portable starter package. See the [extension guide](docs/extension-guide.md) for installation, authoring and independent backup/restore. Core backups exclude extension databases.
 
-Source setup keeps existing paths and stores `installation.json` beside the database. Web, CLI and MCP share it via `SATURDAY_INSTALLATION_PATH`. Setup records progress/logs for retry; missing initialized storage fails instead of creating an empty replacement. `npm run status -- --json` verifies the installation through `/health`, not just HTTP success. Default per-user OS roots are defined for future bootstrap installation; desktop installers/shortcuts and background server controls remain planned.
+Source setup keeps existing paths and stores `installation.json` beside the database. Web, CLI and MCP share it via `SATURDAY_INSTALLATION_PATH`. Setup records progress/logs for retry; missing initialized storage fails instead of creating an empty replacement. `npm run status -- --json` verifies the installation through `/health`, not just HTTP success. Default per-user OS roots are defined for future bootstrap installation; desktop installers/shortcuts and login startup remain planned. Background UI launch and authenticated Settings Stop/Restart are available.

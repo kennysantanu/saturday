@@ -1,3 +1,4 @@
+import { withServerActivity } from './server-lifecycle.js';
 import { createReadStream } from 'node:fs';
 import { extensionRegistry } from './extensions.generated.js';
 import {
@@ -630,6 +631,7 @@ const networkTools = [
 	]
 ];
 function publicNetworkError(error) {
+	if (error?.code === 'BUSY') return { code: 'BUSY', message: error.message };
 	if (error instanceof ValidationError)
 		return { code: 'validation_error', message: error.message, fields: error.fieldErrors };
 	if (error instanceof ServiceError) return { code: error.code, message: error.message };
@@ -660,7 +662,7 @@ for (const [tools, formatError] of [
 			},
 			async (input) => {
 				try {
-					return toolResult({ ok: true, ...(await operation(input)) });
+					return toolResult({ ok: true, ...(await withServerActivity(() => operation(input))) });
 				} catch (error) {
 					return {
 						content: [

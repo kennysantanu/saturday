@@ -1,3 +1,4 @@
+import { withServerActivity } from './server-lifecycle.js';
 import { getInstallation, assertInstallationStorage } from './installation.js';
 import { migrations, applyMigrations, assertMigrationHistory } from './migrations.js';
 import { mkdirSync, existsSync, readFileSync } from 'node:fs';
@@ -137,17 +138,19 @@ export function reserveJobFileIds(db) {
 }
 
 export function inTransaction(db, callback, { checkFiles = true } = {}) {
-	db.exec('BEGIN IMMEDIATE');
-	try {
-		assertMigrationHistory(db);
-		if (checkFiles) assertFileStorageCompatible();
-		const result = callback();
-		db.exec('COMMIT');
-		return result;
-	} catch (error) {
+	return withServerActivity(() => {
+		db.exec('BEGIN IMMEDIATE');
 		try {
-			db.exec('ROLLBACK');
-		} catch {}
-		throw error;
-	}
+			assertMigrationHistory(db);
+			if (checkFiles) assertFileStorageCompatible();
+			const result = callback();
+			db.exec('COMMIT');
+			return result;
+		} catch (error) {
+			try {
+				db.exec('ROLLBACK');
+			} catch {}
+			throw error;
+		}
+	});
 }
