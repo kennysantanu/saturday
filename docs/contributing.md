@@ -2,154 +2,147 @@
 
 ## Get set up
 
-You need Node.js 22.13 or newer and npm 10 or newer. Run `npm ci`, then `npm run migrate` to create the database and `npm run dev` to start the development server on loopback.
+For installer and operational setup, use the [installation guide](installation-guide.md). For development, use Node.js 22.13+ and npm 10+. From a source checkout:
+
+```sh
+npm run setup
+npm run dev
+```
+
+Setup installs dependencies, prepares optional Chrome/PDF support, builds web/MCP, and initializes or validates stores. It persists an installation descriptor and can be repeated without resetting data. The dev server binds to loopback. Use disposable paths for experiments and tests; do not develop recovery workflows against personal data.
+
+For an isolated source workspace, set absolute `SATURDAY_DB_PATH`, `SATURDAY_FILES_PATH`, `SATURDAY_EXTENSION_STATE_PATH`, and `SATURDAY_EXTENSIONS_PATH` before setup. Keep the resulting `SATURDAY_INSTALLATION_PATH` consistent across commands. Existing descriptors reject conflicting overrides rather than selecting another workspace.
 
 ## Development toward 0.1.0
 
-Development is unversioned until the first `0.1.0` release. Leave package/lockfile versions unchanged; do not create numbered beta releases. Breaking APIs and storage changes may require an explicit development-data reset. Setup/startup must never silently reset data. Earlier development backups are not guaranteed compatible with later builds.
+Development remains unversioned until `0.1.0`: leave placeholder package/lockfile versions unchanged and do not create numbered beta releases. Breaking development APIs/storage may require an explicitly authorized reset; startup and setup must never reset data silently. Retain compatible backups and their source/build when testing upgrades.
 
-The intended first release covers Dashboard, Jobs, Network, Documents, Settings, local MCP and backup/recovery. Cloud hosting/storage, plugins, built-in AI and installers are later work. The initial changelog and formal release tag belong to the final `0.1.0` publication step. After that, released baselines are immutable and supported data changes use migrations independently of app version numbers.
+Dashboard, Jobs, Network, Documents/Profile, backups, local MCP, extensions, managed installers, and manual update/repair/uninstall are implemented. Implementation does not establish platform certification. After `0.1.0`, released storage baselines are immutable and supported data changes use migrations independently of application version numbers.
 
-### Build identity and storage contracts
+### Build identity
 
-Vite and the MCP builder use `scripts/build-info.mjs` to capture the same Git-based development identity: `dev.<12-character-commit>` with `.dirty` when tracked or untracked source changes exist. Dirty builds are not reproducible references; use a clean commit when sharing a build. Rebuild both artifacts with `npm run build` after source changes. A running dev server captures identity when Vite starts; restart it to refresh the identity.
+`scripts/build-info.mjs` supplies both web and MCP with a captured identity. Git builds use `dev.<12-character-commit>` with `.dirty` for local changes. Pinned archives use a validated full `SATURDAY_BUILD_COMMIT`; local snapshots can use a fingerprint identity `local.<12-hex>`. Without Git or an explicit identity, builds fall back to `development`. Direct source services have no compiled identity.
 
-No Git executable or repository is needed at production runtime. Source archives without Git build with the explicit `development` fallback; direct source CLI commands also have no captured build identity. MCP reports its build identifier in the initialization response. Web Settings responses expose it in `X-Saturday-Build` and their load data; Settings Storage displays the captured build and resolved storage diagnostics.
-
-`src/lib/server/compatibility.js` owns current supported-storage declarations, using the existing migration list for the database version and a shared manifest version for initialization, validation and offline recovery. Exact migration/schema/manifest validators still apply; a version range alone does not establish compatibility. The active baselines are `saturday.database.numeric` (schema 1), `saturday.files.numeric` (manifest 2; version 1 converts with original metadata retained), and `saturday.backup-pair.numeric` (pair 1). SQLite and the manifest share a dataset UUID. Business writes recheck the database schema and file-format header at mutation boundaries; file publication also checks the current manifest fingerprint and database compatibility before journalling/replay. Unsupported development formats require a matching build or an explicit reset, never guessed conversion.
+Run `npm run build` to rebuild both artifacts; restart Vite to refresh a dev server's identity. Production does not need Git. Settings diagnostics, `get_saturday_info`, and `/health` expose build identity; the MCP initialization version is also the build ID. A dirty build is not a reproducible source reference.
 
 ### Provisional support matrix
 
-These are testing targets, not a beta support claim. Record actual release-candidate results before advertising support.
+| Area                  | Implementation target / verification limit                                                                                                      |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Managed installation  | Private Node/npm, source staging, desktop launcher, optional login startup, manual update/repair/uninstall                                      |
+| macOS                 | 14+, Apple silicon/x64; local source and limited disposable managed-install evidence on Apple silicon                                           |
+| Windows               | Windows 11 x64; native runtime, paths/processes, desktop/login, PDF, and failure workflows still need full verification                         |
+| Linux                 | Ubuntu 22.04/24.04 x64 with graphical GNOME; runtime, Chrome libraries/fonts, desktop/login, and failure workflows still need full verification |
+| Source runtime        | Node.js 22.13+ and npm 10+; verify each advertised runtime explicitly                                                                           |
+| Browser/accessibility | Modern desktop browser; full keyboard, zoom, contrast, screen-reader, and platform certification pending                                        |
+| Assistant client      | Local stdio MCP; real-client connection/reconnect must be verified separately from protocol tests                                               |
 
-| Area                | Target / current verification boundary                                                                                                |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Installation        | Source checkout with npm; no installer                                                                                                |
-| macOS Apple Silicon | Primary development target; complete clean-install, recovery and accessibility checks before release                                  |
-| macOS Intel / Linux | Candidate targets; platform, Chrome/font and workflow verification pending                                                            |
-| Windows             | Support decision pending native installation, path/process and PDF checks; shell examples alone do not establish support              |
-| Runtime             | Node.js 22.13+ and npm 10+ required; test the chosen release Node versions explicitly, rather than assuming every newer version works |
-| Browser             | Modern desktop browser; choose advertised browsers after keyboard, narrow-layout and PDF workflows pass                               |
-| Assistant client    | Local stdio MCP; ChatGPT Work selected for beta verification, actual connection/reconnect pending                                     |
+History records local macOS source/setup, PDF, HTTP/browser, and limited managed-launcher/login checks. These are historical observations, not a current all-platform test pass. Before claiming support, record the candidate commit/build, OS/architecture, Node/npm/Chrome and client versions, commands, and actual results. Reboot/login/session behavior and real assistant-client access remain explicit manual checks.
 
-Phase 5 local evidence (2026-10-09): macOS 26.4.1 on Apple Silicon; clean source installation and repeated populated setup with Node 25.9.0/npm 11.12.1; sandboxed Chrome 154.0.8037.57. Repeated setup preserves records, document content/tokens and numeric allocation. The production HTTP test checks start, stop, status and restart. All 107 service/CLI/MCP tests pass locally; Node 22.23.3 and 24.21.0 pass the 106-test suite plus the final process-death case separately. The expanded production browser review passes without page errors, and single-/three-page PDF fixtures pass visual and extracted-text/link/layout inspection. This verifies rebuilding the same compatible development baseline, not a released-version upgrade. Results for each advertised platform, actual ChatGPT Work and screen-reader certification remain release gates. Hosted CI is not required.
+## Commands and verification
 
-Run checks with temporary databases and file stores. Before a development update, stop web and MCP processes and retain backups with the matching source/build if needed. Incompatible-format errors require a compatible build or an explicit scoped reset, never manually altered migration records. The current build requires the numeric database and dataset-bound file baselines. UUID-era databases/backups and earlier manifests/pairs are unsupported. This implementation does not reset existing development data; use isolated paths until the deliberate final reset.
+| Command                                                | Purpose                                                                     |
+| ------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `npm run setup`                                        | Resumable dependency/PDF/build/storage preparation                          |
+| `npm run dev`                                          | Loopback development server                                                 |
+| `npm run open` / `npm run stop` / `npm run restart`    | Control this installation's background UI                                   |
+| `npm run start`                                        | Production start with foreground control when creating a server             |
+| `npm run status`                                       | Verify installation/build readiness and actual URL                          |
+| `npm run build` / `npm run build:mcp`                  | Build web and MCP / MCP only                                                |
+| `npm run migrate`                                      | Create the database or apply supported migrations                           |
+| `npm run check`                                        | Generate extension registrations; check Svelte and types                    |
+| `npm run lint` / `npm run format`                      | Check / write Prettier formatting                                           |
+| `npm run setup:pdf`                                    | Install Puppeteer's managed Chrome                                          |
+| `npm test`                                             | Build MCP; run service, CLI, process, and protocol tests                    |
+| `npm run test:web`                                     | Build production; run HTTP and server-lifecycle integration tests           |
+| `npm run test:beta`                                    | Browser review against an existing production build                         |
+| `npm run verify`                                       | Lint, type checks, unit/integration tests, production tests, browser review |
+| `npm run assistant -- config --format json`            | Generate local MCP configuration; also supports TOML                        |
+| `npm run update:check` / `npm run update -- --confirm` | Check / perform a manual application update                                 |
+| `npm run repair` / `npm run uninstall -- --confirm`    | Repair installation / uninstall with data retained                          |
 
-## Commands
+Backup/file commands are in the [agent guide](agent-guide.md#backup-and-recovery-commands); extension commands are in the [extension guide](extension-guide.md).
 
-| Command             | Purpose                                                       |
-| ------------------- | ------------------------------------------------------------- |
-| `npm run setup`     | Install dependencies, build, and migrate (used for first use) |
-| `npm run dev`       | Start the development server on loopback                      |
-| `npm run check`     | Check Svelte and TypeScript/JavaScript                        |
-| `npm run build`     | Build the production web app and MCP entry point              |
-| `npm run build:mcp` | Rebuild the MCP entry point at `build/mcp/index.js`           |
-| `npm run migrate`   | Create the database and apply pending migrations              |
-| `npm run start`     | Start the production web server                               |
-| `npm run status`    | Check the web server on the expected port                     |
-| `npm run lint`      | Check formatting with Prettier                                |
-| `npm run format`    | Format project files                                          |
+Run checks appropriate to a change. Before sharing a candidate, install Chrome and run `npm run verify`. `test:beta` requires `npm run build` first when run independently. Browser screenshots and failure evidence are written to the printed OS temporary directory. Tests use disposable stores; real Chrome checks need sandboxed browser startup. HTTP and compilation checks do not replace visual or screen-reader review.
 
-Additional commands: `npm run backup` creates a managed snapshot, `npm run restore -- <file> --inspect` prepares a restore, and `npm test` builds MCP and runs job-detail/search, migration, backup/restore, and MCP integration tests using temporary databases. `npm run test:web` builds the app and tests production job/Network forms and search, Settings actions, and worker supervision on localhost. See the [agent guide](agent-guide.md#backup-and-recovery-commands) for confirmation and scheduling commands.
+For the optional large-archive case, run `node --max-old-space-size=128 --test tests/files.large.integration.mjs`; allow several GiB of temporary space. It exercises a ZIP and expanded collection above 1 GiB.
 
-## Project layout
+## Source map
 
-- `src/routes` — app pages
-- `src/lib/server` — database, immutable migrations, job logic, backup/restore services, validation, and the MCP server
-- `src/lib/components` — shared interface components
-- `scripts` — setup/run commands, backup/restore CLI, and shared installation setup
-- `tests` — temporary-database service, process, CLI, and MCP integration tests
-- `docs` — user and contributor documentation
+| Location                                                          | Responsibility                                                                    |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `src/routes/`                                                     | SvelteKit pages, form actions, HTTP endpoints, and layout                         |
+| `src/lib/components/app/`                                         | Shared app UI patterns                                                            |
+| `src/lib/components/ui/`                                          | UI primitives                                                                     |
+| `src/lib/job-fields.js`, `src/lib/job-search.js`                  | Job field registry and browser-safe search/URL choices                            |
+| `src/lib/server/services.js`, `networks.js`, `validation.js`      | Record services, queries, and validation                                          |
+| `src/lib/server/database.js`, `migrations.js`, `compatibility.js` | SQLite access, schema, and supported formats                                      |
+| `src/lib/server/backups.js`, `src/lib/server/files/`              | Database/file backups, documents, PDF, journals, and coordinated recovery         |
+| `src/lib/server/mcp-server.js`                                    | Core tool schemas and adapters; extension tool registration                       |
+| `src/lib/server/installation.js`                                  | Shared descriptor, paths, setup helpers, client configuration, and OS integration |
+| `src/lib/server/server-lifecycle.js`                              | Owned UI supervisor, readiness, and lifecycle admission                           |
+| `src/lib/server/installation-operations.js`                       | Update selection, external controller, publication, repair, and uninstall         |
+| `src/lib/server/extensions.js`, `src/lib/extension-ui.js`         | Extension runtime/storage services and public browser exports                     |
+| `scripts/`                                                        | Setup/build/run, installer, backup/recovery, and extension commands               |
+| `tests/`                                                          | Service, process, CLI, MCP, HTTP, browser, and UI-convention checks               |
+| `examples/extensions/interview-practice/`                         | Portable extension example                                                        |
+| `docs/`                                                           | User, assistant, and contributor guides                                           |
 
-## Conventions
+## Storage contracts
 
-- Follow the [design guide](design-guide.md) for interface, responsive layout, and accessibility.
-- Run `npm run format` and `npm run check` before submitting changes.
-- Interface conventions are enforced by `tests/ui-conventions.test.mjs` (part of `npm test`). Use the shared
-  components in `src/lib/components/app`; the [design guide](design-guide.md#building-a-new-page-or-feature) lists
-  them and the checklist for finishing a change.
+`compatibility.js` and `migrations.js` define supported formats. Package `saturday.storage` metadata must agree with them. Exact schema/manifest validation is required in addition to version checks.
 
-## Screenshots in documentation
+| Store              | Current contract                                                                                     |
+| ------------------ | ---------------------------------------------------------------------------------------------------- |
+| Database           | `saturday.database.numeric`, schema 1; `app_metadata` holds the dataset UUID                         |
+| Files              | `saturday.files.numeric`, manifest 2; supported version 1 upgrades while retaining original metadata |
+| Coordinated backup | `saturday.backup-pair.numeric`, version 1; validates both actual artifacts and their shared dataset  |
+| Installation       | `saturday.installation`, version 1; installation ID is distinct from dataset ID                      |
 
-Store images in `docs/images/` and reference them with relative paths, such as `![Dashboard](docs/images/dashboard.png)` from the README. Use PNG, keep them reasonably small, and describe them in the alt text.
+UUID-era database backups and unbound file formats/pairs are unsupported. Supported manifest version 1 is already dataset-bound; its upgrade to version 2 adds Profile designations and preserves the existing Master CV. Never alter migration records or dataset IDs to bypass compatibility checks.
 
-## Optional job details and schema upgrades
+Jobs, people, and both histories use independent positive safe integer IDs. Same-dataset restores retain the higher current/incoming allocator counters. IDs represented by same-dataset job-file folders are also reserved, preventing attachment reassignment after an older database restore. Restoring another dataset uses its identity/counters.
 
-The unreleased numeric migration-1 baseline contains all current job fields and Network tables. Jobs, people and both histories have independent auto-increment integer IDs; update IDs supply insertion order. The singleton `app_metadata` row stores format and dataset identity. The complete registry of original and added stored fields lives in `src/lib/job-fields.js`. It defines names, UI/MCP mappings, types, limits, options, access (`user`, `assistant`, `system`), dependencies, and introduction versions. Validation, service writes, read adapters, MCP inputs, and backup column lists derive from it. Add/Edit form fields stay inline with the other page fields. Manual create/edit ignores assessment inputs; only MCP create and the dedicated assessment service write score/comment. Partial edits preserve omitted fields. Clearing a follow-up date clears its comment and never adds history.
+Database and files remain independent. Normal `jobs/<id>` access requires matching dataset identities; user documents and explicit recovery remain available across a mismatch. Add missing refuses cross-dataset merges into populated file collections; Replace installs the incoming collection. Either store can be restored first, with attachment access waiting for a match.
 
-Backup validation uses an exact schema signature for each supported migration version. Restore stages only the supported numeric baseline, including dataset metadata and allocator counters. Same-dataset restores retain the higher current/incoming counters; another dataset uses incoming counters. Job allocation and database restore also reserve IDs represented by same-dataset file entries, including unmatched folders from newer independent snapshots. Original backups are never migrated in place. Include all new fields in dataset fingerprints so any detail or assessment change invalidates a prepared restore. Freeze baseline 1 at release `0.1.0`; afterward append supported migrations and test upgrades/restores.
+### Jobs and Network
 
-When adding a stored job field, add it to `jobFields` with `since` set to its migration version, write an explicit migration, and add inline form controls as needed. System fields are generated/maintained by services; assistant fields are excluded from manual input. `info` controls the Job information card, and `list` controls MCP list summaries. Keep existing names, mappings, and historical `since` values stable. Removing a field from the UI/input does not mean deleting its historical definition or data; handle permanent column removal and historical backup compatibility in an explicit migration. Computed status and history remain service behavior, not jobs columns.
+The job registry owns stored field names, UI/MCP mappings, types, limits, access, dependencies, and introduction versions. Validation, write adapters, MCP inputs, and backup columns derive from it. User edits cannot write assistant assessment fields; partial edits preserve omitted fields. Status/history are computed service behavior, not extra job columns.
 
-## Jobs search and filters
+For a new stored field, update the registry, migration, relevant forms, backup validation/fingerprint, and tests together. Keep existing names and historical `since` values stable. Freeze the released baseline and append migrations afterward; never migrate original backup files in place.
 
-`src/lib/job-search.js` owns browser-safe filter choices, defaults, URL encoding, and chips. Search schemas live in server validation; `searchJobs` applies bound SQL predicates and shared status rules within a read snapshot before counting/pagination. Candidate history is fetched in a batch. Jobs uses an inline GET form; MCP uses the same service with All as its default activity. Keep `listJobs` backward compatible for existing callers.
+Search uses bound literal-contains queries, whitelisted sorts, stable ties, read snapshots for counts/pages, and batched related records. Filters combine with AND across categories and OR within categories. UI Jobs defaults to Active; MCP defaults to All. Historical steps include inactive jobs. Dates use the host's local calendar. Filter additions must update validation, URL/chips, controls, service predicates, MCP documentation, and meaningful tests.
 
-When adding a filter, update its validation, URL handling/chip behavior, inline control, service predicate, MCP documentation, and meaningful tests. Keep AND across categories, OR within categories, historical steps including inactive jobs, local calendar date boundaries, and stable sort tie-breakers. A query filter needs no migration unless it also introduces stored data. Tests must use temporary databases.
+Network follows the same validation/query conventions. General notes, relationship notes, and interaction notes are distinct. Link/unlink and interactions do not change job status/history or parent detail timestamps. Interaction dates cannot be future dates; follow-ups are independent and are not cleared by interactions. Scope updates by both person and update ID.
 
-## Documents
+### Documents and recovery
 
-`src/lib/server/files/` owns file scope/manifest services, journalled local publication, ZIP recovery and PDF generation. MCP tool definitions live together in `src/lib/server/mcp-server.js`. Files add no SQLite schema migration. `src/lib/file-types.js` owns the small format/action mapping; explicit page controls remain in Svelte. The UI shares file list/editor components between user and job scopes and follows the design guide's solid surfaces, existing dialogs, labeled controls and toast feedback.
+Use `files/` services for every file mutation; routes/tools must not write bytes or the manifest directly. Publication checks hashes/conflict tokens and journals changes. Version conversion runs under the file lock and preserves old metadata. Copies and PDFs get independent IDs; Profile designations refer to stable document IDs.
 
-Manifest format `saturday.files.numeric`, version 2, is validated centrally. Version 1 converts under the file lock, retaining the original metadata as `manifest-v1.json` in recovery state. A new collection binds once to the database dataset UUID; later operations never silently rebind it. Canonical numeric `jobs/<id>` keys require matching database/manifest datasets for normal access. User documents and explicit recovery remain available across a dataset mismatch. Add missing refuses cross-dataset merges into populated collections; an empty collection may adopt an incoming namespace, while Replace preserves the incoming identity. Independent restoration can occur database-first or files-first; job access waits for a match. Keep future migrations pure/sequential and preserve historical validators; refuse newer versions. Use shared conflict tokens and storage services for every mutation. Never write file bytes or the manifest from a route/MCP handler directly. Copies/PDFs create independent IDs; designations refer to stable IDs. Journal recovery precedes normal operations. Coordinated restore holds the SQLite write gate before the file lock, with a persisted recovery session for cross-store failures.
+Coordinated restore acquires the SQLite write gate before the file lock and persists cross-store recovery state. Interrupted sessions block normal access until offline recovery. Backups include creator-build and dataset metadata; fingerprints must include all stored fields. Previews expire, reject relevant changes, and are single-use. Preserve recovery copies after uncertain failures.
 
-Tests use temporary file roots and databases. `npm test` includes real Chrome PDF and process/journal/recovery/MCP checks; install Chrome first and permit sandboxed browser startup locally. `npm run test:web` covers production document forms, scope downloads, streaming uploads/imports and existing job/backup flows. The browser review covers core-page control names/reflow, keyboard dialog focus and validation, document/network workflows, light/dark and reduced motion. Visual contrast and actual screen-reader review remain separate release checks.
+Manual backup orchestration lives in `files/pairs.js`. Database/files/both appear in grouped history; combined downloads/imports stream ZIPs while retaining independent artifact formats. New archives use `backups/database/` and `backups/files/` beside the stores. Supported older adjacent archives remain discoverable. Scheduling/retention workers are removed; old schedule JSON is inert. Core backups exclude extension databases.
 
-`npm run test:beta` runs `scripts/review-documents.mjs` against the production build (run `npm run build` first), with disposable stores and screenshots. Sandboxed Chrome must be installed. Browser review screenshots and failure evidence stay in the OS temporary directory; the command prints its location.
+## Installation and lifecycle contracts
 
-Run `npm run setup:pdf` once, then `npm run verify` before sharing each beta candidate. Verification runs lint, Svelte checks, service/CLI/MCP tests, production build/HTTP tests and browser review in order, stopping on failure. No hosted CI or new dependencies are required. Record the commit/build identity, OS/architecture, Node/npm/Chrome versions and results; local success establishes evidence only for the tested environment. Screen-reader, contrast and actual assistant-client checks remain manual.
+The shared resolver owns all database/file/state/backup/extension/code/runtime/log paths. Setup starts without application dependencies, runs `npm ci`, then loads storage services. Step results and bounded logs persist for retry. Existing source paths are adopted without relocation; missing initialized stores fail instead of creating replacements.
 
-Optional extended checks: `node scripts/review-documents.mjs` runs Documents and Network browser workflows with disposable stores and screenshots in the OS temp directory. `node --max-old-space-size=128 --test tests/files.large.integration.mjs` checks a ZIP and expanded collection above 1 GiB; allow several GiB of temporary disk space. Neither command uses your application data.
+The supervisor owns only its UI child. `/health` reports readiness and installation/build identity without record content or paths. Lifecycle controls require authenticated local ownership and refuse active operations; client-owned stdio MCP stays independent. Controller tokens and state are private and excluded from backups.
 
-## Network contracts
+Bootstrap verifies official Node artifact hashes and pinned GitHub source, builds in staging, and retains an interruption journal. It never replaces global Node, enables login by default, or bypasses OS protections. The private runtime pin lives in `install.sh`/`install.bat`. Managed PDF cache paths must be shared across UI/CLI/MCP.
 
-`src/lib/server/networks.js` owns people, due follow-ups, job relationships and optional dated interactions. Shared explicit schemas live in `validation.js`; tools stay in the central MCP server. Network route forms and the job Network section stay inline, reusing existing UI primitives; no additional UI components, field registry, dependencies or picker endpoints are needed.
+Update/repair/uninstall run through an external controller that survives UI shutdown. Staging/builds precede publication; live writers must stop before storage validation/migration. Maintenance guards persist across interruption. Retain previous code/runtime/descriptor and independent database/file/extension snapshots; never blindly downgrade or roll back migrated data. Source updates require clean Git state; local-source repair preserves checkout files and uses a fingerprint identity.
 
-Numeric baseline 1 includes `networks`, `job_networks` and `network_updates`; IDs are positive safe integers. Follow-up is independent of interactions. Link/unlink and interaction changes do not update parent detail timestamps or job status/history. Link notes own their timestamp and creation source. Use scoped IDs, bound literal contains queries, whitelisted sorts, a read snapshot for counts/pages, and batched link lookup for pickers. History uses calendar date then insertion order, rejects future dates on writes, and is optional.
+Uninstall removes only exact owned targets. Data retention is the default; confirmed deletion must exclude shared/external/unowned paths and system runtimes. Keep partial-cleanup state and guidance. App uninstall does not discover or alter arbitrary assistant configuration files.
 
-Extend every backup table definition, deterministic ordering, field validation, hash, preview count and replacement path for new stored records. Only the current numeric baseline is supported; restore uses child-before-parent deletion and parent-before-child insertion. Both ordinary and coordinated recovery include Network. Tests cover >100 records, literal AND/OR filters, partial/null edits, retry-safe links, scoped history changes, rejected old snapshots, namespace mismatches, interrupted cross-dataset recovery, stale previews, malformed data, real MCP and production HTTP/browser flows. Keep full accessibility/platform review as separate release work, not implied by compilation.
+### Release metadata
 
-Backup metadata records the creator build, format and dataset identity. File archives also carry creator build metadata in their manifest, keeping them self-contained. Pair preparation validates both actual artifacts against the pair namespace; recovery sessions retain each original store identity, including an original mismatch. Stop and rebuild/restart web and MCP together after development updates.
+The controller supports stable GitHub releases with uploaded `saturday-release.json`: format `saturday.release`, version 1, stable `release`, full source `commit`, `source: {type: "github-source"}`, and the package's installation/runtime/storage metadata. It verifies GitHub's SHA-256 asset digest, tag commit, version, and compatibility contract. Drafts/prereleases are ignored; stable versions are ordered numerically. Released installs never silently fall back to `main`; lookup failure is an error.
 
-Settings presents manual database/files/both creation and grouped history with download, previewed restore and confirmed deletion. Shared orchestration in `files/pairs.js` preserves independent formats, dataset checks and safety recovery. Downloads stream; combined ZIP imports validate artifacts and remap pair IDs. An operation lock protects managed create/import/export/delete. New backups sit under the data directory's `backups/`; legacy adjacent archives remain discoverable. Scheduling APIs, worker startup and retention are removed; old schedule JSON is inert.
+Optional `runtime: {version, hashes: {"darwin-arm64": "<sha256>", ...}}` pins official runtime artifacts when needed. Keep installation API 1 bootstrap/controller code parseable by the supported existing runtime until a new runtime can be staged.
 
-## Extension development
+## UI and documentation conventions
 
-The [extension guide](extension-guide.md) defines API 1. `scripts/extension-build.mjs` generates the web/MCP registrations on dev/build/check. `src/lib/server/extensions.js` shares lifecycle, locks, database access and recovery; `scripts/extension-install.mjs` stages and publishes offline installs. The public browser entry is `src/lib/extension-ui.js`; avoid private imports in extension packages. Interview Practice in `examples/extensions` exercises page/database/tool contracts without a new dependency. Run local verification and focused lifecycle tests before changing these contracts.
+Follow the [design guide](design-guide.md#building-a-new-page-or-feature) and reuse shared components. `tests/ui-conventions.test.mjs` enforces these patterns. Update the user guide for UI behavior, the MCP reference for tool contracts, and the installation guide for setup/maintenance commands. Keep assistant connection instructions in the assistant guide and advanced recovery in the agent guide. Keep current behavior separate from unverified support claims; avoid repeating instructions across guides.
 
-## Installation paths and setup
-
-`src/lib/server/installation.js` is the shared resolver for database, file/state/backup, extension and code/runtime/log paths. Descriptor format `saturday.installation` version 1 holds a separate installation ID, resolved paths, build, port and initialized/setup state. `scripts/setup.mjs` orchestrates source setup with persisted step results and capped logs. Its initial imports are dependency-free so fresh checkout setup can run npm ci first; store/extension services load afterward. Atomic JSON and directory-lock helpers are shared through the installation module and re-exported by the file store. Existing source paths stay unchanged; a configured descriptor is mandatory when supplied and path conflicts/missing initialized stores fail. Offline file recovery explicitly bypasses only the missing-manifest guard, retaining existing recovery checks. Managed roots use macOS Application Support, Windows LOCALAPPDATA, and Linux absolute XDG_DATA_HOME with the standard fallback. Private runtime provisioning, shortcuts, login startup, manual updates and lifecycle controls are implemented; relocation remains separate future work.
-
-`/health` returns installation/build readiness without paths or record content; `scripts/status.mjs` checks identity before reporting success. Settings exposes the data directory, platform-native Open folder action and descriptor/log diagnostics. Run focused installation tests and temporary HTTP checks; Windows/Linux runtime and complete visual/accessibility verification remain Phase 7.
-
-## UI process lifecycle
-
-`src/lib/server/server-lifecycle.js` shares owned background launch, readiness, private loopback control and process admission between `scripts/start.mjs`, Settings and storage services. `npm run open` starts/reuses and opens the browser; `npm run start` keeps a foreground wrapper for developer Ctrl-C behavior. Stop/Restart acknowledgments precede completion; status checks the persisted address and installation identity. Only the spawned child is terminated, never an arbitrary recorded PID.
-
-Private `server.state/` holds credentials, owner/generation and PID activity markers outside backups. An exclusive maintenance flag and double-checked activity admission prevent new writes from racing lifecycle controls; nested operations share admission via AsyncLocalStorage. Wrap whole asynchronous data operations, not just their final transaction. Existing backup streaming locks also prevent shutdown during downloads. Settings validates the HttpOnly same-site session cookie and exact Origin; the private controller separately requires a bearer secret. Response completion commits UI operations so the acknowledgment arrives before shutdown. Never serialize controller secrets into page data, health responses or diagnostics.
-
-Settings controls and reconnect state remain inline; no additional frontend framework or dependency is used. Child startup/logging is bounded; failures leave recoverable status/logs and no permanent supervisor after stopping. `tests/server-lifecycle.integration.mjs` uses a production build and disposable data for port collisions, duplicate ownership, active-operation rejection, UI authentication/restart/stop and real MCP writes with web off. Light macOS checks pass; full crash/failure, desktop/session lifetime, keyboard/screen-reader and Windows/Linux execution remain Installation Phase 7. Login startup and installer adapters are implemented in Phase 4.
-
-## Bootstrap and OS integration
-
-`install.sh` and `install.bat` prepare a pinned private Node/npm runtime and validate its official SHA-256 hash. The dependency-free `scripts/install.mjs` owns source discovery/verification, staged setup/build, recoverable first-install publication, shared workspace initialization and lifecycle launch. Existing installations are reopened without code replacement or data relocation; manual updates use the shared controller below. Local source copies omit stores, secrets, generated registrations and build/dependency directories. GitHub snapshots are pinned and checked against Git blob hashes before setup executes. No dependencies were added.
-
-Platform launchers and login registration extend `installation.js`. macOS creates a local `.app` and a one-shot LaunchAgent with KeepAlive false; Windows uses JScript/Windows Script Host, the redirected Desktop/Startup folders and private hidden launch scripts without PowerShell; Linux uses `xdg-user-dir`, desktop entries and XDG autostart. Unknown/foreign files and registrations are preserved. Settings controls stay inline, use the existing checkbox/button/notices, and validate the same session/origin as Stop/Restart. Startup status reads actual OS registration; policy/unavailable states are explicit. The descriptor carries the managed PDF cache so web/CLI/MCP share Chrome.
-
-Focused installation tests check snapshot integrity, interrupted publication and platform quoting. Production HTTP tests exercise source/managed status and control authentication. Light disposable macOS evidence includes a verified private-runtime install, real PDF, temporary desktop artifact, one-shot native LaunchAgent, explicit Stop without respawn and populated reinstall preservation. Full reboot/login/desktop/session and Windows/Linux execution, permissions/network/disk failures and accessibility stay in Installation Phase 7. Public remote installer links should be published only after the installer revision is on main and its advertised distribution gates pass.
-
-## Installation operations contract
-
-`installation-operations.js` shares manual release/main discovery, checked-candidate state, queued external controller, staged build/migration/publication, maintenance and owned cleanup. CLI entry points extend `scripts/install.mjs`; Settings controls remain inline. The read-only status route and temporary cookie-authenticated, origin-bound loopback gateway expose progress across web shutdown without serializing controller credentials. No scheduled update check, hosted CI or dependency is added. Controller files/state/logs live under `installation.state` outside replaceable code; Windows executes a controller-local Node copy so removing its owned runtime does not unlink the running executable.
-
-Package `saturday` metadata declares installation API 1, Node minimum and supported database/manifest bounds. Keep these consistent with compatibility/migrations; do not bump the placeholder app version before 0.1.0. A future stable GitHub release is installable when it includes uploaded `saturday-release.json`: format `saturday.release`, version 1, stable `release`, full source `commit`, `source: {type: "github-source"}`, and the package's installation/runtime/storage metadata. GitHub's published SHA-256 asset digest, tag commit, package version and contract are checked. Ignore drafts/prereleases; compare stable versions numerically; release lookup failure is an error, and released installs do not fall back to main. Optional `runtime: {version, hashes: {"darwin-arm64": "<sha256>", ...}}` pins official Node artifacts for a required runtime change. Keep API-1 bootstrap/controller code parseable by the existing supported Node until it can stage the new runtime.
-
-Updates clone and validate post-quiescence storage before live migration. Recovery snapshots remain independent; mismatched database/file namespaces are preserved through independent captures. Retain compatible previous code/runtime/descriptor information. Persistent maintenance blocks new writers and MCP initialization during publication and after interruption; repair validates journal identity/paths and never blindly restores/downgrades after migration began. Source updates require clean Git state, preserve the old HEAD and artifacts, and switch to the pinned official commit; repair of local source preserves checkout files and uses a fingerprint identity. Owned registration paths and runtime history survive; runtime changes refresh owned launch definitions without enabling startup or resurrecting an intentionally stopped UI.
-
-Uninstall validates exact owned targets and writer quiescence. Default retention preserves stores and extension packages/data; separate confirmed deletion also removes owned recovery copies. Never recursively delete a broad root, external backup, system runtime or linked root. Keep cleanup progress until completion; source/custom ownership is retained for manual review. Test with disposable paths and real staging builds. Focused tests cover selection/digests, stale checks, actual repair/update publication and data retention, connected-client rejection and explicitly scoped deletion. Full OS/reboot/failure/accessibility and real-client matrix remain Installation Phase 7.
-
-### Assistant onboarding
-
-Settings → Connect an assistant provides JSON and a local ChatGPT/Codex TOML snippet from the shared installation descriptor. No client file is changed by copying. `get_saturday_info` reads installation/dataset/build identity and counts, including empty workspaces; compare these with Settings and repeat after updates. Real-client verification stays pending until performed in that client. Hosted-only chats cannot launch Saturday's local stdio server. The optional `scripts/assistant.mjs` JSON merge/removal command requires a caller-selected absolute path and confirmation, preserves unrelated settings and retains a private recovery copy. TOML is merged using client controls or a reviewed manual edit. No new UI component or dependency is introduced. See the assistant and agent guides for commands and client scope.
+Documentation images belong in `docs/images/`, with relative links, descriptive alt text, and reasonably sized PNGs. Run Prettier on changed documentation. Extension API changes must also update the [extension guide](extension-guide.md); generated extension registries are ignored outputs and must not be edited manually.
