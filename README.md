@@ -55,7 +55,7 @@ install.bat --source .
 
 The first install still uses a terminal. The installer creates an **Open Saturday** desktop shortcut where the OS permits it; use that shortcut for daily access. If shortcut creation is blocked, the installer reports an exact reopen command. Linux desktops may require **Allow Launching** for the generated desktop file. Installation never bypasses OS protections. A failed PDF setup can continue without PDF; rerun the same installer with `--retry-pdf` to download and validate Chrome again. `--skip-pdf` deliberately omits PDF setup.
 
-Without `--source`, installation resolves official GitHub `main` to one exact commit and verifies the downloaded source against its Git blob hashes. Use this remote path after this installer revision is available on `main`; public standalone download commands are not published yet. Reinstall reopens/repairs the existing installation without replacing its code, relocating data, or changing login startup. Automatic updates are not implemented; the updater is a later phase.
+Without `--source`, installation resolves official GitHub `main` to one exact commit and verifies the downloaded source against its Git blob hashes. Use this remote path after this installer revision is available on `main`; public standalone download commands are not published yet. Reinstall reopens/repairs the existing installation without replacing its code, relocating data, or changing login startup. Manual updates are implemented; unattended updates remain out of scope.
 
 Initial implementation targets are macOS 14+ (Apple silicon/x64), Windows 11 x64, and Ubuntu 22.04/24.04 x64 with a graphical GNOME session. macOS has light disposable-install evidence; Windows/Linux runtime, reboot/login, desktop launch and full accessibility certification remain pending. Other architectures, distributions and headless sessions are not advertised installer targets yet. Shell prerequisites: curl/tar and shasum (macOS) or sha256sum (Linux); Windows requires curl.exe, tar.exe, certutil.exe and Windows Script Host for shortcuts. Restricted devices receive a fallback/error, not elevated installation.
 
@@ -80,15 +80,25 @@ Settings → Saturday server provides Restart, confirmed Stop, and **Start at lo
 
 ## Updating
 
-For source checkouts, stop the UI with `npm run stop` and disconnect assistant MCP sessions before updating, then run:
+Use **Settings → Updates and installation → Check for updates**, review the selected release or main commit, then confirm **Update Saturday**. There are no unattended checks or updates. Disconnect Saturday's MCP connection before publication; reconnect afterward to load the new code. The page shows progress through the external controller and reloads after readiness. If the Node path changes, copy the current assistant configuration from Settings too.
+
+Manual and assistant commands use the same controller. From a source checkout:
 
 ```sh
-git pull
-npm run setup
-npm run start
+npm run update:check
+npm run update -- --confirm
+npm run repair -- --retry-pdf
 ```
 
-Managed-install updates are not implemented yet; do not run Git commands in an archive-based installation. Reinstall preserves its current code. `npm run setup` is safe to repeat against compatible storage and never intentionally resets your data. During unversioned development, breaking format changes may instead require a documented explicit reset. Keep backups with the matching build if you need to retain development data.
+For a managed install, use your OS installer with `check`, `update --confirm`, or `repair --retry-pdf`, or the descriptor's Node with `<code_root>/scripts/install.mjs`. Pass `--installation <absolute-descriptor>` when operating outside the installation. `check --json` returns a check ID; `update --check-id <id> --confirm --json` pins that reviewed check. `status --json` reports the persisted result. Background acknowledgment is not completion.
+
+Until releases exist, checks compare exact main SHAs; a changed head is not a promise of newer chronology. Installable stable releases are selected using verified release metadata and version order. Released installations never silently fall back to main. Stale checks, offline/rate-limit failures, incompatible storage, unsupported runtime artifacts and changed source produce readable errors. Source working-tree changes block updates; clean source updates retain the previous Git HEAD/build and use a pinned detached checkout. Managed previous code and verified database/file/extension recovery snapshots are retained. Updating never resets development data or blindly rolls back over migrated storage.
+
+**Repair installation** retries the compatible staged setup without resetting stores. An interrupted publication stays guarded until repair completes. Keep the displayed operation log/recovery paths; use the CLI if the UI cannot start. `repair --source <local-source>` explicitly rebuilds a local snapshot when its original commit is unknown, with a local fingerprint build identity. First installation/reinstall preserves existing data; reinstall after confirmed data deletion creates a fresh workspace.
+
+**Uninstall Saturday** stops the owned UI and removes owned application/runtime files, shortcuts and login registration. Data, backups and extension packages/data are kept by default. **Delete all Saturday data** additionally requires the directory preview and typing `DELETE DATA` in the UI (CLI: explicit `--delete-data --confirm`). Download backups elsewhere first. External/shared storage and unowned source checkouts are retained with cleanup guidance; a partial cleanup is reported. Disconnect/remove Saturday's entry in your assistant settings separately.
+
+Formal versioning still begins at `0.1.0`; no version bump is part of these installation features.
 
 ## Your data and privacy
 
@@ -139,4 +149,4 @@ Jobs and Network show readable record numbers for assistant requests. Settings �
 
 Optional trusted extensions add one page, an independent SQLite database, and namespaced MCP tools. Enable the master switch in Settings; manage installed extensions in Extensions. Interview Practice is included as a portable starter package. See the [extension guide](docs/extension-guide.md) for installation, authoring and independent backup/restore. Core backups exclude extension databases.
 
-Source setup keeps existing paths and stores `installation.json` beside the database. Web, CLI and MCP share it via `SATURDAY_INSTALLATION_PATH`. Setup records progress/logs for retry; missing initialized storage fails instead of creating an empty replacement. `npm run status -- --json` verifies the installation through `/health`, not just HTTP success. Managed bootstrap uses the per-user OS roots listed above. Private runtime provisioning, desktop shortcuts and optional login startup are implemented. Full platform verification and the updater remain planned.
+Source setup keeps existing paths and stores `installation.json` beside the database. Web, CLI and MCP share it via `SATURDAY_INSTALLATION_PATH`. Setup records progress/logs for retry; missing initialized storage fails instead of creating an empty replacement. `npm run status -- --json` verifies the installation through `/health`, not just HTTP success. Managed bootstrap uses the per-user OS roots listed above. Private runtime provisioning, desktop shortcuts and optional login startup are implemented. Manual updates, repair and owned uninstall are implemented; full platform verification remains pending.

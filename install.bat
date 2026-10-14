@@ -51,7 +51,7 @@ curl.exe --proto "=https" --tlsv1.2 -fL --retry 2 -o "%ENGINE%.part" "https://ra
 if errorlevel 1 goto failed
 move /Y "%ENGINE%.part" "%ENGINE%" >nul
 if errorlevel 1 goto failed
-"%NODE%" "%ENGINE%" --root "%SATURDAY_ROOT%" --commit "%COMMIT%" %*
+"%NODE%" "%ENGINE%" --root "%SATURDAY_ROOT%" --bootstrap-commit "%COMMIT%" %*
 if errorlevel 1 goto failed
 goto success
 :local

@@ -267,7 +267,9 @@ export async function setExtensionState(id, enabled, { remove = false } = {}) {
 export async function registerExtensionRuntime() {
 	const p = extensionPaths();
 	await fs.mkdir(join(p.state, 'processes'), { recursive: true });
-	await atomicJson(join(p.state, 'processes', `${process.pid}.json`), { pid: process.pid });
+	await withServerActivity(() =>
+		atomicJson(join(p.state, 'processes', `${process.pid}.json`), { pid: process.pid })
+	);
 }
 export async function assertExtensionProcessesStopped() {
 	let names = [];

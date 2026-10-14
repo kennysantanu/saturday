@@ -114,4 +114,12 @@ The development installer uses a private runtime and a separate managed workspac
 
 Settings → Saturday server → **Start at login** is off by default. Save the checkbox to start the UI after signing in, without opening a browser. Reinstall preserves the actual startup registration. Explicit Stop keeps Saturday stopped until you reopen it or sign in again. If the OS reports startup unavailable, use the shortcut/CLI and retain the diagnostic message.
 
-PDF setup can continue without export. Retry using the same installer with `--retry-pdf`; Chrome stays in the managed runtime cache. Reinstall preserves installed code and data; it is not an update command. Managed updates/removal and full platform verification are still later installation phases.
+PDF setup can continue without export. Retry using the same installer with `--retry-pdf`; Chrome stays in the managed runtime cache. Reinstall of an installed app preserves code and data; reinstall after uninstall restores the application around retained data. Manual updates/removal are implemented; full platform verification remains a later installation phase.
+
+## Updates, repair and uninstall
+
+Settings → Updates and installation shows the installed release/build. Check manually, review the target, and confirm Update Saturday. Disconnect your assistant's Saturday connection before publication. Progress remains available through a temporary local controller while UI is stopped; successful readiness reloads the page. Reconnect your assistant afterward and copy the current Settings configuration if the runtime changed. An error, stale check or local source change does not mean you are up to date.
+
+Repair installation retries compatible build/setup/PDF validation without resetting records. The displayed log and recovery paths help when the UI cannot return; manual commands are in README. Interrupted publication stays guarded for explicit repair. The updater keeps verified database/file recovery and separate extension snapshots; it does not silently restore them or downgrade code over migrated data.
+
+Uninstall asks for confirmation and keeps data/backups/extensions by default. Its unchecked Delete all Saturday data option previews directories, warns that deletion is permanent, and requires typing DELETE DATA. Download copies elsewhere first. Shared/custom or unowned storage is retained for reviewed cleanup. Partial failures show the remaining action. Reinstall reuses retained data, or creates a fresh workspace after explicitly confirmed deletion. Disconnect/remove the Saturday entry in your assistant settings separately.

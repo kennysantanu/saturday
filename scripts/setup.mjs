@@ -95,7 +95,10 @@ try {
 		new Promise((res, rej) => {
 			const child = spawn(config.node_path, args, {
 				cwd: config.code_root,
-				env: installationEnvironment({ ...config, descriptor_path: path }),
+				env: {
+					...installationEnvironment({ ...config, descriptor_path: path }),
+					...(args[1] === 'ci' ? { PUPPETEER_SKIP_DOWNLOAD: 'true' } : {})
+				},
 				stdio: ['ignore', 'pipe', 'pipe']
 			});
 			for (const stream of [child.stdout, child.stderr])

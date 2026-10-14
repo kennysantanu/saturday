@@ -25,6 +25,20 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 
 	let { data, form } = $props();
+	let updateDialog = $state(false),
+		uninstallDialog = $state(false),
+		deleteUserData = $state(false);
+	let installationProgress = $state<any>(null);
+	const installationActive = [
+		'queued',
+		'staging',
+		'waiting_for_disconnect',
+		'backing_up',
+		'publishing',
+		'migrating',
+		'restarting',
+		'removing'
+	];
 	let deleteOpen = $state(false);
 	let confirmDelete = $state<{ id: string; contents: string } | null>(null);
 	let stopDialog = $state(false),
@@ -103,6 +117,45 @@
 	$effect(() => {
 		if (form?.serverOperation) void reconnectServer(form.serverOperation);
 	});
+	async function pollInstallation(initial: any, cancelled: () => boolean) {
+		let operation = initial;
+		const deadline = Date.now() + 20 * 60 * 1000;
+		while (!cancelled() && Date.now() < deadline) {
+			installationProgress = operation;
+			if (operation.error || !installationActive.includes(operation.status)) {
+				if (operation.status === 'complete' && operation.operation !== 'uninstall' && operation.url)
+					window.location.assign(`${operation.url}/settings#updates`);
+				return;
+			}
+			await new Promise((r) => setTimeout(r, 750));
+			try {
+				const response = await fetch(operation.poll_url || '/settings/installation', {
+					credentials: 'include',
+					cache: 'no-store',
+					signal: AbortSignal.timeout(2000)
+				});
+				if (response.ok) operation = await response.json();
+			} catch {
+				/* The retained controller continues across UI shutdown. */
+			}
+		}
+		if (!cancelled())
+			installationProgress = {
+				...operation,
+				error:
+					'Progress timed out. Inspect the installation log or run the installation status command; do not repeat an uncertain operation.'
+			};
+	}
+	$effect(() => {
+		const operation = form?.installationOperation || data.installationOperation;
+		if (operation && installationActive.includes(operation.status) && !operation.error) {
+			let cancelled = false;
+			void pollInstallation(operation, () => cancelled);
+			return () => {
+				cancelled = true;
+			};
+		}
+	});
 	const records = (counts: Record<string, number | undefined>) => ({
 		jobs: counts.job_count ?? 0,
 		updates: counts.update_count ?? 0,
@@ -154,7 +207,9 @@
 	<nav aria-label="Settings sections" class="section-nav">
 		<a href="#assistant">Assistant</a>
 		<a href="#backups">Backups</a>
-		<a href="#storage">Storage</a><a href="#server">Server</a><a href="#extensions">Extensions</a>
+		<a href="#updates">Updates</a><a href="#storage">Storage</a><a href="#server">Server</a><a
+			href="#extensions">Extensions</a
+		>
 	</nav>
 
 	<SectionCard
@@ -686,6 +741,180 @@
 				>
 			</div>
 		</form>
+	</SectionCard>
+
+	<SectionCard
+		id="updates"
+		title="Updates and installation"
+		description="Check manually. Updates preserve your workspace; reconnect your assistant afterward."
+	>
+		<p class="text-sm text-muted-foreground">
+			Installed: {data.installation.release || data.installation.build?.id || data.buildInfo.id}
+		</p>
+		{#if form?.installationError}<Notice tone="error" title="Installation operation failed"
+				>{form.installationError}</Notice
+			>{/if}
+		{#if data.updateCheck?.error}<Notice tone="error" title="Update check failed"
+				>{data.updateCheck.error}</Notice
+			>{/if}
+		{#if installationProgress || data.installationOperation}
+			{@const operation = installationProgress || data.installationOperation}
+			<Notice
+				tone={operation.error ? 'error' : 'info'}
+				title={operation.operation === 'uninstall' && operation.status === 'complete'
+					? 'Saturday uninstalled'
+					: 'Installation status'}
+			>
+				{operation.step}{#if operation.error && operation.error !== operation.step}<p class="mt-2">
+						{operation.error}
+					</p>{/if}
+				{#if operation.logs}<p class="mt-2 text-sm break-all">Log: {operation.logs}</p>{/if}
+				{#if operation.status === 'complete' && operation.operation === 'uninstall'}<p class="mt-2">
+						The UI is stopped. {operation.retained_paths?.length
+							? 'Your data and backups are retained for reinstall.'
+							: 'The confirmed owned data was removed.'}
+					</p>{/if}
+			</Notice>
+		{/if}
+		{#if data.updateCheck?.target}
+			<p class="text-sm">
+				{data.updateCheck.target.available
+					? data.updateCheck.target.kind === 'release'
+						? 'Release available'
+						: 'Latest main available'
+					: 'You’re up to date'}:
+				<a class="link" href={data.updateCheck.target.url} target="_blank" rel="noreferrer"
+					>{data.updateCheck.target.release || data.updateCheck.target.commit?.slice(0, 12)}</a
+				>
+			</p>
+			{#if data.updateCheck.local?.dirty}<Notice title="Local changes retained"
+					>Local source changes block updating. Commit or preserve them before checking again.</Notice
+				>{/if}
+			{#if data.updateCheck.local?.unknown}<Notice title="Source identity unknown"
+					>The original source fingerprint is unknown. Review the selected snapshot; your current
+					code will be retained in recovery.</Notice
+				>{/if}
+			{#if data.updateCheck.target.notes}<details class="disclosure">
+					<summary>Update notes</summary>
+					<p class="mt-3 text-sm whitespace-pre-wrap">{data.updateCheck.target.notes}</p>
+				</details>{/if}
+		{/if}
+		<div class="flex flex-wrap gap-2">
+			<form
+				method="POST"
+				action="?/checkUpdates"
+				use:enhance={withPending(() => async ({ update }) => {
+					await update();
+					await tick();
+					focusFirstError();
+				})}
+			>
+				<Button type="submit" variant="outline" disabled={!data.server.controlsAvailable}
+					>Check for updates</Button
+				>
+			</form>
+			{#if data.updateCheck?.target?.available && !data.updateCheck.local?.dirty}<Button
+					variant="outline"
+					onclick={() => (updateDialog = true)}>Update Saturday</Button
+				>{/if}
+			<form
+				method="POST"
+				action="?/installationOperation"
+				use:enhance={withPending(() => async ({ result }) => {
+					await applyAction(result);
+					await tick();
+					focusFirstError();
+				})}
+			>
+				<input type="hidden" name="operation" value="repair" /><Button
+					type="submit"
+					variant="outline"
+					disabled={!data.server.controlsAvailable}>Repair installation</Button
+				>
+			</form>
+			<Button
+				variant="outline"
+				disabled={!data.server.controlsAvailable}
+				onclick={() => (uninstallDialog = true)}>Uninstall Saturday</Button
+			>
+		</div>
+		<form
+			id="update-saturday"
+			method="POST"
+			action="?/installationOperation"
+			use:enhance={withPending(() => async ({ result }) => {
+				updateDialog = false;
+				await applyAction(result);
+				await tick();
+				focusFirstError();
+			})}
+		>
+			<input type="hidden" name="operation" value="update" /><input
+				type="hidden"
+				name="check_id"
+				value={data.updateCheck?.id || ''}
+			/><input type="hidden" name="confirm" value="true" />
+		</form>
+		<ConfirmDialog
+			bind:open={updateDialog}
+			title="Update Saturday?"
+			description={`Install ${data.updateCheck?.target?.release || data.updateCheck?.target?.commit?.slice(0, 12) || 'the checked build'} after staging and verified recovery backups. Disconnect your assistant before publication. Data will be preserved.`}
+			confirmLabel="Update Saturday"
+			formId="update-saturday"
+		/>
+		<form
+			id="uninstall-saturday"
+			method="POST"
+			action="?/installationOperation"
+			use:enhance={withPending(() => async ({ result }) => {
+				uninstallDialog = false;
+				await applyAction(result);
+				await tick();
+				focusFirstError();
+			})}
+		>
+			<input type="hidden" name="operation" value="uninstall" /><input
+				type="hidden"
+				name="confirm"
+				value="true"
+			/>
+		</form>
+		<ConfirmDialog
+			bind:open={uninstallDialog}
+			title={deleteUserData ? 'Delete data and uninstall Saturday?' : 'Uninstall Saturday?'}
+			description="Disconnect your assistant first. The UI will stop; owned application files, shortcuts and login registration will be removed. Data and backups are kept unless you select deletion."
+			confirmLabel={deleteUserData ? 'Delete data and uninstall' : 'Uninstall Saturday'}
+			formId="uninstall-saturday"
+			destructive
+		>
+			<Checkbox
+				form="uninstall-saturday"
+				name="delete_data"
+				label="Delete all Saturday data"
+				bind:checked={deleteUserData}
+				disabled={Boolean(data.deletionUnavailable)}
+			/>
+			{#if data.deletionUnavailable}<p class="text-sm text-muted-foreground">
+					{data.deletionUnavailable}
+				</p>{/if}
+			{#if deleteUserData}<Notice tone="error" title="Permanent deletion"
+					>This permanently deletes your jobs, network, documents, Profile designations, settings,
+					local backups and extension data. This cannot be undone. Download any backups you want to
+					keep first.</Notice
+				>
+				<ul class="list-disc space-y-1 pl-5 text-sm">
+					{#each data.deleteDataPaths as path}<li class="break-all">{path}</li>{/each}
+				</ul>
+				<Field id="delete_data_confirmation" label="Type DELETE DATA to confirm"
+					>{#snippet control(attrs)}<Input
+							{...attrs}
+							form="uninstall-saturday"
+							name="confirmation"
+							required
+							autocomplete="off"
+						/>{/snippet}</Field
+				>{/if}
+		</ConfirmDialog>
 	</SectionCard>
 
 	<SectionCard

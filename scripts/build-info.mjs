@@ -3,11 +3,17 @@ import { fileURLToPath } from 'node:url';
 
 // Shared by Vite and esbuild; production artifacts never need Git at runtime.
 export function readBuildInfo(root = fileURLToPath(new URL('../', import.meta.url))) {
+	if (process.env.SATURDAY_BUILD_ID) {
+		if (!/^local\.[a-f0-9]{12}$/.test(process.env.SATURDAY_BUILD_ID))
+			throw new Error('Invalid local build identity.');
+		return { id: process.env.SATURDAY_BUILD_ID, commit: null, dirty: true };
+	}
 	if (process.env.SATURDAY_BUILD_COMMIT) {
 		const commit = process.env.SATURDAY_BUILD_COMMIT;
 		if (!/^[a-f0-9]{40}$/.test(commit))
 			throw new Error('SATURDAY_BUILD_COMMIT must be a full commit SHA.');
-		return { id: `dev.${commit.slice(0, 12)}`, commit, dirty: false };
+		const dirty = process.env.SATURDAY_BUILD_DIRTY === '1';
+		return { id: `dev.${commit.slice(0, 12)}${dirty ? '.dirty' : ''}`, commit, dirty };
 	}
 	try {
 		const git = (args) =>

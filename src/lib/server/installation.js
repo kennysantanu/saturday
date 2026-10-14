@@ -1,3 +1,5 @@
+export const installationApiVersion = 1;
+
 // Installation identity and paths shared by scripts, web, CLI and MCP. No store initialization on read.
 import { existsSync, readFileSync, lstatSync } from 'node:fs';
 import { resolve, dirname, join, sep, basename, win32, posix, isAbsolute } from 'node:path';
@@ -163,6 +165,16 @@ export function getInstallation() {
 export function assertInstallationStorage({ allowFileRecovery = false } = {}) {
 	const value = getInstallation();
 	if (!value.descriptor_path) return;
+	const maintenancePath = join(value.data_root, 'server.state', 'maintenance.json');
+	let authorizedMaintenance = false;
+	if (process.env.SATURDAY_MAINTENANCE_TOKEN && existsSync(maintenancePath)) {
+		const flag = JSON.parse(readFileSync(maintenancePath, 'utf8'));
+		authorizedMaintenance =
+			flag.installation_id === value.installation_id &&
+			flag.token === process.env.SATURDAY_MAINTENANCE_TOKEN;
+	}
+	if (value.uninstalled && !authorizedMaintenance)
+		throw new Error('Saturday is uninstalled. Reinstall or repair it before using the workspace.');
 	for (const [key, path] of [
 		['database', value.database],
 		['files', join(value.files, 'manifest.json')],
@@ -449,12 +461,13 @@ async function windowsShortcut(value, artifact, action, folder) {
 export async function createDesktopShortcut({ desktop } = {}) {
 	const value = getInstallation();
 	const artifact = launcherArtifacts(value, {
-		...(desktop
-			? { desktop: resolve(desktop) }
+		...(desktop || value.desktop_shortcut
+			? { desktop: desktop ? resolve(desktop) : dirname(value.desktop_shortcut) }
 			: process.platform === 'linux'
 				? { desktop: await linuxDesktop(homedir()) }
 				: {})
 	});
+	let shortcut = artifact.desktop;
 	if (process.platform === 'darwin') {
 		for (const path of [
 			artifact.desktop,
@@ -483,11 +496,12 @@ export async function createDesktopShortcut({ desktop } = {}) {
 		const plist = `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${artifact.label}</string><key>CFBundleName</key><string>Open Saturday</string><key>CFBundleExecutable</key><string>open-saturday</string><key>CFBundlePackageType</key><string>APPL</string><key>SaturdayOwner</key><string>${artifact.marker}</string></dict></plist>`;
 		await ownedText(join(artifact.desktop, 'Contents', 'Info.plist'), plist, artifact.marker);
 	} else if (process.platform === 'win32')
-		return windowsShortcut(value, artifact, 'create', 'Desktop');
+		shortcut = await windowsShortcut(value, artifact, 'create', 'Desktop');
 	else if (process.platform === 'linux')
 		await ownedText(artifact.desktop, artifact.desktopContent, artifact.marker, 0o700);
 	else throw new Error('Desktop integration is unavailable on this OS.');
-	return artifact.desktop;
+	await atomicJson(value.descriptor_path, { ...value, desktop_shortcut: shortcut });
+	return shortcut;
 }
 export async function loginStartupStatus() {
 	const value = getInstallation();
@@ -573,4 +587,48 @@ export async function setLoginStartup(enabled) {
 			await release();
 		}
 	});
+}
+
+export async function removeDesktopShortcut() {
+	const value = getInstallation();
+	const artifact = launcherArtifacts(value, {
+		...(value.desktop_shortcut
+			? { desktop: dirname(value.desktop_shortcut) }
+			: process.platform === 'linux'
+				? { desktop: await linuxDesktop(homedir()) }
+				: {})
+	});
+	if (process.platform === 'win32') return windowsShortcut(value, artifact, 'remove', 'Desktop');
+	if (!existsSync(artifact.desktop)) return;
+	if ((await fs.lstat(artifact.desktop)).isSymbolicLink())
+		throw new Error('The shortcut path is linked; it was retained.');
+	const owned =
+		process.platform === 'darwin'
+			? join(artifact.desktop, 'Contents', 'MacOS', 'open-saturday')
+			: artifact.desktop;
+	if (!(await fs.readFile(owned, 'utf8')).includes(artifact.marker))
+		throw new Error('An unowned desktop item was retained.');
+	await fs.rm(artifact.desktop, { recursive: true });
+}
+
+export async function refreshLoginStartup(previous, next, enabled) {
+	if (!enabled) return;
+	const before = launcherArtifacts(previous),
+		after = launcherArtifacts(next);
+	if (process.platform === 'win32') {
+		await windowsShortcut(next, after, 'create', 'Startup');
+		return;
+	}
+	if (!existsSync(before.login))
+		throw new Error('Login registration changed during update. Review startup before repair.');
+	const content = await fs.readFile(before.login, 'utf8');
+	if (content === after.loginContent) return;
+	if (content !== before.loginContent)
+		throw new Error('An unrecognized login registration was retained.');
+	await ownedText(
+		after.login,
+		after.loginContent,
+		process.platform === 'darwin' ? after.label : after.marker
+	);
+	// The updated file is loaded at the next sign-in. Do not run a login job now or revive a stopped UI.
 }
