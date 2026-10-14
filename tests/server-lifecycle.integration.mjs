@@ -116,6 +116,31 @@ test('owned background server reuses, handles collisions, protects active work a
 		assert.equal(deniedStartup.status, 403);
 		const unchangedStartup = await (await startup(cookie)).json();
 		assert.equal(unchangedStartup.type, 'success'); // Already disabled: no real login registration is created.
+		assert.ok(html.includes('Check for updates'));
+		assert.ok(html.includes('Uninstall Saturday'));
+		const progress = await fetch(`${first.url}/settings/installation`, { headers: { cookie } });
+		assert.equal(progress.status, 200);
+		const unauthorizedInstall = await fetch(`${first.url}/settings?/installationOperation`, {
+			method: 'POST',
+			headers: {
+				origin: first.url,
+				'content-type': 'application/x-www-form-urlencoded',
+				'x-sveltekit-action': 'true'
+			},
+			body: 'operation=uninstall&confirm=true'
+		});
+		assert.equal((await unauthorizedInstall.json()).status, 403);
+		const staleInstall = await fetch(`${first.url}/settings?/installationOperation`, {
+			method: 'POST',
+			headers: {
+				cookie,
+				origin: first.url,
+				'content-type': 'application/x-www-form-urlencoded',
+				'x-sveltekit-action': 'true'
+			},
+			body: 'operation=update&confirm=true&check_id=unknown'
+		});
+		assert.equal((await staleInstall.json()).status, 409);
 		const restarted = await post('restart', { cookie });
 		assert.equal(restarted.status, 200);
 		const response = await restarted.json();

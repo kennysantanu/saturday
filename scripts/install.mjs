@@ -298,6 +298,51 @@ export async function install(values) {
 		}
 		let config = existsSync(descriptor) ? JSON.parse(await fs.readFile(descriptor, 'utf8')) : null;
 		let app = config?.code_root || join(root, 'app');
+		if (config?.uninstalled) {
+			if (config.uninstall?.status !== 'complete')
+				throw new Error(
+					'Uninstall cleanup is incomplete. Finish the confirmed uninstall before reinstalling.'
+				);
+			stage = await fs.mkdtemp(join(root, 'install-stage-'));
+			const source = values.source
+				? resolve(values.source)
+				: (await downloadSource(stage, config.build?.commit || undefined)).source;
+			const operations = await import(
+				pathToFileURL(join(source, 'src/lib/server/installation-operations.js'))
+			);
+			process.env.SATURDAY_INSTALLATION_PATH = descriptor;
+			for (const name of [
+				'SATURDAY_PROJECT_ROOT',
+				'SATURDAY_DB_PATH',
+				'SATURDAY_FILES_PATH',
+				'SATURDAY_EXTENSION_STATE_PATH',
+				'SATURDAY_EXTENSIONS_PATH'
+			])
+				delete process.env[name];
+			let operation = await operations.queueOperation('repair', {
+				source,
+				retry_pdf: !values['skip-pdf']
+			});
+			while (
+				[
+					'queued',
+					'staging',
+					'waiting_for_disconnect',
+					'backing_up',
+					'publishing',
+					'migrating',
+					'restarting'
+				].includes(operation.status) &&
+				!operation.error
+			) {
+				await new Promise((r) => setTimeout(r, 500));
+				operation = operations.operationStatus();
+			}
+			if (operation.status !== 'complete')
+				throw new Error(`${operation.error || operation.step}. See ${operation.logs}`);
+			config = JSON.parse(await fs.readFile(descriptor, 'utf8'));
+			app = config.code_root;
+		}
 		if (!config && existsSync(app))
 			throw new Error(
 				'An application directory already exists without a descriptor. Inspect/repair it; installation will not overwrite it.'
@@ -309,11 +354,42 @@ export async function install(values) {
 		if (!config) {
 			stage = await fs.mkdtemp(join(root, 'install-stage-'));
 			say('Preparing an exact Saturday source snapshot…');
-			const selected = values.source
+			let selected = values.source
 				? { source: resolve(values.source), commit: null }
-				: await downloadSource(stage, values.commit);
+				: await downloadSource(stage, values.commit || values['bootstrap-commit']);
+			if (!values.source && !values.commit) {
+				const operations = await import(
+					pathToFileURL(join(selected.source, 'src/lib/server/installation-operations.js'))
+				);
+				const target = await operations.selectTarget({ build: { commit: null } });
+				if (target.commit !== selected.commit) {
+					const next = join(stage, 'selected');
+					await fs.mkdir(next);
+					selected = await downloadSource(next, target.commit);
+				}
+				selected.target = target;
+			}
 			const candidate = join(stage, 'app');
 			await copySource(selected.source, candidate);
+			const operationServices = await import(
+				pathToFileURL(join(candidate, 'src/lib/server/installation-operations.js'))
+			);
+			const packageInfo = JSON.parse(await fs.readFile(join(candidate, 'package.json'), 'utf8'));
+			operationServices.validateDistribution(packageInfo.saturday);
+			const baseRuntime = {
+				descriptor_path: path,
+				installation_id: randomUUID(),
+				node_path: process.execPath,
+				runtime_root:
+					process.platform === 'win32'
+						? dirname(process.execPath)
+						: dirname(dirname(process.execPath)),
+				runtime_owned: process.execPath.startsWith(join(root, 'runtime') + sep)
+			};
+			const preparedRuntime = await operationServices.prepareRuntime(
+				baseRuntime,
+				packageInfo.saturday
+			);
 			const env = {
 				...process.env,
 				SATURDAY_INSTALLATION_PATH: '',
@@ -324,12 +400,16 @@ export async function install(values) {
 				SATURDAY_EXTENSIONS_PATH: '',
 				SATURDAY_SETUP_STAGING: '1',
 				PUPPETEER_CACHE_DIR: join(root, 'runtime', 'chrome'),
-				PATH: `${dirname(process.execPath)}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH || ''}`,
-				...(selected.commit ? { SATURDAY_BUILD_COMMIT: selected.commit } : {})
+				PATH: `${dirname(preparedRuntime.node_path)}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH || ''}`,
+				SATURDAY_BUILD_COMMIT: selected.commit || '',
+				SATURDAY_BUILD_ID: selected.commit
+					? ''
+					: `local.${(await operationServices.codeFingerprint(candidate)).slice(0, 12)}`,
+				SATURDAY_BUILD_DIRTY: ''
 			};
 			say('Building Saturday before activation…');
 			await run(
-				process.execPath,
+				preparedRuntime.node_path,
 				[
 					join(candidate, 'scripts', 'setup.mjs'),
 					'--managed',
@@ -340,13 +420,14 @@ export async function install(values) {
 				{ cwd: candidate, env }
 			);
 			config = JSON.parse(await fs.readFile(join(stage, 'workspace', 'installation.json'), 'utf8'));
+			config.installation_id = preparedRuntime.installation_id;
 			config.code_root = app;
-			config.runtime_root =
-				process.platform === 'win32'
-					? dirname(process.execPath)
-					: dirname(dirname(process.execPath));
-			config.node_path = process.execPath;
-			config.runtime_owned = config.runtime_root.startsWith(join(root, 'runtime') + sep);
+			config.release = selected.target?.release || null;
+			config.distribution = selected.target?.kind || 'development';
+			config.runtime_root = preparedRuntime.runtime_root;
+			config.node_path = preparedRuntime.node_path;
+			config.runtime_owned = preparedRuntime.runtime_owned;
+			config.runtime_history = preparedRuntime.runtime_history;
 			config.code_owned = true;
 			config.pdf_cache = join(root, 'runtime', 'chrome');
 			// Shared setup creates the real stores only after code has built. Candidate stores are disposable.
@@ -391,7 +472,9 @@ export async function install(values) {
 			shared.installationEnvironment({ ...config, descriptor_path: descriptor }),
 			{
 				SATURDAY_SETUP_STAGING: '',
-				...(config.build?.commit ? { SATURDAY_BUILD_COMMIT: config.build.commit } : {}),
+				SATURDAY_BUILD_COMMIT: config.build?.commit || '',
+				SATURDAY_BUILD_ID: config.build?.id?.startsWith('local.') ? config.build.id : '',
+				SATURDAY_BUILD_DIRTY: config.build?.dirty ? '1' : '',
 				...(config.pdf_cache ? { PUPPETEER_CACHE_DIR: config.pdf_cache } : {})
 			}
 		);
@@ -415,6 +498,12 @@ export async function install(values) {
 				`Shortcut unavailable: ${e.message}. Reopen with: "${config.node_path}" "${join(app, 'scripts', 'start.mjs')}" open --installation "${descriptor}"`
 			);
 		}
+		const refreshed = JSON.parse(await fs.readFile(descriptor, 'utf8'));
+		const operationServices = await import(
+			pathToFileURL(join(app, 'src/lib/server/installation-operations.js'))
+		);
+		refreshed.code_fingerprint ??= await operationServices.codeFingerprint(app);
+		await shared.atomicJson(descriptor, refreshed);
 		// Preserve actual login registration; do not enable it on installation/reinstallation.
 		const server = await import(
 			pathToFileURL(join(app, 'src', 'lib', 'server', 'server-lifecycle.js'))
@@ -438,12 +527,20 @@ export async function install(values) {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
 	try {
-		const { values } = parseArgs({
+		const { values, positionals } = parseArgs({
+			allowPositionals: true,
 			options: {
+				installation: { type: 'string' },
+				'check-id': { type: 'string' },
+				'operation-id': { type: 'string' },
+				confirm: { type: 'boolean' },
+				'delete-data': { type: 'boolean' },
+				background: { type: 'boolean' },
 				root: { type: 'string' },
 				desktop: { type: 'string' },
 				source: { type: 'string' },
 				commit: { type: 'string' },
+				'bootstrap-commit': { type: 'string' },
 				'skip-pdf': { type: 'boolean' },
 				'retry-pdf': { type: 'boolean' },
 				'no-open': { type: 'boolean' },
@@ -452,10 +549,79 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
 		});
 		if (values.commit && !/^[a-f0-9]{40}$/.test(values.commit))
 			throw new Error('--commit must be a full GitHub commit SHA.');
-		const result = await install(values);
+		if (values.installation) {
+			for (const name of [
+				'SATURDAY_PROJECT_ROOT',
+				'SATURDAY_DB_PATH',
+				'SATURDAY_FILES_PATH',
+				'SATURDAY_EXTENSION_STATE_PATH',
+				'SATURDAY_EXTENSIONS_PATH'
+			])
+				delete process.env[name];
+			process.env.SATURDAY_INSTALLATION_PATH = resolve(values.installation);
+		}
+		const action = positionals[0] || 'install';
+		let operations = null;
+		if (action !== 'install') {
+			const local = new URL('../src/lib/server/installation-operations.js', import.meta.url);
+			if (existsSync(local)) operations = await import(local);
+			else {
+				const descriptor =
+					values.installation || join(resolve(values.root || '.'), 'installation.json');
+				const config = JSON.parse(await fs.readFile(descriptor, 'utf8'));
+				operations = await import(
+					pathToFileURL(join(config.code_root, 'src/lib/server/installation-operations.js'))
+				);
+			}
+		}
+		const { checkUpdates, operationStatus, queueOperation, executeOperation } = operations || {};
+		let result;
+		if (action === 'check') result = await checkUpdates();
+		else if (action === 'status') result = operationStatus();
+		else if (action === 'execute') {
+			await executeOperation(values['operation-id'], { downloadSource, copySource, run });
+			result = operationStatus();
+		} else if (['update', 'repair', 'uninstall'].includes(action)) {
+			if (action === 'update' && !values['check-id']) {
+				const check = await checkUpdates();
+				say(`Selected ${check.target.release || check.target.commit}`);
+				values['check-id'] = check.id;
+			}
+			result = await queueOperation(action, {
+				check_id: values['check-id'],
+				confirm: values.confirm,
+				delete_data: values['delete-data'],
+				source: values.source,
+				retry_pdf: values['retry-pdf']
+			});
+			if (!values.background) {
+				let step = '';
+				while (
+					[
+						'queued',
+						'staging',
+						'backing_up',
+						'publishing',
+						'migrating',
+						'restarting',
+						'removing',
+						'waiting_for_disconnect'
+					].includes(result.status) &&
+					!result.error
+				) {
+					if (step !== result.step) {
+						step = result.step;
+						say(step);
+					}
+					await new Promise((r) => setTimeout(r, 500));
+					result = operationStatus();
+				}
+				if (result.status !== 'complete') process.exitCode = 1;
+			}
+		} else if (action === 'install') result = await install(values);
+		else throw new Error('Use install/check/update/repair/uninstall/status.');
 		if (values.json) console.log(JSON.stringify(result));
-		else
-			say(`Saturday is ready at ${result.url}. Close this installer; reopen using Open Saturday.`);
+		else say(result?.url ? `Saturday is ready at ${result.url}.` : JSON.stringify(result));
 	} catch (e) {
 		if (process.argv.includes('--json'))
 			console.log(

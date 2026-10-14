@@ -1,3 +1,11 @@
+import {
+	checkUpdates,
+	installedCheck,
+	operationStatus,
+	queueOperation,
+	ownedRemovalTargets,
+	operationPaths
+} from '$lib/server/installation-operations.js';
 import { serverSummary, controlServer, validServerSession } from '$lib/server/server-lifecycle.js';
 import { getInstallation, loginStartupStatus, setLoginStartup } from '$lib/server/installation.js';
 import { spawn } from 'node:child_process';
@@ -110,7 +118,24 @@ export async function load({ setHeaders, url }) {
 	} finally {
 		db.close();
 	}
+	let installationOperation = null,
+		updateCheck = null,
+		installationError = null,
+		deleteDataPaths = [],
+		deletionUnavailable = null;
+	try {
+		installationOperation = operationStatus();
+		updateCheck = installedCheck();
+		deleteDataPaths = ownedRemovalTargets(installation, true);
+	} catch (e) {
+		deletionUnavailable = e.message;
+	}
 	return {
+		installationOperation,
+		updateCheck,
+		installationError,
+		deleteDataPaths,
+		deletionUnavailable,
 		extensionsEnabled,
 		extensionsError,
 		diagnostics,
@@ -167,7 +192,44 @@ async function boundedForm(request) {
 		headers: { 'content-type': request.headers.get('content-type') ?? '' }
 	}).formData();
 }
+function installationAuthorized({ request, cookies, url }) {
+	return (
+		request.headers.get('origin') === url.origin &&
+		url.origin === process.env.ORIGIN &&
+		validServerSession(cookies.get('saturday-server-session'))
+	);
+}
 export const actions = {
+	checkUpdates: async (event) => {
+		if (!installationAuthorized(event))
+			return fail(403, { installationError: 'Use this installation’s local browser session.' });
+		try {
+			await checkUpdates();
+			return { updatesChecked: true };
+		} catch (e) {
+			return fail(409, { installationError: e.message });
+		}
+	},
+	installationOperation: async (event) => {
+		if (!installationAuthorized(event))
+			return fail(403, { installationError: 'Use this installation’s local browser session.' });
+		try {
+			const values = await event.request.formData(),
+				operation = String(values.get('operation')),
+				deleteData = values.get('delete_data') === 'on';
+			if (deleteData && values.get('confirmation') !== 'DELETE DATA')
+				throw new Error('Type DELETE DATA to confirm permanent deletion.');
+			const result = await queueOperation(operation, {
+				check_id: String(values.get('check_id') || ''),
+				confirm: values.get('confirm') === 'true',
+				delete_data: deleteData,
+				retry_pdf: operation === 'repair'
+			});
+			return { installationOperation: result };
+		} catch (e) {
+			return fail(409, { installationError: e.message });
+		}
+	},
 	loginStartup: async ({ request, cookies, url }) => {
 		if (
 			request.headers.get('origin') !== url.origin ||

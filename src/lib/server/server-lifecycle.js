@@ -64,7 +64,17 @@ function maintenanceActive() {
 	const path = serverPaths().maintenance;
 	if (!existsSync(path)) return false;
 	const record = JSON.parse(readFileSync(path, 'utf8'));
+	if (
+		process.env.SATURDAY_MAINTENANCE_TOKEN &&
+		record.token === process.env.SATURDAY_MAINTENANCE_TOKEN &&
+		alive(record.pid)
+	)
+		return false;
 	if (alive(record.pid)) return true;
+	if (record.persistent)
+		fail(
+			'Interrupted installation maintenance requires repair. Run the installation repair command.'
+		);
 	unlinkSync(path);
 	return false;
 }
@@ -94,13 +104,33 @@ export function withServerActivity(operation) {
 		throw e;
 	}
 }
-async function claimMaintenance() {
+export async function claimInstallationMaintenance({ persistent = false, recover = false } = {}) {
+	const existing = serverPaths().maintenance;
+	if (recover && existsSync(existing)) {
+		const record = JSON.parse(readFileSync(existing, 'utf8'));
+		if (
+			!alive(record.pid) &&
+			record.persistent &&
+			record.installation_id === getInstallation().installation_id
+		)
+			await fs.rm(existing);
+	}
 	const paths = serverPaths();
 	maintenanceActive();
-	await fs.writeFile(paths.maintenance, JSON.stringify({ pid: process.pid }), {
-		flag: 'wx',
-		mode: 0o600
-	});
+	await fs.mkdir(paths.root, { recursive: true, mode: 0o700 });
+	await fs.writeFile(
+		paths.maintenance,
+		JSON.stringify({
+			pid: process.pid,
+			token: randomBytes(32).toString('hex'),
+			persistent,
+			installation_id: getInstallation().installation_id
+		}),
+		{
+			flag: 'wx',
+			mode: 0o600
+		}
+	);
 	try {
 		const markers = existsSync(paths.activities) ? readdirSync(paths.activities) : [];
 		for (const name of markers) {
@@ -245,6 +275,8 @@ async function freePort(preferred) {
 	throw new Error('Could not reserve a loopback port.');
 }
 export async function startServer({ open = false } = {}) {
+	if (maintenanceActive())
+		fail('Installation maintenance is running. Wait or repair an interrupted operation.');
 	assertInstallationStorage();
 	const installation = getInstallation(),
 		paths = serverPaths();
@@ -455,7 +487,7 @@ export async function runSupervisor(port) {
 				return;
 			}
 			const previous = { ...record };
-			const restoreAdmission = await claimMaintenance();
+			const restoreAdmission = await claimInstallationMaintenance();
 			try {
 				operation = true;
 				record.status = action === 'stop' ? 'stopping' : 'restarting';

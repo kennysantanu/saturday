@@ -32,7 +32,11 @@
 		"extensions:generate": "node scripts/extension-build.mjs",
 		"open": "node scripts/start.mjs open",
 		"stop": "node scripts/start.mjs stop",
-		"restart": "node scripts/start.mjs restart"
+		"restart": "node scripts/start.mjs restart",
+		"update:check": "node scripts/install.mjs check",
+		"update": "node scripts/install.mjs update",
+		"repair": "node scripts/install.mjs repair",
+		"uninstall": "node scripts/install.mjs uninstall"
 	},
 	"devDependencies": {
 		"@internationalized/date": "^3.12.4",
@@ -67,5 +71,21 @@
 		"yauzl": "^3.4.0",
 		"yazl": "^3.3.1",
 		"zod": "^4.6.5"
+	},
+	"saturday": {
+		"installation_api": 1,
+		"node_minimum": "22.13.0",
+		"storage": {
+			"database": {
+				"format": "saturday.database.numeric",
+				"minimumVersion": 1,
+				"currentVersion": 1
+			},
+			"manifest": {
+				"format": "saturday.files.numeric",
+				"minimumVersion": 1,
+				"version": 2
+			}
+		}
 	}
 }

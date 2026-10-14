@@ -740,6 +740,7 @@ try {
 	await registerExtensionRuntime();
 } catch (e) {
 	console.error(`Extension runtime registration failed: ${e.message}`);
+	if (e.code === 'BUSY') throw e;
 }
 await refreshExtensionTools();
 const extensionRefresh = setInterval(() => void refreshExtensionTools(), 1000);

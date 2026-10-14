@@ -51,6 +51,6 @@ else
  ENGINE="$ROOT/runtime/downloads/install-$COMMIT.mjs"
  curl --proto '=https' --tlsv1.2 -fL --retry 2 -o "$ENGINE.part" "https://raw.githubusercontent.com/kennysantanu/saturday/$COMMIT/scripts/install.mjs"
  mv "$ENGINE.part" "$ENGINE"
- set -- --commit "$COMMIT" "$@"
+ set -- --bootstrap-commit "$COMMIT" "$@"
 fi
 "$NODE" "$ENGINE" --root "$ROOT" "$@"
