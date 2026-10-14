@@ -1,6 +1,6 @@
 # Using Saturday
 
-Saturday keeps your job search in a SQLite file on your computer. You can track jobs entirely through the web app; connecting an assistant is optional.
+Saturday keeps your job records and documents on your computer. Use the web app on its own or connect an optional assistant. For installation, start with the [README](../README.md#install-and-start).
 
 ## Add and find jobs
 
@@ -54,76 +54,85 @@ From the job chooser, **Add person** opens the normal form and returns to the ch
 
 **Interactions** is optional. Add a completed interaction with its date and **Interaction note**; backdated entries are supported, future dates belong in Follow-up. Edit a mistaken date/note or Delete and confirm to permanently remove one entry. Recording an interaction never clears a reminder. History sorts by date, then recording order; paginated history and linked jobs have independent pages. “Last recorded interaction” summarizes notes on file, including unanswered outreach; “None recorded” does not prove you have never contacted someone. Permanent person deletion is outside this version.
 
+## Documents and Profile
+
+**Documents** holds reusable files. Choose **Upload** to save a file immediately (up to 25 MiB), or **New document** to create Markdown. Search by filename. Each row offers Edit and a menu with Preview, Download, Rename, Duplicate, and permanent Delete. There is no Trash or automatic version history.
+
+Markdown has a basic visual editor and source mode; unsupported formatting stays in source mode to preserve it. HTML and TXT use source editors. Editing is limited to valid UTF-8 text up to 1 MiB. PDFs support browser preview/download; other binary formats download only. Click **Save** explicitly. If another editor or assistant changes the file, reload and reconcile, or save your draft as a separate copy.
+
+Open **Profile** from the Documents header to assign reusable context:
+
+| Designation           | Required format |
+| --------------------- | --------------- |
+| Master CV             | Markdown        |
+| Resume template       | HTML            |
+| Cover letter template | HTML            |
+| Career direction      | Markdown        |
+| Assistant preferences | Markdown        |
+
+For each designation, select an existing document, upload one, or create one using the editor. Selected files must be readable UTF-8 within the 1 MiB limit. They remain ordinary Documents entries with designation labels. Clearing or replacing a selection keeps the old file. PDF/Word conversion is not included.
+
+On a job, choose **Manage documents** to upload/create attachments or **Copy to this job** for an independent copy of a reusable document. Editing a job copy never edits its source. The main Documents page does not browse job folders.
+
+To export a resume, save self-contained HTML and choose **Generate PDF** from its preview. Saturday saves a new PDF beside the HTML; existing PDFs are preserved with numbered filenames. Later HTML edits do not update previous PDFs. Scripts and external resources are blocked, so use self-contained print CSS and installed fonts. PDF generation requires Chrome prepared during setup.
+
 ## Data and assistant connection
 
-**Settings** displays the database file's location. The default is `data/saturday.db` in the repository. Use the Backup and restore section to save or recover your data, as described below.
+**Settings → Local database** shows the actual data path and **Open folder** action. Expand **Diagnostics** for build, storage versions, descriptor, backup/recovery, and log paths. Source setup normally uses the repository's `data/`; managed installs use a separate [per-user installation root](installation-guide.md#data-locations-and-installation-descriptor). Repeating setup preserves data. Missing initialized storage requires repair/recovery, not a reset.
 
-To connect a local assistant, build Saturday and follow **Settings → Connect an assistant**. Its generated configuration uses paths for your installation and the same database file as the web app. After reconnecting the client, ask it to list your jobs to confirm access. The assistant can list and read jobs, create a job, and add a dated update. The assistant can also edit job details, schedule follow-ups, and set an assessment score with an explanation. Job update corrections/removals, dismissal, and reopening remain in the web app. Network tools can find/edit people, manage job relationships/follow-ups, and read/add/correct/delete scoped interactions with explicit confirmation for deletion. The [assistant guide](assistant-guide.md) has the full connection steps and troubleshooting. An assistant installing Saturday for you can follow the [agent setup guide](agent-guide.md).
+**Settings → Connect an assistant** generates configuration for a supported local MCP client. Reconnect the client, call `get_saturday_info`, and compare installation, dataset, and build identities with Settings. Read a known job when available. Copying configuration alone does not verify access. See the [assistant guide](assistant-guide.md) for connection steps and the [MCP reference](mcp-reference.md) for tools.
 
-Jobs and people show their record numbers (such as **#123**) in lists, headings and relationship pickers. Use these when asking an assistant to read or update a particular job or person. Numbers are separate for Jobs and Network; include which record you mean.
-
-Under **Settings → Local database → Diagnostics**, expand the disclosure to copy your development build, actual database/manifest versions, and storage/backup/recovery paths when reporting a problem.
+Jobs and people show numbers such as **#123** in lists, headings, and relationship pickers. Their sequences are separate; say “job #123” or “person #123” when asking your assistant to change a record. Refresh the browser after assistant writes. Job history corrections/removals, dismissal, and reopening remain browser actions; assistant scores are read-only in the UI.
 
 ## Backup and restore
 
-In **Settings → Backup and restore**, click **Back up now** to save your database and files together. Choose **Database only** for a smaller snapshot of jobs, people, follow-ups, relationships and history. Choose **Files only** to save documents and attachments separately. Saved backups appear in one history; a complete set has one **Download** link for an importable ZIP containing both artifacts. A backup completes only when both artifacts of a selected complete set are published. Files are not encrypted and contain private career information; copy important backups to another device or location if you need protection against loss of this computer.
+In **Settings → Backup and restore**, choose what to include, then **Back up now**:
 
-To restore, select a saved backup and choose **Preview restore**. A complete set previews both records and files; database-only restore keeps existing files; files-only restore replaces files. You can also upload a SQLite backup (up to 100 MiB) under **Import a database backup**; an uploaded file takes priority. Choose **Preview restore**, review current and incoming counts, then confirm the appropriate restore action. Restoring replaces all current jobs, people, job relationships and both histories rather than merging them. It preserves IDs, dates, history, and assistant attribution and keeps a recovery backup of the records it replaces. No restart is needed. Refresh other open tabs to see restored data.
+| Contents                     | Saves                                                                     | Download                    |
+| ---------------------------- | ------------------------------------------------------------------------- | --------------------------- |
+| Database and files (default) | Core records, reusable documents, Profile selections, and job attachments | One importable combined ZIP |
+| Database only                | Jobs, people, relationships, follow-ups, and both histories               | SQLite backup               |
+| Files only                   | File manifest, Profile selections, reusable documents, and attachments    | File ZIP                    |
 
-Previews expire after ten minutes and become invalid if records change. Prepare again if this happens. A restore ID can be attempted only once, including failed attempts. If a response is interrupted, inspect your records and saved recovery backups before preparing another restore. A corrupt active database needs offline recovery; the in-app workflow requires a healthy installation. Backups from newer app schemas are rejected until you upgrade Saturday. Only the numeric-ID baseline is supported. Older UUID-era databases and earlier file formats are rejected without conversion or deletion. Database backups preserve all job/Network data, dataset identity and allocation counters; rolling back within the same dataset does not reuse newer IDs.
+Core backups exclude extension databases. Backups contain private information and are unencrypted. They are kept until you delete them; there is no automatic schedule or retention policy. Download copies to another drive to protect against disk failure.
 
 ### Saved backups
 
-Choose Database and files, Database only, or Files only, then Back up now. Saved entries show their contents, date and size. Download a complete combined entry as one ZIP; use Import a combined backup ZIP to restore it on another or a clean installation. Restore shows a preview and requires confirmation; a safety snapshot is kept before replacing data. Delete requires confirmation and removes only the selected artifacts. Active restore sources cannot be deleted until their preview expires. Partial entries are labeled and offer the available artifact for independent recovery.
+History shows contents, date, size, and Download, Restore, and confirmed Delete actions. A complete combined backup requires both artifacts; an incomplete entry is labeled **Partial** and retains the available artifact for independent recovery. Delete removes only selected backup artifacts, not live records, and rejects sources used by an active restore preview.
 
-There are no automatic backups or retention settings. Download copies to another drive: local backups do not protect against disk failure. Database archives retain their 100 MiB limit; file ZIPs have no total-size cap. New archives normally live under `data/backups/database/` and `data/backups/files/`; supported older adjacent archives remain readable. Extension backups stay separate on Extensions.
+Use **Import a combined backup ZIP** to add a downloaded complete backup to history. Standalone database imports are under **Import a database backup** (up to 100 MiB); an uploaded database takes priority over the selected saved backup. File ZIP imports are under **Advanced file recovery**. Importing an archive is separate from confirming a restore.
 
-## Documents and Master CV
+### Restore a backup
 
-Documents holds your reusable files. Click **Upload**, then select a file (up to 25 MiB) to upload immediately or choose **New document** to create Markdown. Search filenames and use a row's Edit action. Its three-dot menu contains Preview, Download, Rename, Duplicate and permanent Delete. Duplicate creates `name copy.ext`, then numbered copies. There is no Trash or automatic version history.
+Select a saved backup and choose **Preview restore** (or Restore from its history entry). Review current/incoming counts and warnings, then confirm. Database restore replaces all core records rather than merging them; file restore replaces the selected collection; a combined restore replaces both. Recovery snapshots are saved first. Database-only restore leaves files in place, and file-only restore leaves records in place. Refresh other tabs after completion.
 
-Markdown uses a basic visual editor with a source fallback. Files with unsupported formatting stay in source mode to preserve it. HTML and TXT use source text editors. Text editing is limited to 1 MiB of valid UTF-8. PDFs have browser preview/download; other formats download only. Explicit Save persists your edits. If an assistant edits the same file, reload/reconcile or save your draft as a separate copy rather than overwriting silently.
+Previews expire after ten minutes and become invalid on relevant changes. Each preview can be attempted once, including failed attempts. If a response is interrupted, inspect current data and recovery backups before preparing another restore. A corrupt active database requires offline recovery; the in-app workflow needs a healthy target.
 
-Open **Profile** from the Documents header to manage Master CV, Resume template, Cover letter template, Career direction, and Assistant preferences. For each, **Select document** chooses an existing compatible file, **Upload** uploads and selects a file, and **Create new** creates and selects one using the existing editor. Master CV, Career direction, and Assistant preferences use Markdown; templates use HTML. Special documents must be readable UTF-8 text within the 1 MiB editor limit. Use **Edit** to change the selected file or its three-dot menu to **Clear selection** with confirmation. Clearing or replacing a selection keeps the previous file. The files remain ordinary Documents entries with designation labels; PDF/Word conversion is not included.
+Only supported storage formats can be restored. Older UUID-era databases and unbound file backups are rejected without deletion or guessed conversion. Supported dataset-bound version-1 file manifests upgrade to the current format. Newer schemas require a compatible app. Same-dataset database restores preserve allocation counters so older backups do not reuse newer record numbers.
 
-Each job has its own Documents section with a **Manage documents** button. Upload/create there or use **Copy to this job** to make an independent copy of a user document. Editing a job copy never edits its source or Master CV. The user Documents page does not browse job folders.
+### File backups and dataset mismatches
 
-For resumes, your assistant can create a reusable HTML template and a job-tailored HTML file. Review/edit the HTML source, save, then choose **Generate PDF** on its preview. Saturday saves a new PDF beside the HTML automatically. Existing PDFs are preserved with numbered filenames; editing HTML later does not update earlier PDFs. The renderer blocks scripts and external resources, so use self-contained print CSS and installed fonts.
+Under **Advanced file recovery**, preview **Add missing files** or **Replace entire file collection**. Add missing stops on conflicts; Replace installs the incoming collection. A complete file recovery archive is retained before changes. File ZIPs have no total-size cap, but staging/recovery needs enough disk space; the database artifact limit remains 100 MiB.
 
-## File backups
+Job attachments belong to a database dataset, not just a job number. If database and files come from different datasets, normal job-attachment access is blocked. Files are kept; user documents and explicit recovery downloads/copies to Documents remain available. Restore matching database/file backups in either order to recover normal access. Add missing cannot merge different populated datasets.
 
-**Back up files only** saves a ZIP containing the file manifest, user documents and job attachments. There is no total archive-size cap; sufficient disk space is required for staging and recovery. Download archives from Saved backups; import and recover them under **Advanced file recovery**. Preview **Add missing files** or **Replace entire file collection** before restoring; conflicts stop additive restore. A complete recovery archive is kept before changes.
+Same-dataset folders without a current job remain recoverable, and their numbers are reserved against future job creation. Interrupted coordinated restores block access until [offline recovery](agent-guide.md#file-storage-and-recovery-commands) completes. Do not delete recovery markers or change dataset IDs.
 
-Database backups and file backups are separate. Database restore leaves files in place. Job attachments belong to a database dataset, so matching job numbers alone do not establish ownership. If datasets differ, Settings explains the mismatch and normal job-file access is blocked; user documents and explicit recovery downloads/copies to Documents remain available. Restore matching database/file backups in either order. Unmatched same-dataset job folders remain available for explicit recovery, and their numbers are reserved against future job creation. Add missing cannot merge different populated datasets; use a reviewed Replace restore to install another file collection. **Back up now** with Database and files captures a coordinated pair; selecting that set in Saved backup previews restoring both. Interrupted coordinated restores block access until offline recovery completes. Backups are private and unencrypted; keep copies on another disk if you need protection from disk failure.
+New archives normally live under `data/backups/database/` and `data/backups/files/`, with actual paths shown in Diagnostics. Supported older adjacent backup folders remain readable.
 
 ## Extensions
 
-Enable Extensions in Settings to show its navigation item. Open an available extension from the directory. Its kebab menu provides enable/disable, independent database backup/restore, and confirmed removal. Disable preserves data; removal requires stopping Saturday and completing the displayed uninstall command. The Settings master switch preserves individual choices. Core backups exclude extension databases. Interview Practice provides a searchable question bank, saved answers, and practice drafts that save only when you click Save answer. See the [extension guide](extension-guide.md) for installing and recovering extensions.
+Enable the master switch in **Settings → Extensions** to show navigation. Install trusted packages using the [extension guide](extension-guide.md); extensions execute code with Saturday's access. Interview Practice is the included starter, with a question bank, saved answers, and drafts saved only through **Save answer**.
 
-Settings shows your data directory with **Open folder** and selectable installation/log paths under Diagnostics. If opening is unavailable, copy the path. Re-running setup preserves records, documents and extension state. Source installations keep their existing data location; setup does not silently move it into an OS application-data folder. If initialized storage disappears, restore/repair it rather than resetting setup. Desktop shortcuts, login startup and background controls are still planned.
+The Extensions directory provides open, enable/disable, independent backup/restore, and confirmed removal. Disable preserves data. Removal disables the extension and requires stopping Saturday/MCP and completing the displayed uninstall command. The master switch preserves individual choices. Back up each extension separately; core database/file backups exclude its database.
 
-## Saturday server
+## Installation and server settings
 
-Settings → Saturday server shows whether the UI is managed and provides Restart and Stop server. Stop asks for confirmation; active data or backup operations must finish first. Closing your browser does not stop Saturday. Stopping the UI leaves an already connected assistant's MCP process available.
+Use the desktop shortcut to reopen Saturday. Settings provides server controls, optional startup at login, and manual update/repair/uninstall. See the installation guide for:
 
-Run `npm run open` from the repository to start or reuse Saturday and open the Dashboard. `npm run stop` stops the owned UI; `npm run restart` requests a restart and `npm run status` checks readiness and its actual local address. The Settings page reconnects after a restart, with a timeout and recovery instructions if startup fails. Without JavaScript, reopen or reload once status is ready. Keep the displayed log path when troubleshooting. Desktop shortcuts and optional Start at login are available through the development installer.
+- [Installation and requirements](installation-guide.md#requirements)
+- [Open, stop, and restart](installation-guide.md#open-stop-and-restart)
+- [Start at login](installation-guide.md#start-at-login)
+- [Updates](installation-guide.md#updates), [repair](installation-guide.md#repair), and [uninstall](installation-guide.md#uninstall)
 
-## Installing and reopening Saturday
-
-The development installer uses a private runtime and a separate managed workspace. Follow the OS commands in [README](../README.md#install-and-start); first installation uses Terminal or Command Prompt. Use the created **Open Saturday** desktop shortcut afterward. If permissions or Windows Script Host block shortcut creation, the installer reports a command that opens the same workspace. Linux may ask you to allow launching its desktop file.
-
-Settings → Saturday server → **Start at login** is off by default. Save the checkbox to start the UI after signing in, without opening a browser. Reinstall preserves the actual startup registration. Explicit Stop keeps Saturday stopped until you reopen it or sign in again. If the OS reports startup unavailable, use the shortcut/CLI and retain the diagnostic message.
-
-PDF setup can continue without export. Retry using the same installer with `--retry-pdf`; Chrome stays in the managed runtime cache. Reinstall of an installed app preserves code and data; reinstall after uninstall restores the application around retained data. Manual updates/removal are implemented; full platform verification remains a later installation phase.
-
-## Updates, repair and uninstall
-
-Settings → Updates and installation shows the installed release/build. Check manually, review the target, and confirm Update Saturday. Disconnect your assistant's Saturday connection before publication. Progress remains available through a temporary local controller while UI is stopped; successful readiness reloads the page. Reconnect your assistant afterward and copy the current Settings configuration if the runtime changed. An error, stale check or local source change does not mean you are up to date.
-
-Repair installation retries compatible build/setup/PDF validation without resetting records. The displayed log and recovery paths help when the UI cannot return; manual commands are in README. Interrupted publication stays guarded for explicit repair. The updater keeps verified database/file recovery and separate extension snapshots; it does not silently restore them or downgrade code over migrated data.
-
-Uninstall asks for confirmation and keeps data/backups/extensions by default. Its unchecked Delete all Saturday data option previews directories, warns that deletion is permanent, and requires typing DELETE DATA. Download copies elsewhere first. Shared/custom or unowned storage is retained for reviewed cleanup. Partial failures show the remaining action. Reinstall reuses retained data, or creates a fresh workspace after explicitly confirmed deletion. Disconnect/remove the Saturday entry in your assistant settings separately.
-
-### Assistant onboarding
-
-Settings → Connect an assistant provides JSON and a local ChatGPT/Codex TOML snippet from the shared installation descriptor. No client file is changed by copying. `get_saturday_info` reads installation/dataset/build identity and counts, including empty workspaces; compare these with Settings and repeat after updates. Real-client verification stays pending until performed in that client. Hosted-only chats cannot launch Saturday's local stdio server. The optional `scripts/assistant.mjs` JSON merge/removal command requires a caller-selected absolute path and confirmation, preserves unrelated settings and retains a private recovery copy. TOML is merged using client controls or a reviewed manual edit. No new UI component or dependency is introduced. See the assistant and agent guides for commands and client scope.
+Uninstall keeps data by default. Back up and review the exact directories before choosing the separate data-deletion option.
