@@ -545,6 +545,21 @@
 		title="Local database"
 		description="Saturday stores jobs and history locally. Backup files are saved beside the database."
 	>
+		{#if form?.storageError}<Notice tone="error" title="Folder could not be opened"
+				>{form.storageError}</Notice
+			>{/if}
+		<Field id="data_path" label="Data directory">
+			{#snippet control(attrs)}<Input
+					{...attrs}
+					readonly
+					value={data.installation.data_root}
+				/>{/snippet}
+		</Field>
+		<form method="POST" action="?/openFolder" use:enhance={enhanceWithFocus}>
+			<Button type="submit" variant="outline" size="sm" disabled={!data.folderSupported}
+				>Open folder</Button
+			>
+		</form>
 		<div class="flex flex-wrap items-center gap-3">
 			<p
 				class="min-w-0 flex-1 rounded-[var(--r-group)] bg-muted px-3 py-2.5 font-mono text-sm break-all text-muted-foreground"
@@ -563,7 +578,8 @@
 			</Button>
 		</div>
 		<p class="text-sm text-muted-foreground">
-			Set <code>SATURDAY_DB_PATH</code> before starting Saturday to use another location.
+			Setup preserves existing storage paths. Managed installations share their installation
+			descriptor across the web app, CLI and MCP.
 		</p>
 		<details class="disclosure">
 			<summary>Diagnostics</summary>
@@ -573,7 +589,7 @@
 					unversioned until the 0.1.0 release.
 				</p>
 				<dl class="space-y-4 text-sm">
-					{#each [['Development build', data.buildInfo.id], ['Database schema', data.diagnostics.databaseVersion], ['Database format', data.diagnostics.databaseFormat], ['File manifest version', data.diagnostics.manifestVersion ?? 'Unavailable'], ['File manifest format', data.diagnostics.manifestFormat ?? 'Unavailable'], ['Database', data.diagnostics.databasePaths.database], ['Database backups', data.diagnostics.databasePaths.backups], ['Database restore staging', data.diagnostics.databasePaths.restore], ['Files', data.diagnostics.filePaths.root], ['File backups', data.diagnostics.filePaths.backups], ['File recovery state', data.diagnostics.filePaths.state]] as [label, value] (label)}
+					{#each [['Installation', data.installation.installation_id], ['Installation descriptor', data.installation.descriptor_path ?? 'Source workspace; run npm run setup to persist identity'], ['Logs', data.installation.logs], ['Development build', data.buildInfo.id], ['Database schema', data.diagnostics.databaseVersion], ['Database format', data.diagnostics.databaseFormat], ['File manifest version', data.diagnostics.manifestVersion ?? 'Unavailable'], ['File manifest format', data.diagnostics.manifestFormat ?? 'Unavailable'], ['Database', data.diagnostics.databasePaths.database], ['Database backups', data.diagnostics.databasePaths.backups], ['Database restore staging', data.diagnostics.databasePaths.restore], ['Files', data.diagnostics.filePaths.root], ['File backups', data.diagnostics.filePaths.backups], ['File recovery state', data.diagnostics.filePaths.state]] as [label, value] (label)}
 						<div>
 							<dt class="font-medium">{label}</dt>
 							<dd class="mt-1 font-mono break-all text-muted-foreground select-text">{value}</dd>

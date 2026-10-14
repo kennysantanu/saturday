@@ -44,7 +44,7 @@ npm run setup
 npm run start
 ```
 
-`npm run setup` installs dependencies, builds the app, and creates the database. Then open <http://127.0.0.1:3000>. Saturday listens only on this computer. Keep the terminal running while you use the app; press Ctrl-C to stop it.
+`npm run setup` installs dependencies, builds web/MCP, validates PDF export (optional on failure), and safely prepares existing/missing stores. It persists an installation descriptor outside application code; repeat setup preserves existing data. Use `npm run setup -- --json` for a machine-readable result. Then open <http://127.0.0.1:3000>. Saturday listens only on this computer. Keep the terminal running while you use the app; press Ctrl-C to stop it.
 
 If port 3000 is in use:
 
@@ -117,3 +117,5 @@ Jobs and Network show readable record numbers for assistant requests. Settings â
 ## Extensions
 
 Optional trusted extensions add one page, an independent SQLite database, and namespaced MCP tools. Enable the master switch in Settings; manage installed extensions in Extensions. Interview Practice is included as a portable starter package. See the [extension guide](docs/extension-guide.md) for installation, authoring and independent backup/restore. Core backups exclude extension databases.
+
+Source setup keeps existing paths and stores `installation.json` beside the database. Web, CLI and MCP share it via `SATURDAY_INSTALLATION_PATH`. Setup records progress/logs for retry; missing initialized storage fails instead of creating an empty replacement. `npm run status -- --json` verifies the installation through `/health`, not just HTTP success. Default per-user OS roots are defined for future bootstrap installation; desktop installers/shortcuts and background server controls remain planned.

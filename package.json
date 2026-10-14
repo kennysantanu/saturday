@@ -7,7 +7,7 @@
 		"node": ">=22.13.0"
 	},
 	"scripts": {
-		"setup": "npm ci && npm run setup:pdf && npm run build && npm run migrate",
+		"setup": "node scripts/setup.mjs",
 		"dev": "node scripts/dev.mjs",
 		"build": "vite build && npm run build:mcp",
 		"build:mcp": "node scripts/build-mcp.mjs",

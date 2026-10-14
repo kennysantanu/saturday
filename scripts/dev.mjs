@@ -1,13 +1,19 @@
+import {
+	getInstallation,
+	installationEnvironment,
+	assertInstallationStorage
+} from '../src/lib/server/installation.js';
 import { spawn } from 'node:child_process';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const installation = getInstallation();
+assertInstallationStorage();
+const root = installation.code_root;
 const vite = join(root, 'node_modules', 'vite', 'bin', 'vite.js');
-const child = spawn(process.execPath, [vite, 'dev', '--host', '127.0.0.1'], {
+const child = spawn(installation.node_path, [vite, 'dev', '--host', '127.0.0.1'], {
 	cwd: root,
 	stdio: 'inherit',
-	env: { ...process.env, SATURDAY_PROJECT_ROOT: root }
+	env: { ...installationEnvironment(installation), SATURDAY_PROJECT_ROOT: root }
 });
 
 for (const signal of ['SIGINT', 'SIGTERM']) {

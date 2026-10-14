@@ -58,7 +58,7 @@ Additional commands: `npm run backup` creates a managed snapshot, `npm run resto
 - `src/routes` — app pages
 - `src/lib/server` — database, immutable migrations, job logic, backup/restore services, validation, and the MCP server
 - `src/lib/components` — shared interface components
-- `scripts` — setup/run commands, backup/restore CLI, and supervised backup worker
+- `scripts` — setup/run commands, backup/restore CLI, and shared installation setup
 - `tests` — temporary-database service, process, CLI, and MCP integration tests
 - `docs` — user and contributor documentation
 
@@ -117,3 +117,9 @@ Settings presents manual database/files/both creation and grouped history with d
 ## Extension development
 
 The [extension guide](extension-guide.md) defines API 1. `scripts/extension-build.mjs` generates the web/MCP registrations on dev/build/check. `src/lib/server/extensions.js` shares lifecycle, locks, database access and recovery; `scripts/extension-install.mjs` stages and publishes offline installs. The public browser entry is `src/lib/extension-ui.js`; avoid private imports in extension packages. Interview Practice in `examples/extensions` exercises page/database/tool contracts without a new dependency. Run local verification and focused lifecycle tests before changing these contracts.
+
+## Installation paths and setup
+
+`src/lib/server/installation.js` is the shared resolver for database, file/state/backup, extension and code/runtime/log paths. Descriptor format `saturday.installation` version 1 holds a separate installation ID, resolved paths, build, port and initialized/setup state. `scripts/setup.mjs` orchestrates source setup with persisted step results and capped logs. Its initial imports are dependency-free so fresh checkout setup can run npm ci first; store/extension services load afterward. Atomic JSON and directory-lock helpers are shared through the installation module and re-exported by the file store. Existing source paths stay unchanged; a configured descriptor is mandatory when supplied and path conflicts/missing initialized stores fail. Offline file recovery explicitly bypasses only the missing-manifest guard, retaining existing recovery checks. Managed roots use macOS Application Support, Windows LOCALAPPDATA, and Linux absolute XDG_DATA_HOME with the standard fallback. Runtime provisioning, relocation, shortcuts, login startup and server lifecycle controls remain later phases.
+
+`/health` returns installation/build readiness without paths or record content; `scripts/status.mjs` checks identity before reporting success. Settings exposes the data directory, platform-native Open folder action and descriptor/log diagnostics. Run focused installation tests and temporary HTTP checks; Windows/Linux runtime and complete visual/accessibility verification remain Phase 7.

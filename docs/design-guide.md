@@ -323,3 +323,5 @@ Job and person rows, detail headings, linked records and relationship pickers sh
 ## Profile patterns
 
 Profile is reached from Documents without adding a sixth navigation tab. Use PageShell/PageHeader and one solid SectionCard per known designation. Show its selected filename or a brief empty message, with compact secondary Select document, Upload, and Create new controls. Reuse the document editor and picker styles. Edit is visible; Clear selection uses the kebab menu and ConfirmDialog, keeping the file. Templates create HTML source; other slots create Markdown. No additional editor, workflow builder, or account form is needed.
+
+Settings Storage displays the resolved data directory in a readonly Field with a compact Open folder action. Failures use an error Notice and preserve the copyable path. Installation identity, descriptor and log paths belong in the collapsed Diagnostics disclosure; setup details must not become an onboarding wizard.

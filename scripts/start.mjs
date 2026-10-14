@@ -1,11 +1,17 @@
+import {
+	getInstallation,
+	installationEnvironment,
+	assertInstallationStorage
+} from '../src/lib/server/installation.js';
 // Starts the production web server bound to loopback only.
 // Usage: npm run start   (PORT overrides the default 3000)
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const installation = getInstallation();
+assertInstallationStorage();
+const root = installation.code_root;
 const entry = join(root, 'build', 'index.js');
 
 if (!existsSync(entry)) {
@@ -14,16 +20,16 @@ if (!existsSync(entry)) {
 }
 
 const host = '127.0.0.1';
-const port = process.env.PORT || '3000';
+const port = process.env.PORT || String(installation.port);
 
 console.log(`Starting Saturday at http://${host}:${port}`);
 console.log('Press Ctrl-C to stop.');
 
-const child = spawn(process.execPath, [entry], {
+const child = spawn(installation.node_path, [entry], {
 	cwd: root,
 	stdio: 'inherit',
 	env: {
-		...process.env,
+		...installationEnvironment(installation),
 		HOST: host,
 		PORT: port,
 		ORIGIN: `http://${host}:${port}`,
