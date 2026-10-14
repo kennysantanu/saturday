@@ -1,9 +1,13 @@
+import { serverSummary } from '../src/lib/server/server-lifecycle.js';
 import { getInstallation, assertInstallationStorage } from '../src/lib/server/installation.js';
 const json = process.argv.includes('--json');
 try {
 	const installation = getInstallation();
 	assertInstallationStorage();
-	const port = Number(process.env.PORT || installation.port);
+	const owned = serverSummary();
+	const port = Number(
+		process.env.PORT || (owned.url ? new URL(owned.url).port : installation.port)
+	);
 	if (!Number.isInteger(port) || port < 1 || port > 65535)
 		throw new Error('Choose a valid server port.');
 	const url = `http://127.0.0.1:${port}`;

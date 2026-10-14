@@ -45,19 +45,14 @@ Use this guide when a user asks you to install Saturday from its GitHub reposito
 
    Running `npm run migrate` again is safe. The default database is `data/saturday.db` in this clone.
 
-4. Check whether the app is already answering on port 3000:
+4. Start or reuse this installation in the background and open its Dashboard:
 
    ```sh
-   npm run status
+   node scripts/start.mjs open --json
+   node scripts/status.mjs --json
    ```
 
-   If it is Saturday, keep that process running and open <http://127.0.0.1:3000>. Otherwise, start the web server:
-
-   ```sh
-   npm run start
-   ```
-
-   Leave that terminal open. In another terminal, change to the cloned repository, run `npm run status`, and open <http://127.0.0.1:3000>. If port 3000 is occupied by another app, stop the failed start and use `PORT=3100 npm run start`, then check with `PORT=3100 npm run status` and open <http://127.0.0.1:3100>. Saturday binds to `127.0.0.1`.
+   `open` finishes after readiness and browser launch; the supervisor continues independently. Report the returned URL, including a fallback port when another app occupies the preferred port. For setup without opening a browser, use `node scripts/start.mjs --background --json`. Do not create another terminal-owned server or kill unrelated Node processes. `npm run start` remains a foreground developer option.
 
 5. Resolve the paths for this clone from its repository folder. If using a new terminal and a custom `SATURDAY_DB_PATH`, set the same value there first:
 
@@ -136,3 +131,9 @@ For a requested custom feature, read the [extension guide](extension-guide.md) a
 Prefer `npm run setup -- --json` for source initialization/retry. Progress and command logs go to stderr; one final JSON result on stdout identifies installation, descriptor, data/log paths and step states. Pass the same `SATURDAY_INSTALLATION_PATH` to every process and use Settings-generated MCP configuration. Descriptor paths take precedence; conflicting legacy path overrides fail rather than switch workspaces. Never delete/change a descriptor to bypass missing-store errors. Source setup adopts existing paths without relocation. `scripts/setup.mjs --managed --root <absolute-root>` prepares the managed layout for bootstrap development; it does not download a private runtime or install shortcuts yet. `--skip-dependencies`, `--skip-build`, and `--skip-pdf` are explicit development/test options, not proof those capabilities are ready. An optional PDF failure does not block the workspace.
 
 Use `npm run status -- --json` to check the expected installation's `/health` response. It returns build/installation identity without record content. `SATURDAY_BUILD_COMMIT` supplies a validated full commit SHA when building a pinned source archive without Git. Setup locks serialize retries, stores retain initialized-state checks, and logs are capped at 1 MiB per setup attempt. Versioning still starts at 0.1.0.
+
+## UI lifecycle commands
+
+`node scripts/start.mjs stop --json` and `restart --json` acknowledge accepted operations; poll `node scripts/status.mjs --json` for readiness after restarting. Stop terminates only the owned web child and supervisor. Client-owned stdio MCP remains usable with web off. A lifecycle request refuses while shared data operations or backup streaming are active; wait for completion, inspect status, and retry the lifecycle request. Do not retry uncertain restore/write requests automatically.
+
+Ownership, local controller credentials and operation admission state live under `<data_root>/server.state/`, outside archives. Treat `server.json` as private; never send its token in diagnostics. Settings shows status and the bounded `server.log` location. Failed readiness requires inspecting logs and reopening; no data reset is authorized. Desktop shortcuts, login registration and installers remain later work. These commands require local process tools; MCP clients do not gain process execution merely by connecting.

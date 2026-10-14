@@ -202,3 +202,9 @@ Users can read job/person numbers from lists and detail headings. When a user sa
 Enabled compatible extensions expose `extension_<id>_<local_tool>` tools through the same Saturday MCP server. Installing code requires restarting/reconnecting; enable/disable is checked on each call and tool discovery refreshes within a second. Reconnect if your client caches discovery. Interview Practice has list/get/create/edit/delete question tools; use fresh revisions for edits/deletes, confirm deletion, and save proposed answers only when requested. Core backups exclude extension databases. See the [extension guide](extension-guide.md).
 
 Settings-generated configuration includes `SATURDAY_INSTALLATION_PATH` after setup. Keep that descriptor shared with CLI/web so every client uses the same installation. Conflicting path overrides are rejected; source installations without a descriptor retain their existing developer paths. Use `npm run setup -- --json` and `npm run status -- --json` for local setup/readiness. An installation-ready HTTP check is separate from verifying an actual assistant tool call.
+
+## UI server independence
+
+The desktop client owns its stdio MCP process. Saturday's background UI supervisor owns only the web server: closing the browser, stopping it in Settings, or running `npm run stop` does not stop the client's MCP access. No backup worker runs. Restarting the UI reloads its page after installation/generation readiness; MCP need not reconnect for a UI-only restart. Rebuild/update still requires disconnecting and restarting MCP to load new code.
+
+Stop/Restart reject active shared data and backup operations. If a tool reports that Saturday is stopping or restarting, check readiness and retry when ready; do not automatically retry a destructive request with an uncertain result. Opening the UI uses local process commands from the [agent guide](agent-guide.md#ui-lifecycle-commands), not an additional MCP tool.

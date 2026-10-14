@@ -20,7 +20,8 @@ export function GET() {
 				app: 'saturday',
 				status: 'ready',
 				installation_id: installation.installation_id,
-				build: buildInfo
+				build: buildInfo,
+				server_generation: process.env.SATURDAY_SERVER_GENERATION ?? null
 			},
 			{ headers: { 'cache-control': 'no-store' } }
 		);

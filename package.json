@@ -23,13 +23,16 @@
 		"backup": "node scripts/backup.mjs",
 		"restore": "node scripts/restore.mjs",
 		"test": "npm run build:mcp && node --test tests/*.test.mjs",
-		"test:web": "npm run build && node --test tests/web.integration.mjs",
+		"test:web": "npm run build && node --test tests/web.integration.mjs tests/server-lifecycle.integration.mjs",
 		"test:beta": "node scripts/review-documents.mjs",
 		"verify": "npm run lint && npm run check && npm test && npm run test:web && npm run test:beta",
 		"files": "node scripts/files.mjs",
 		"setup:pdf": "puppeteer browsers install chrome",
 		"extension": "node scripts/extensions.mjs",
-		"extensions:generate": "node scripts/extension-build.mjs"
+		"extensions:generate": "node scripts/extension-build.mjs",
+		"open": "node scripts/start.mjs open",
+		"stop": "node scripts/start.mjs stop",
+		"restart": "node scripts/start.mjs restart"
 	},
 	"devDependencies": {
 		"@internationalized/date": "^3.12.4",

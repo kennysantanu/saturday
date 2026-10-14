@@ -1,3 +1,4 @@
+import { withServerActivity } from '../server-lifecycle.js';
 import {
 	atomicJson,
 	syncDirectory,
@@ -36,6 +37,7 @@ export class FileError extends Error {
 }
 
 export function publicFileError(e) {
+	if (e?.code === 'BUSY') return { code: 'BUSY', message: e.message };
 	if (e?.code === 'FORMAT' || String(e?.message).includes('Unsupported database schema'))
 		return { code: 'FORMAT', message: e.message };
 	return e instanceof FileError
@@ -323,71 +325,75 @@ export async function acquireDirectoryLock(lock, options) {
 	}
 }
 export async function withFileLock(operation, { initialize = true, allowSession = false } = {}) {
-	assertInstallationStorage({ allowFileRecovery: !initialize || allowSession });
-	const p = filePaths();
-	for (const path of [p.root, p.state, p.backups]) {
-		try {
-			const st = await fs.lstat(path);
-			if (st.isSymbolicLink() || !st.isDirectory())
-				reject('STORAGE', 'Storage roots must be ordinary directories, not symlinks.');
-		} catch (e) {
-			if (e.code !== 'ENOENT') throw e;
-		}
-	}
-	await fs.mkdir(p.state, { recursive: true, mode: 0o700 });
-	const release = await acquireDirectoryLock(join(p.state, 'lock'));
-	try {
-		if (!allowSession) {
+	return withServerActivity(async () => {
+		assertInstallationStorage({ allowFileRecovery: !initialize || allowSession });
+		const p = filePaths();
+		for (const path of [p.root, p.state, p.backups]) {
 			try {
-				await fs.access(join(p.state, 'pair-session.json'));
-				reject(
-					'RECOVERY_REQUIRED',
-					'An interrupted coordinated restore requires offline recovery: npm run files -- recover-pair'
-				);
+				const st = await fs.lstat(path);
+				if (st.isSymbolicLink() || !st.isDirectory())
+					reject('STORAGE', 'Storage roots must be ordinary directories, not symlinks.');
 			} catch (e) {
 				if (e.code !== 'ENOENT') throw e;
 			}
 		}
-		await recover();
-		if (!initialize) return await operation(null);
-		await fs.mkdir(p.root, { recursive: true, mode: 0o700 });
-		let m;
+		await fs.mkdir(p.state, { recursive: true, mode: 0o700 });
+		const release = await acquireDirectoryLock(join(p.state, 'lock'));
 		try {
-			m = JSON.parse(await fs.readFile(await regularPath(p.root, 'manifest.json'), 'utf8'));
-		} catch (e) {
-			if (e.code !== 'ENOENT') throw e;
-			const names = await fs.readdir(p.root);
-			if (names.length) reject('FORMAT', 'Existing files have no manifest. Use offline recovery.');
-			m = {
-				format: storageCompatibility.manifest.format,
-				format_version: storageCompatibility.manifest.version,
-				dataset_id: (
-					databaseIdentity() ??
-					withDatabase((db) =>
-						db.prepare('SELECT format, dataset_id FROM app_metadata WHERE id=1').get()
-					)
-				).dataset_id,
-				token: randomUUID(),
-				documents: [],
-				designations: {}
-			};
-			await atomicJson(join(p.root, 'manifest.json'), m);
+			if (!allowSession) {
+				try {
+					await fs.access(join(p.state, 'pair-session.json'));
+					reject(
+						'RECOVERY_REQUIRED',
+						'An interrupted coordinated restore requires offline recovery: npm run files -- recover-pair'
+					);
+				} catch (e) {
+					if (e.code !== 'ENOENT') throw e;
+				}
+			}
+			await recover();
+			if (!initialize) return await operation(null);
+			await fs.mkdir(p.root, { recursive: true, mode: 0o700 });
+			let m;
+			try {
+				m = JSON.parse(await fs.readFile(await regularPath(p.root, 'manifest.json'), 'utf8'));
+			} catch (e) {
+				if (e.code !== 'ENOENT') throw e;
+				const names = await fs.readdir(p.root);
+				if (names.length)
+					reject('FORMAT', 'Existing files have no manifest. Use offline recovery.');
+				m = {
+					format: storageCompatibility.manifest.format,
+					format_version: storageCompatibility.manifest.version,
+					dataset_id: (
+						databaseIdentity() ??
+						withDatabase((db) =>
+							db.prepare('SELECT format, dataset_id FROM app_metadata WHERE id=1').get()
+						)
+					).dataset_id,
+					token: randomUUID(),
+					documents: [],
+					designations: {}
+				};
+				await atomicJson(join(p.root, 'manifest.json'), m);
+			}
+			validateManifest(m);
+			if (m.format_version !== storageCompatibility.manifest.version) {
+				await atomicJson(join(p.state, 'manifest-v1.json'), m);
+				m = migrateManifest(m);
+				m.token = randomUUID();
+				await atomicJson(join(p.root, 'manifest.json'), m);
+			}
+			databaseIdentity();
+			return await fileSession.run({ manifest: structuredClone(m), hash: manifestHash(m) }, () =>
+				operation(m)
+			);
+		} finally {
+			await release();
 		}
-		validateManifest(m);
-		if (m.format_version !== storageCompatibility.manifest.version) {
-			await atomicJson(join(p.state, 'manifest-v1.json'), m);
-			m = migrateManifest(m);
-			m.token = randomUUID();
-			await atomicJson(join(p.root, 'manifest.json'), m);
-		}
-		databaseIdentity();
-		return await fileSession.run({ manifest: structuredClone(m), hash: manifestHash(m) }, () =>
-			operation(m)
-		);
-	} finally {
-		await release();
-	}
+	});
 }
+
 export async function commitManifest(manifest, changes = [], { restore = false } = {}) {
 	const p = filePaths();
 	const session = fileSession.getStore();

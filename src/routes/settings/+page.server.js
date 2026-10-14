@@ -1,3 +1,4 @@
+import { serverSummary, controlServer, validServerSession } from '$lib/server/server-lifecycle.js';
 import { getInstallation } from '$lib/server/installation.js';
 import { spawn } from 'node:child_process';
 import {
@@ -57,6 +58,12 @@ export async function load({ setHeaders, url }) {
 	} catch (e) {
 		extensionsError = extensionError(e).message;
 	}
+	let server;
+	try {
+		server = { ...serverSummary(), controlsAvailable: Boolean(process.env.SATURDAY_SERVER_TOKEN) };
+	} catch (e) {
+		server = { managed: false, status: 'unavailable', controlsAvailable: false, error: e.message };
+	}
 	const databasePath = getDatabasePath();
 	const installation = getInstallation();
 	const nodePath = installation.node_path;
@@ -107,6 +114,7 @@ export async function load({ setHeaders, url }) {
 		extensionsError,
 		diagnostics,
 		installation,
+		server,
 		folderSupported: ['darwin', 'win32', 'linux'].includes(process.platform),
 		backupHistory,
 		backupPage,
@@ -158,6 +166,27 @@ async function boundedForm(request) {
 	}).formData();
 }
 export const actions = {
+	serverControl: async ({ request, cookies, url, setHeaders }) => {
+		if (
+			request.headers.get('origin') !== url.origin ||
+			url.origin !== process.env.ORIGIN ||
+			!validServerSession(cookies.get('saturday-server-session'))
+		)
+			return fail(403, {
+				serverError: 'Server controls require this installation’s local browser session.'
+			});
+		try {
+			const values = await request.formData();
+			const operation = String(values.get('operation'));
+			if (operation === 'stop' && values.get('confirm') !== 'true')
+				throw new Error('Confirm stopping the UI server.');
+			const result = await controlServer(operation, { defer: true });
+			setHeaders({ 'x-saturday-server-operation': result.generation });
+			return { serverOperation: result };
+		} catch (e) {
+			return fail(409, { serverError: e.message });
+		}
+	},
 	openFolder: async () => {
 		try {
 			const path = getInstallation().data_root;

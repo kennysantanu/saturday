@@ -1,3 +1,4 @@
+import { withServerActivity } from './server-lifecycle.js';
 import { getInstallation, assertInstallationStorage } from './installation.js';
 // Shared extension lifecycle, database, and recovery. Extension code is trusted, not sandboxed.
 import * as fs from 'node:fs/promises';
@@ -188,16 +189,19 @@ export async function inspectExtension(folder) {
 }
 const session = new AsyncLocalStorage();
 export async function withExtensionLock(fn) {
-	if (session.getStore()) return fn();
-	const p = extensionPaths();
-	await fs.mkdir(p.state, { recursive: true, mode: 0o700 });
-	const release = await acquireDirectoryLock(join(p.state, 'lock'));
-	try {
-		return await session.run(true, fn);
-	} finally {
-		await release();
-	}
+	return withServerActivity(async () => {
+		if (session.getStore()) return fn();
+		const p = extensionPaths();
+		await fs.mkdir(p.state, { recursive: true, mode: 0o700 });
+		const release = await acquireDirectoryLock(join(p.state, 'lock'));
+		try {
+			return await session.run(true, fn);
+		} finally {
+			await release();
+		}
+	});
 }
+
 export function validateExtensionNamespaces(entries) {
 	const names = new Set();
 	for (const entry of entries)
