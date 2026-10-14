@@ -7,7 +7,12 @@ import {
 	operationPaths
 } from '$lib/server/installation-operations.js';
 import { serverSummary, controlServer, validServerSession } from '$lib/server/server-lifecycle.js';
-import { getInstallation, loginStartupStatus, setLoginStartup } from '$lib/server/installation.js';
+import {
+	assistantConfiguration,
+	getInstallation,
+	loginStartupStatus,
+	setLoginStartup
+} from '$lib/server/installation.js';
 import { spawn } from 'node:child_process';
 import {
 	extensionCatalog,
@@ -76,24 +81,7 @@ export async function load({ setHeaders, url }) {
 	const installation = getInstallation();
 	const nodePath = installation.node_path;
 	const mcpPath = join(getProjectRoot(), 'build', 'mcp', 'index.js');
-	const config = {
-		mcpServers: {
-			saturday: {
-				command: nodePath,
-				args: [mcpPath],
-				env: {
-					...(installation.descriptor_path
-						? { SATURDAY_INSTALLATION_PATH: installation.descriptor_path }
-						: {}),
-					...(installation.pdf_cache ? { PUPPETEER_CACHE_DIR: installation.pdf_cache } : {}),
-					SATURDAY_DB_PATH: databasePath,
-					SATURDAY_FILES_PATH: filePaths().root,
-					SATURDAY_EXTENSION_STATE_PATH: extensionPaths().state,
-					SATURDAY_EXTENSIONS_PATH: extensionPaths().code
-				}
-			}
-		}
-	};
+	const config = assistantConfiguration(installation);
 	const requestedPage = Number(url.searchParams.get('backup_page') ?? 1);
 	let backupPage = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
 	let history = await listBackupHistory({ offset: (backupPage - 1) * 50 });
@@ -110,6 +98,7 @@ export async function load({ setHeaders, url }) {
 			databaseVersion: db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get()
 				.version,
 			databaseFormat: db.prepare('SELECT format FROM app_metadata WHERE id=1').get().format,
+			datasetId: db.prepare('SELECT dataset_id FROM app_metadata WHERE id=1').get().dataset_id,
 			manifestVersion: fileSummary?.format_version ?? null,
 			manifestFormat: fileSummary?.format ?? null,
 			databasePaths: getBackupPaths(),
@@ -156,7 +145,8 @@ export async function load({ setHeaders, url }) {
 		pdfStatus: await pdfReadiness(),
 		mcpPath,
 		mcpReady: existsSync(mcpPath),
-		configuration: JSON.stringify(config, null, 2)
+		configuration: config.json,
+		configurationToml: config.toml
 	};
 }
 

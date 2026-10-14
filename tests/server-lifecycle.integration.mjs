@@ -179,6 +179,28 @@ test('owned background server reuses, handles collisions, protects active work a
 					mcp.stdin.write(
 						JSON.stringify({
 							jsonrpc: '2.0',
+							id: 3,
+							method: 'tools/call',
+							params: { name: 'get_saturday_info', arguments: {} }
+						}) + '\n'
+					);
+				}
+				if (message.id === 3) {
+					try {
+						assert.notEqual(message.result.isError, true);
+						const info = JSON.parse(message.result.content[0].text);
+						assert.equal(info.installation_id, first.installation_id);
+						assert.ok(html.includes(info.dataset_id));
+						assert.ok(html.includes(info.build.id));
+						assert.equal(info.jobs, 0);
+					} catch (error) {
+						clearTimeout(timeout);
+						rej(error);
+						return;
+					}
+					mcp.stdin.write(
+						JSON.stringify({
+							jsonrpc: '2.0',
 							id: 2,
 							method: 'tools/call',
 							params: {

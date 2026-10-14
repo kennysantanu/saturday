@@ -458,6 +458,14 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n'
 		);
 		const listing = await request('tools/list', {});
+		const info = await call('get_saturday_info', {});
+		assert.equal(typeof info.dataset_id, 'string');
+		assert.equal(info.jobs, 0);
+		assert.equal(info.build.id, initialized.serverInfo.version);
+		assert.equal(
+			listing.tools.find((t) => t.name === 'get_saturday_info').annotations.readOnlyHint,
+			true
+		);
 		for (const [tool, fields] of [
 			['get_job', ['job_id']],
 			['get_network', ['network_id']],
@@ -506,7 +514,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			score_comment: 'Initial fit'
 		});
 		assert.equal(job.id, 1);
-		assert.equal(listing.tools.length, 42);
+		assert.equal(listing.tools.length, 43);
 		for (const name of [
 			'list_networks',
 			'get_network',

@@ -1,81 +1,34 @@
 # Agent setup guide
 
-Use this guide when a user asks you to install Saturday from its GitHub repository into a folder they chose for a ChatGPT Work project.
+Use this guide for authorized installation, opening, updating and optional assistant connection. First establish whether the assistant can run local processes and access the user's computer. A hosted-only chat must provide manual instructions; it cannot install a local stdio server by adding a URL. App/platform support and client execution capabilities are separate.
 
-## Clone and start Saturday
+## Install and open Saturday
 
-1. In a terminal, check the required tools. Node.js must be 22.13 or newer and npm must be 10 or newer.
+1. Read the repository README and inspect this revision's installer. Use the shared bootstrap, not a separate clone/build/migrate recipe. During development, download/extract the official repository archive and run `sh install.sh --source .` on macOS/Linux, or `install.bat --source .` in Windows Command Prompt. Use the remote installer path only once this revision is published. Do not replace global Node/npm or require Git merely for installation.
+2. Preserve a detected descriptor and existing workspace. Repeat installation reopens/repairs it. Do not reset storage, relocate data, enable login startup or bypass OS restrictions without the user's instruction. PDF failure can continue without PDF; offer a retry later.
+3. Wait for installation readiness. Report the actual returned URL, descriptor and data paths. The shared Open command and desktop shortcut reuse the owned background UI; closing the browser does not stop it. Do not create a terminal-owned server or kill unrelated processes.
+4. For an existing install, use the descriptor's absolute Node path with `<code_root>/scripts/start.mjs open --json`; set `SATURDAY_INSTALLATION_PATH` to that descriptor. `scripts/status.mjs --json` verifies installation/build readiness. Source users can use `npm run setup` and `npm run open`. Start at login remains off unless chosen.
 
-   ```sh
-   node -v
-   npm -v
-   git --version
-   ```
+## Prepare an optional assistant connection
 
-2. Set `SATURDAY_DEST` to the absolute path of the folder the user selected. Create it if needed.
+1. Obtain configuration from Settings or run the descriptor's Node with `<code_root>/scripts/assistant.mjs config --installation <absolute-descriptor> --format json` (JSON clients) or `--format toml` (supported local ChatGPT/Codex configuration). This generates configuration only, not a connected status. Use the same descriptor for web and MCP, including files, extensions and PDF cache.
+2. Check the actual client's supported execution mode and configuration mechanism. See the [assistant guide](assistant-guide.md#chatgpt-work-local-desktop). Hosted-only chats have no supported local stdio registration here. A managed policy may deny a local server; report the denial rather than bypassing it.
+3. For a JSON client such as Claude Desktop, inspect the existing client file and obtain authorization to modify its Saturday entry. Use `scripts/assistant.mjs connect --installation <descriptor> --config <absolute-client-json> --confirm`. This merges only `mcpServers.saturday`, retains unrelated settings/servers and saves a private recovery copy. A conflicting entry requires reviewed `--replace --confirm`. Invalid JSON and linked paths fail without overwriting the file. The helper does not discover/edit arbitrary client files.
+4. For TOML, use the client's documented MCP controls/CLI or merge the generated tables after reviewing the existing configuration and retaining a private recovery copy. Do not paste JSON into TOML, append duplicate Saturday tables or replace the whole file. No dependency or custom TOML parser is required by Saturday.
+5. Reconnect the client. Ask it to call `get_saturday_info`; compare `installation_id`, `dataset_id` and `build.id` with Settings. This works with zero jobs. For populated data, read a known numbered job and compare its title/history. Do not create a record merely to verify connectivity. Configuration preparation or an automated protocol test is not proof that this assistant connected.
+6. Report client name/version/execution mode, actual tool result and whether identities matched. If no real client was available, explicitly report verification pending. Refresh the browser after authorized writes.
 
-   ```sh
-   SATURDAY_DEST="/absolute/path/to/selected/folder"
-   mkdir -p "$SATURDAY_DEST"
-   ```
+## Update, reconnect and remove configuration
 
-   If that folder is empty, clone into it:
+Use Settings or the same `scripts/install.mjs check --installation <descriptor> --json`, then `update --check-id <reviewed-id> --confirm --installation <descriptor> --json`. Before publication, disconnect Saturday's MCP process in the client. Do not invoke the updater from a still-connected Saturday tool; the writer guard must reject that. Wait for the persisted terminal operation result; background acknowledgment is not completion. Reopen only through shared lifecycle commands and repeat the identity/read verification after reconnecting. If the Node path changed, regenerate configuration and review the updated Saturday entry before reconnecting.
 
-   ```sh
-   git clone https://github.com/kennysantanu/saturday.git "$SATURDAY_DEST"
-   cd "$SATURDAY_DEST"
-   ```
+For repair use `scripts/install.mjs repair --installation <descriptor> --json`; keep operation logs and recovery paths. Never blindly reset data or downgrade over migrations.
 
-   If it already contains files, clone into a new `saturday` subfolder instead:
-
-   ```sh
-   git clone https://github.com/kennysantanu/saturday.git "$SATURDAY_DEST/saturday"
-   cd "$SATURDAY_DEST/saturday"
-   ```
-
-   Use only the branch that matches the selected folder. Stop if cloning fails; do not overwrite an existing `saturday` subfolder.
-
-3. From the cloned repository, install, build, and migrate. If the user chose a custom database file, set `SATURDAY_DB_PATH` before these commands and keep it set when starting the app.
-
-   ```sh
-   npm ci
-   npm run build
-   npm run migrate
-   ```
-
-   Running `npm run migrate` again is safe. The default database is `data/saturday.db` in this clone.
-
-4. Start or reuse this installation in the background and open its Dashboard:
-
-   ```sh
-   node scripts/start.mjs open --json
-   node scripts/status.mjs --json
-   ```
-
-   `open` finishes after readiness and browser launch; the supervisor continues independently. Report the returned URL, including a fallback port when another app occupies the preferred port. For setup without opening a browser, use `node scripts/start.mjs --background --json`. Do not create another terminal-owned server or kill unrelated Node processes. `npm run start` remains a foreground developer option.
-
-5. Resolve the paths for this clone from its repository folder. If using a new terminal and a custom `SATURDAY_DB_PATH`, set the same value there first:
-
-   ```sh
-   pwd -P
-   node -p 'process.execPath'
-   printf 'MCP entry: %s/build/mcp/index.js\n' "$(pwd -P)"
-   node --input-type=module -e "import { getDatabasePath } from './src/lib/server/database.js'; console.log(getDatabasePath())"
-   ```
-
-   The final command prints the absolute database path. `SATURDAY_DB_PATH`, when set, may be absolute or relative to the repository folder. The path shown in **Settings** must match this result.
-
-## Connect the desktop assistant
-
-1. Open Saturday's **Settings** page and copy **Local desktop configuration**. It uses the absolute Node, MCP entry, and database paths resolved above. If the database path differs, check that the web process and the path commands used the same `SATURDAY_DB_PATH` value.
-2. Configure `saturday` using the client's documented format. The Settings JSON is for clients that accept `mcpServers`; ChatGPT Work's local desktop configuration uses TOML instead (see the [assistant guide](assistant-guide.md#chatgpt-work-local-desktop)). Reconnect or restart the client.
-3. Add a job in the web app, then ask the assistant to list the jobs in Saturday. Confirm that `list_jobs` returns that job's title and ID. This verifies that the desktop MCP process and the browser use the same database. Refresh Saturday after an assistant write to check that it appears there too.
-
-The local desktop client starts the MCP process when it connects; it is not a second web server to start manually. Do not claim that MCP is connected until the client has called one of Saturday's tools. `list_jobs` and `get_job` read data; `create_job`, `edit_job`, `set_job_follow_up`, `set_job_score`, and `add_job_update` write data. Job details and follow-ups are shared between UI and MCP; assessment score/comment can be written only through MCP. Use `list_jobs` filters and pagination metadata to find the correct record before writing; it defaults to all jobs, while the Jobs page defaults to active jobs. See the [assistant guide](assistant-guide.md) for query options, optional fields, clearing semantics, and scoring.
+Before uninstall, disconnect the client. If authorized, remove the matching JSON entry with `scripts/assistant.mjs disconnect --installation <descriptor> --config <absolute-client-json> --confirm` while the application/runtime still exist. A changed entry is retained for manual review; TOML removal uses the client's documented controls or reviewed removal of only Saturday's tables. Recovery copies may contain private client settings; retain them securely and let the user decide when to delete them. App uninstall deliberately does not guess client locations or delete unrelated settings.
 
 ## Report completion
 
-Tell the user the local browser address, whether the app is answering, the database location shown in Settings, whether the desktop client has successfully called an MCP tool, and any remaining step that needs their action. The client may ask the user to approve MCP write calls.
+Report the local browser address, app readiness, data/descriptor location, prepared client configuration, actual tool-call verification or pending/unavailable status, and any policy or platform limitation. Real ChatGPT Work read/reconnect verification and Windows/Linux client execution remain Phase 7 gates; do not claim automated tests certify them.
 
 ## Backup and recovery commands
 
@@ -118,7 +71,7 @@ Puppeteer uses managed Chrome installed by `npm run setup` or `npm run setup:pdf
 
 ## Network upgrade and verification
 
-Numeric schema baseline 1 includes people, job-person links and optional interaction history. Jobs, people and both histories use positive safe integer IDs; MCP IDs are JSON numbers. The central MCP entry exposes 42 tools, including twelve Network operations documented in the [assistant guide](assistant-guide.md#network-tools). UUID-era databases/backups and earlier unbound file manifests/pairs are unsupported. Never alter migration records or dataset IDs to bypass checks. File manifest `saturday.files.numeric` version 2 binds to the database dataset and validates Profile designations; version 1 upgrades while preserving existing files and Master CV; restore matching independent artifacts in either order, or a validated coordinated pair. A mismatch retains files and blocks normal job-attachment access. Stop and rebuild/restart all processes together after updates; setup never resets data automatically.
+Numeric schema baseline 1 includes people, job-person links and optional interaction history. Jobs, people and both histories use positive safe integer IDs; MCP IDs are JSON numbers. The central MCP entry exposes 43 tools, including twelve Network operations documented in the [assistant guide](assistant-guide.md#network-tools). UUID-era databases/backups and earlier unbound file manifests/pairs are unsupported. Never alter migration records or dataset IDs to bypass checks. File manifest `saturday.files.numeric` version 2 binds to the database dataset and validates Profile designations; version 1 upgrades while preserving existing files and Master CV; restore matching independent artifacts in either order, or a validated coordinated pair. A mismatch retains files and blocks normal job-attachment access. Stop and rebuild/restart all processes together after updates; setup never resets data automatically.
 
 For support, Settings → Local database → Diagnostics exposes the captured development build ID, actual schema/manifest versions and resolved database/files/backup/recovery paths. It does not run Git at runtime or present the development package version as a released app version. Job/person references shown as #123 use JSON numbers in MCP, with separate sequences per table.
 

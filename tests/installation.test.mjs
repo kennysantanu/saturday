@@ -1,17 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, renameSync, rmSync, existsSync } from 'node:fs';
+import {
+	realpathSync,
+	symlinkSync,
+	unlinkSync,
+	mkdtempSync,
+	readFileSync,
+	writeFileSync,
+	renameSync,
+	rmSync,
+	existsSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:http';
 import { spawnSync } from 'node:child_process';
 import {
+	assistantConfiguration,
+	configureAssistantJson,
 	defaultInstallationRoot,
 	getInstallation,
 	sourceProjectRoot
 } from '../src/lib/server/installation.js';
 import { readBuildInfo } from '../scripts/build-info.mjs';
-const root = mkdtempSync(join(tmpdir(), 'saturday-installation-'));
+const root = realpathSync(mkdtempSync(join(tmpdir(), 'saturday-installation-')));
 test.after(() => rmSync(root, { recursive: true, force: true }));
 const env = {
 	...process.env,
@@ -295,4 +307,82 @@ test('interrupted first-install publication recovers its descriptor without rese
 	const descriptor = readFileSync(join(base, 'installation.json'));
 	await recoverPublication(base);
 	assert.deepEqual(readFileSync(join(base, 'installation.json')), descriptor);
+});
+
+test('assistant config uses explicit workspace paths and preserves client settings with confirmed merge/removal', async () => {
+	const value = {
+		installation_id: 'test',
+		code_root: join(root, 'code ü'),
+		node_path: process.execPath,
+		database: join(root, 'db'),
+		files: join(root, 'files'),
+		extension_state: join(root, 'state'),
+		extension_code: join(root, 'extensions'),
+		descriptor_path: join(root, 'installation.json')
+	};
+	const config = assistantConfiguration(value);
+	assert.equal(
+		JSON.parse(config.json).mcpServers.saturday.env.SATURDAY_INSTALLATION_PATH,
+		value.descriptor_path
+	);
+	assert.ok(config.toml.includes(JSON.stringify(value.database)));
+	assert.ok(!Object.hasOwn(config.entry.env, 'PATH'));
+	const path = join(root, 'client.json');
+	const original = '{"theme":"dark","mcpServers":{"other":{"command":"preserve"}}}';
+	writeFileSync(path, original);
+	await assert.rejects(configureAssistantJson(path, { value }), /confirm/);
+	const prepared = await configureAssistantJson(path, { confirm: true, value });
+	assert.equal(prepared.verified, false);
+	assert.equal(readFileSync(prepared.backup, 'utf8'), original);
+	assert.equal(JSON.parse(readFileSync(path)).mcpServers.other.command, 'preserve');
+	assert.equal((await configureAssistantJson(path, { confirm: true, value })).status, 'unchanged');
+	const modified = JSON.parse(readFileSync(path));
+	modified.mcpServers.saturday.env.EXTRA = 'keep';
+	writeFileSync(path, JSON.stringify(modified));
+	await assert.rejects(configureAssistantJson(path, { confirm: true, value }), /different/);
+	await assert.rejects(
+		configureAssistantJson(path, { remove: true, confirm: true, value }),
+		/changed/
+	);
+	await configureAssistantJson(path, { replace: true, confirm: true, value });
+	await configureAssistantJson(path, { remove: true, confirm: true, value });
+	assert.deepEqual(JSON.parse(readFileSync(path)), JSON.parse(original));
+	writeFileSync(path, '{bad json');
+	await assert.rejects(configureAssistantJson(path, { confirm: true, value }));
+	assert.equal(readFileSync(path, 'utf8'), '{bad json');
+	const linked = join(root, 'linked-client.json');
+	symlinkSync(path, linked);
+	await assert.rejects(configureAssistantJson(linked, { confirm: true, value }), /Linked/);
+	unlinkSync(linked);
+	writeFileSync(`${path}.saturday.lock`, 'occupied');
+	await assert.rejects(configureAssistantJson(path, { confirm: true, value }), /EEXIST/);
+	unlinkSync(`${path}.saturday.lock`);
+	assert.equal(readFileSync(path, 'utf8'), '{bad json');
+});
+
+test('assistant CLI prepares both formats without modifying client files or data', () => {
+	const config = spawnSync(
+		process.execPath,
+		['scripts/assistant.mjs', 'config', '--format', 'json'],
+		{ env, encoding: 'utf8' }
+	);
+	assert.equal(config.status, 0, config.stderr);
+	assert.equal(
+		JSON.parse(config.stdout).mcpServers.saturday.env.SATURDAY_DB_PATH,
+		env.SATURDAY_DB_PATH
+	);
+	const toml = spawnSync(
+		process.execPath,
+		['scripts/assistant.mjs', 'config', '--format', 'toml'],
+		{ env, encoding: 'utf8' }
+	);
+	assert.equal(toml.status, 0, toml.stderr);
+	assert.match(toml.stdout, /\[mcp_servers\.saturday\.env\]/);
+	const refused = spawnSync(
+		process.execPath,
+		['scripts/assistant.mjs', 'connect', '--config', join(root, 'not-authorized.json')],
+		{ env, encoding: 'utf8' }
+	);
+	assert.equal(refused.status, 1);
+	assert.equal(existsSync(join(root, 'not-authorized.json')), false);
 });
