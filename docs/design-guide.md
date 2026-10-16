@@ -97,7 +97,7 @@ Existing-document selection keeps search/paging in the URL. Copy to this job loa
 
 ### Settings
 
-Section navigation covers LAN access, Password, Assistant, Backups, Updates, Storage, Server, and Extensions. Each section uses SectionCard.
+Section navigation covers Updates, Server, Password, LAN access, Backups, Storage, Assistant, and Extensions, in page order. Each section uses SectionCard inside `.settings-layout`. From 64rem the navigation is a sticky left sidebar beside a content column capped at 52rem; below that it is a sticky, horizontally scrolling chip row that clears the sticky top bar at 48–64rem. The current section carries `aria-current="location"`, driven by scroll position. Backups uses Create a backup / Restore a backup / Saved backups subsections with imports in disclosures; Assistant shows configuration first and setup steps in a disclosure; Uninstall sits apart from routine update actions.
 
 - **LAN access:** show saved startup preference and effective running mode separately, with Restart required when they differ. Confirm Allow LAN access with the reachable-device/optional-password/HTTP warning, then offer Restart now/Later. Disable saves local-only mode but keeps effective phone addresses visible until restart. Show interface-labelled selectable addresses, Copy with manual fallback, and guidance to use the host shortcut for unavailable controls. Never label a VPN candidate as confirmed Wi-Fi. After restart, force a full page reload; fragment navigation cannot replace stale state or enforce renewed sign-in.
 
