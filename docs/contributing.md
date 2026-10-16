@@ -9,7 +9,7 @@ npm run setup
 npm run dev
 ```
 
-Setup installs dependencies, prepares optional Chrome/PDF support, builds web/MCP, and initializes or validates stores. It persists an installation descriptor and can be repeated without resetting data. The dev server binds to loopback. Use disposable paths for experiments and tests; do not develop recovery workflows against personal data.
+Setup installs dependencies, prepares optional Chrome/PDF support, builds web/MCP, and initializes or validates stores. It persists an installation descriptor and can be repeated without resetting data. The dev/preview server binds to loopback. Test LAN through the owned production launcher; it reads Settings on each web start. Use disposable paths for experiments and tests; do not develop recovery workflows against personal data.
 
 For an isolated source workspace, set absolute `SATURDAY_DB_PATH`, `SATURDAY_FILES_PATH`, `SATURDAY_EXTENSION_STATE_PATH`, and `SATURDAY_EXTENSIONS_PATH` before setup. Keep the resulting `SATURDAY_INSTALLATION_PATH` consistent across commands. Existing descriptors reject conflicting overrides rather than selecting another workspace.
 
@@ -41,25 +41,25 @@ History records local macOS source/setup, PDF, HTTP/browser, and limited managed
 
 ## Commands and verification
 
-| Command                                                | Purpose                                                                              |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| `npm run setup`                                        | Resumable dependency/PDF/build/storage preparation                                   |
-| `npm run dev`                                          | Loopback development server                                                          |
-| `npm run open` / `npm run stop` / `npm run restart`    | Control this installation's background UI                                            |
-| `npm run start`                                        | Production start with foreground control when creating a server                      |
-| `npm run status`                                       | Verify installation/build readiness and actual URL                                   |
-| `npm run build` / `npm run build:mcp`                  | Build web and MCP / MCP only                                                         |
-| `npm run migrate`                                      | Create the database or apply supported migrations                                    |
-| `npm run check`                                        | Generate extension registrations; check Svelte and types                             |
-| `npm run lint` / `npm run format`                      | Check / write Prettier formatting                                                    |
-| `npm run setup:pdf`                                    | Install Puppeteer's managed Chrome                                                   |
-| `npm test`                                             | Build MCP; run service, CLI, process, and protocol tests                             |
-| `npm run test:web`                                     | Build production; run HTTP, lifecycle, password, and available Chrome workflow tests |
-| `npm run test:beta`                                    | Browser review against an existing production build                                  |
-| `npm run verify`                                       | Lint, type checks, unit/integration tests, production tests, browser review          |
-| `npm run assistant -- config --format json`            | Generate local MCP configuration; also supports TOML                                 |
-| `npm run update:check` / `npm run update -- --confirm` | Check / perform a manual application update                                          |
-| `npm run repair` / `npm run uninstall -- --confirm`    | Repair installation / uninstall with data retained                                   |
+| Command                                                | Purpose                                                                           |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `npm run setup`                                        | Resumable dependency/PDF/build/storage preparation                                |
+| `npm run dev`                                          | Loopback development server                                                       |
+| `npm run open` / `npm run stop` / `npm run restart`    | Control this installation's background UI                                         |
+| `npm run start`                                        | Production start with foreground control when creating a server                   |
+| `npm run status`                                       | Verify installation/build readiness and actual URL                                |
+| `npm run build` / `npm run build:mcp`                  | Build web and MCP / MCP only                                                      |
+| `npm run migrate`                                      | Create the database or apply supported migrations                                 |
+| `npm run check`                                        | Generate extension registrations; check Svelte and types                          |
+| `npm run lint` / `npm run format`                      | Check / write Prettier formatting                                                 |
+| `npm run setup:pdf`                                    | Install Puppeteer's managed Chrome                                                |
+| `npm test`                                             | Build MCP; run service, CLI, process, and protocol tests                          |
+| `npm run test:web`                                     | Build production; run HTTP, lifecycle, password, LAN, and available Chrome checks |
+| `npm run test:beta`                                    | Browser review against an existing production build                               |
+| `npm run verify`                                       | Lint, type checks, unit/integration tests, production tests, browser review       |
+| `npm run assistant -- config --format json`            | Generate local MCP configuration; also supports TOML                              |
+| `npm run update:check` / `npm run update -- --confirm` | Check / perform a manual application update                                       |
+| `npm run repair` / `npm run uninstall -- --confirm`    | Repair installation / uninstall with data retained                                |
 
 Backup/file commands are in the [agent guide](agent-guide.md#backup-and-recovery-commands); extension commands are in the [extension guide](extension-guide.md).
 

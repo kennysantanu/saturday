@@ -126,9 +126,23 @@ Enable the master switch in **Settings → Extensions** to show navigation. Inst
 
 The Extensions directory provides open, enable/disable, independent backup/restore, and confirmed removal. Disable preserves data. Removal disables the extension and requires stopping Saturday/MCP and completing the displayed uninstall command. The master switch preserves individual choices. Back up each extension separately; core database/file backups exclude its database.
 
+## LAN access
+
+1. On the computer running Saturday, open the **Open Saturday** desktop shortcut and go to **Settings → LAN access**.
+2. Choose **Allow LAN access**, read the warning, then confirm. Cancel leaves the preference unchanged. Password protection is optional and configured separately.
+3. Choose **Restart now** or **Later**. Settings shows the saved startup preference, running mode, and **Restart required** while they differ. Later applies the preference at the next restart or launch of a stopped server. Opening an already-running instance does not restart it.
+4. Once LAN access is running, connect your phone to the same trusted network and open a displayed **Phone address** in its browser. Sign in if password login is enabled. Jobs, documents, uploads/downloads, and both logout actions work from the phone.
+5. Choose **Disable LAN access** on the server computer to save local-only mode, then restart now or later. Phone access continues until that restart completes. Disabling LAN does not disable password protection.
+
+Use the address matching the server computer’s Wi-Fi/Ethernet interface. Multiple addresses may appear; VPN/virtual interfaces are labelled as candidates rather than confirmed Wi-Fi addresses. Addresses and the actual port can change: reload Settings to refresh, or reopen the desktop shortcut after a failed reconnect. Copy the address, or select its text manually if clipboard access is unavailable.
+
+Keep the server computer awake. If the phone cannot connect, check that both devices use the intended network, that guest Wi-Fi/client isolation permits device-to-device traffic, and that the computer’s firewall permits Saturday. Saturday does not alter OS firewall/router settings or configure public internet access. LAN mode listens on all IPv4 interfaces, so any reachable device may connect. HTTP does not encrypt passwords, sessions, or career data. Without password protection, reachable devices can read/edit the workspace.
+
+LAN/password preferences, installation/server/start-at-login controls, and opening host folders require the server computer’s local browser opened by the desktop shortcut. They remain unavailable from the phone even when password protection is off. Password-protected restarts sign all browsers out. Local stdio MCP remains independent; enabling LAN does not publish an MCP endpoint.
+
 ## Password login
 
-Open Saturday with its desktop shortcut, then go to **Settings → Password login**. Protection is optional and off by default. Choose **Enable password login**, enter and confirm a password, and save. Any non-empty password is accepted, with no minimum length or required character mix. The current browser stays signed in; other browsers must enter the same password. No username or online account is needed. The UI still listens only on this computer; this feature does not enable phone/LAN access.
+Open Saturday with its desktop shortcut, then go to **Settings → Password login**. Protection is optional and off by default. Choose **Enable password login**, enter and confirm a password, and save. Any non-empty password is accepted, with no minimum length or required character mix. The current browser stays signed in; other browsers must enter the same password. No username or online account is needed. Password login applies to local and LAN browsers; it does not enable LAN access by itself.
 
 **Sign out after inactivity (hours)** accepts 0.25–720 hours, including fractions such as 0.5 for 30 minutes. The default is 1 hour. Navigation, actions, scrolling, and typing keep the session active; passive reading without interaction eventually counts as inactivity. Background polling does not keep you signed in. Without JavaScript, only navigation and form requests count. Each browser session has its own timer; tabs sharing a session share its activity.
 

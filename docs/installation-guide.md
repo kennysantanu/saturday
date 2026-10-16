@@ -109,6 +109,28 @@ Open reuses an existing owned UI. Occupied preferred ports fall back to another 
 
 The supervisor owns only the UI. Stopping or restarting it does not stop client-owned MCP or require an MCP reconnect. Code updates do require reconnecting MCP to load new code. Ownership/credentials/state live under `<data_root>/server.state/`; keep `server.json` private and never share controller tokens.
 
+## LAN access and startup
+
+Normal use is **Open Saturday desktop shortcut → Settings → LAN access → Allow LAN access → warning → Restart now/Later → Phone address**. See [LAN access](user-guide.md#lan-access) for the phone workflow and connection help. Both LAN access and password login default off; either can be enabled independently.
+
+The owned supervisor reads the saved preference for every web-process start, including restart, desktop shortcut, and Start at login. Local-only mode binds `127.0.0.1`; LAN mode binds `0.0.0.0` for IPv4. The local browser/readiness URL remains loopback. Port reservation checks the intended bind address and falls back to a free port without killing unrelated processes. Opening a running instance reuses its current mode even if a different preference is pending. The supervisor’s control listener always stays on loopback.
+
+The production entry `scripts/web.mjs` serves the built adapter handler with literal local/interface hosts, the actual request origin, and actual socket identity. It overrides its internal protocol header and ignores forwarded identity/origin headers; SvelteKit CSRF checks remain enabled. Remote browsers cannot invoke host controls, including with forged loopback/proxy headers or password protection off. Phone addresses refresh from current IPv4 interfaces and show the actual port, including VPN/virtual candidate labels. HTTPS/proxy deployment and public hosting are outside this feature.
+
+The developer server and `npm run preview` stay on loopback. To apply a LAN setting from a development checkout, stop the dev/preview server and open the production build through Open Saturday or `npm run open`. The UI explains this when an owned restart is unavailable. A failed reconnect can mean a changed port or a failed restart; use the desktop shortcut to open the actual address and inspect Settings/Diagnostics.
+
+For explicitly authorized host-terminal maintenance, `access.mjs` supports:
+
+```sh
+node scripts/access.mjs status --json
+node scripts/access.mjs lan --enable --confirm --json
+node scripts/access.mjs lan --disable --json
+```
+
+For installed copies, use the private runtime and `--installation "<descriptor>"` as described above. LAN preference commands save for the next restart without stopping the UI or changing password/session state. Status includes saved/effective mode, restart-required state, and current candidate phone addresses. LAN commands refuse competing installation operations. Password/timeout maintenance still requires confirmed web shutdown; local credential disable/recovery also saves LAN off. No command changes firewall/router settings.
+
+LAN mode allows reachable devices on all IPv4 interfaces, not just the current Wi-Fi. Use trusted networks. HTTP does not encrypt credentials, session cookies, or records; password protection controls application access independently. No preferred-port setting, npm dependency, or career database migration is added.
+
 ## Password login and local recovery
 
 Configure optional browser protection through **Settings → Password login**, after opening the installed desktop shortcut. See the [user guide](user-guide.md#password-login) for inactivity, No expiration, logout, and restart behavior. Source developers must run setup to persist an installation descriptor before changing sign-in settings.
@@ -125,7 +147,7 @@ node scripts/access.mjs disable --confirm --json
 node scripts/access.mjs recover --confirm --json
 ```
 
-Mutating commands stop an owned UI and verify it has exited, then hold the lifecycle maintenance guard while saving. A competing operation/shutdown failure refuses the change. An independently launched development/preview UI must be stopped first; current local MCP may remain connected. Older runtimes without an identified process role must be stopped once before access maintenance. The command leaves the UI stopped; use **Open Saturday** afterward. `recover --confirm` explicitly clears password protection, repairs the access settings file, and saves LAN off while retaining career data. It refuses linked settings files. No browser endpoint can reset a forgotten password.
+Mutating authentication commands stop an owned UI and verify it has exited, then hold the lifecycle maintenance guard while saving. A competing operation/shutdown failure refuses the change. An independently launched development/preview UI must be stopped first; current local MCP may remain connected. Older runtimes without an identified process role must be stopped once before access maintenance. The command leaves the UI stopped; use **Open Saturday** afterward. `recover --confirm` explicitly clears password protection, repairs the access settings file, and saves LAN off while retaining career data. It refuses linked settings files. No browser endpoint can reset a forgotten password.
 
 `set-password --stdin` accepts JSON containing `password` and `confirm_password` through protected standard input. It follows the same stop/save rules. Never put passwords in command-line arguments, shell history, diagnostics, or assistant configuration. Results are JSON with account-enabled status and inactivity hours; no verifier, cookie, or plaintext password is returned.
 
@@ -149,7 +171,7 @@ Forgotten-password recovery is command-line-only. Run the command on the compute
 
 If access settings are missing/corrupt, use the same invocation with `recover --confirm` instead of `disable --confirm`. Recovery also resets inactivity to its default and keeps LAN off. Preserve `installation.json`; do not delete credentials/settings files or edit initialization markers to bypass protection. A missing/invalid installation descriptor needs setup repair, not password recovery.
 
-With protection enabled, updates must advertise `saturday.access_api: 1`; an incompatible candidate is refused rather than silently dropping login protection. The installer’s optional password support adds no npm dependency or career database migration. It does not add LAN binding or HTTPS.
+With protection enabled, updates must advertise `saturday.access_api: 1`; an incompatible candidate is refused rather than silently dropping login protection. With a saved LAN preference, candidates must also advertise `saturday.lan_api: 1` so a build cannot silently ignore network startup settings. The installer’s optional password support adds no npm dependency or career database migration. LAN access is configured separately as described above; HTTPS is not added.
 
 ## Start at login
 

@@ -305,6 +305,9 @@ test('Git sources pin commits and retain copied snapshots through source changes
 	const { execFileSync } = await import('node:child_process');
 	const scratch = await fs.mkdtemp(join(tmpdir(), 'saturday-extension-git-')),
 		prior = { ...process.env };
+	process.env.SATURDAY_DB_PATH = join(scratch, 'core.sqlite');
+	process.env.SATURDAY_FILES_PATH = join(scratch, 'files');
+	process.env.SATURDAY_INSTALLATION_PATH = '';
 	process.env.SATURDAY_EXTENSION_STATE_PATH = join(scratch, 'state');
 	process.env.SATURDAY_EXTENSIONS_PATH = join(scratch, 'code');
 	const source = join(scratch, 'repo'),
@@ -469,6 +472,9 @@ test('real candidate build produces web and MCP artifacts without changing the r
 		prior = { ...process.env },
 		checkout = resolve('.'),
 		app = join(scratch, 'app');
+	process.env.SATURDAY_DB_PATH = join(scratch, 'core.sqlite');
+	process.env.SATURDAY_FILES_PATH = join(scratch, 'files');
+	process.env.SATURDAY_INSTALLATION_PATH = '';
 	process.env.SATURDAY_EXTENSION_STATE_PATH = join(scratch, 'state');
 	process.env.SATURDAY_EXTENSIONS_PATH = join(app, 'extensions');
 	try {

@@ -21,7 +21,8 @@ export function GET() {
 				status: 'ready',
 				installation_id: installation.installation_id,
 				build: buildInfo,
-				server_generation: process.env.SATURDAY_SERVER_GENERATION ?? null
+				server_generation: process.env.SATURDAY_SERVER_GENERATION ?? null,
+				allow_lan: process.env.SATURDAY_RUNNING_ALLOW_LAN === 'true'
 			},
 			{ headers: { 'cache-control': 'no-store' } }
 		);

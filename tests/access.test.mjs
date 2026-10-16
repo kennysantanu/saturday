@@ -210,6 +210,12 @@ test('salted scrypt verification, bounded failures and installation cookie isola
 		const settings = readAccessSettings(),
 			state = authState(settings);
 		const token = state.store.create(settings.idle_timeout_seconds);
+		await updateAccessSettings((current) => ({ ...current, allow_lan: true }));
+		assert.equal(
+			authState(readAccessSettings()).store.valid(token, 3600),
+			true,
+			'saving LAN preference must not revoke an active login'
+		);
 		for (let i = 0; i < 10; i++) assert.equal(await checkPassword('', 'client', settings), false);
 		await assert.rejects(checkPassword('', 'client', settings), /Too many attempts/);
 		assert.equal(state.store.valid(token, 3600), true, 'failed logins do not evict sessions');

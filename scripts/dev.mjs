@@ -5,6 +5,8 @@ import {
 } from '../src/lib/server/installation.js';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
+// Developer preview is loopback-only; apply LAN preferences through Open Saturday.
+process.env.SATURDAY_RUNNING_ALLOW_LAN = 'false';
 
 const installation = getInstallation();
 assertInstallationStorage();

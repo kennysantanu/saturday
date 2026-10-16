@@ -24,7 +24,12 @@ import {
 	passwordHash
 } from '$lib/server/access-auth.js';
 import { withAccessChange } from '$lib/server/access-admin.js';
-import { serverSummary, controlServer, validServerSession } from '$lib/server/server-lifecycle.js';
+import {
+	serverSummary,
+	controlServer,
+	validServerSession,
+	networkSummary
+} from '$lib/server/server-lifecycle.js';
 import {
 	assistantConfiguration,
 	getInstallation,
@@ -143,6 +148,7 @@ export async function load(event) {
 	}
 	return {
 		access: event.locals.access,
+		network: networkSummary(readAccessSettings(), Number(url.port || 80)),
 		installationOperation,
 		updateCheck,
 		installationError,
@@ -214,6 +220,30 @@ function installationAuthorized(event) {
 	);
 }
 export const actions = {
+	lan: async (event) => {
+		if (!localBrowser(event) || !sameOrigin(event))
+			return fail(403, {
+				lanError: 'Change LAN access from Open Saturday on the server computer.'
+			});
+		try {
+			const values = await accessForm(event.request);
+			const enable = values.get('operation') === 'enable';
+			if (!['enable', 'disable'].includes(String(values.get('operation'))))
+				throw new AccessError('Choose Allow LAN access or Disable LAN access.');
+			if (enable && values.get('confirm') !== 'true')
+				throw new AccessError('Confirm allowing reachable network devices.');
+			await withAccessChange(() =>
+				updateAccessSettings((current) => ({ ...current, allow_lan: enable }))
+			);
+			return { lanSaved: true };
+		} catch (e) {
+			return fail(e.status ?? 503, {
+				lanError: e.status
+					? e.message
+					: 'LAN access could not be saved. Check local settings and try again.'
+			});
+		}
+	},
 	password: async (event) => {
 		if (!sameOrigin(event) || !localBrowser(event))
 			return fail(403, {

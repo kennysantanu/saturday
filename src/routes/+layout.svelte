@@ -99,7 +99,7 @@
 	<main id="main" tabindex="-1" class="app-main">
 		{@render children()}
 	</main>
-	<footer class="app-footer">Saturday keeps your job search on this computer.</footer>
+	<footer class="app-footer">Your job search stays on the computer running Saturday.</footer>
 </div>
 
 <!-- Below 48rem the same destinations move to a floating tab bar. -->

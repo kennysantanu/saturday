@@ -97,7 +97,9 @@ Existing-document selection keeps search/paging in the URL. Copy to this job loa
 
 ### Settings
 
-Section navigation covers Password, Assistant, Backups, Updates, Storage, Server, and Extensions. Each section uses SectionCard.
+Section navigation covers LAN access, Password, Assistant, Backups, Updates, Storage, Server, and Extensions. Each section uses SectionCard.
+
+- **LAN access:** show saved startup preference and effective running mode separately, with Restart required when they differ. Confirm Allow LAN access with the reachable-device/optional-password/HTTP warning, then offer Restart now/Later. Disable saves local-only mode but keeps effective phone addresses visible until restart. Show interface-labelled selectable addresses, Copy with manual fallback, and guidance to use the host shortcut for unavailable controls. Never label a VPN candidate as confirmed Wi-Fi. After restart, force a full page reload; fragment navigation cannot replace stale state or enforce renewed sign-in.
 
 - **Password:** optional password-only login. Use Field/Input for passwords and hours, Checkbox for No expiration, and ConfirmDialog for disabling protection/logout-all. Signed-in host users can disable protection in Settings with the current password and confirmation. Forgotten-password recovery is host-command-line-only; Sign in has a Forgot your password disclosure with recovery instructions and an explicit MCP limitation. Log out and Log out all devices stay together in Settings; native logout/disable navigation clears client state. Enhanced forms preserve drafts on authentication-required responses and offer separate-tab sign-in.
 - **Assistant:** show copyable JSON/TOML, built-entry status, and installation/dataset/build identities. Distinguish configuration prepared from real-client verification. Copy actions do not modify client files; instructions belong in the [assistant guide](assistant-guide.md).

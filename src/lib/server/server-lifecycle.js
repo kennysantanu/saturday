@@ -3,7 +3,8 @@ import { createServer } from 'node:http';
 import { createServer as createSocket } from 'node:net';
 import { spawn } from 'node:child_process';
 import { randomUUID, randomBytes, timingSafeEqual } from 'node:crypto';
-import { initializeAccessSettings } from './access-settings.js';
+import { initializeAccessSettings, readAccessSettings } from './access-settings.js';
+import { phoneAddresses } from './access-network.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {
 	mkdirSync,
@@ -169,6 +170,7 @@ function readRecord() {
 			record.status
 		) ||
 		record.version !== 1 ||
+		(record.allow_lan !== undefined && typeof record.allow_lan !== 'boolean') ||
 		!Number.isSafeInteger(record.pid) ||
 		record.pid < 1 ||
 		!Number.isInteger(record.port) ||
@@ -194,9 +196,30 @@ export function serverSummary() {
 		status: record && alive(record.pid) ? record.status : 'stopped',
 		url: record?.url ?? null,
 		generation: record?.generation ?? null,
+		allow_lan: record?.allow_lan ?? false,
+		port: record?.port ?? null,
 		installation_id: getInstallation().installation_id,
 		logs: join(getInstallation().logs, 'server.log'),
 		error: record?.error ?? null
+	};
+}
+export function networkSummary(settings = readAccessSettings(), runtimePort = null) {
+	const server = serverSummary();
+	const running = server.managed && server.status === 'running';
+	const direct = runtimePort && process.env.SATURDAY_RUNNING_ALLOW_LAN !== undefined;
+	const effective = direct
+		? process.env.SATURDAY_RUNNING_ALLOW_LAN === 'true'
+		: running
+			? server.allow_lan
+			: null;
+	const port = direct ? runtimePort : server.port;
+	return {
+		saved_allow_lan: settings.allow_lan,
+		effective_allow_lan: effective,
+		restart_required: effective !== null && settings.allow_lan !== effective,
+		phone_addresses: effective === true && port ? phoneAddresses(port) : [],
+		local_url: server.url,
+		managed: server.managed
 	};
 }
 export function validServerSession(token) {
@@ -218,6 +241,7 @@ async function probe(record) {
 			health.status === 'ready' &&
 			health.installation_id === getInstallation().installation_id &&
 			health.server_generation === record.generation &&
+			(health.allow_lan ?? false) === (record.allow_lan ?? false) &&
 			(!getInstallation().build?.id || health.build?.id === getInstallation().build.id)
 		);
 	} catch {
@@ -256,24 +280,39 @@ export async function commitServerControl(generation) {
 		signal: AbortSignal.timeout(4000)
 	});
 }
-async function freePort(preferred) {
+async function freePort(preferred, host = '127.0.0.1') {
 	if (!Number.isInteger(preferred) || preferred < 1 || preferred > 65535)
 		throw new Error('Choose a valid port.');
 	for (const candidate of [preferred, 0]) {
-		const server = createSocket();
+		let server;
 		try {
-			await new Promise((res, rej) => {
-				server.once('error', rej);
-				server.listen(candidate, '127.0.0.1', res);
-			});
-			const port = server.address().port;
-			await new Promise((res) => server.close(res));
+			async function check(address, port) {
+				server = createSocket();
+				await new Promise((res, rej) => {
+					server.once('error', rej);
+					server.listen(port, address, res);
+				});
+				const actual = server.address().port;
+				await new Promise((res) => server.close(res));
+				return actual;
+			}
+			const port = await check(host, candidate);
+			if (host === '0.0.0.0') {
+				// macOS can allow a wildcard listener beside an existing specific-interface listener.
+				// Probe each address without our wildcard held so Windows/Linux do not conflict with us.
+				for (const address of new Set([
+					'127.0.0.1',
+					...phoneAddresses(port).map((entry) => entry.address)
+				]))
+					await check(address, port);
+				await check(host, port);
+			}
 			return port;
 		} catch {
-			server.close();
+			server?.close();
 		}
 	}
-	throw new Error('Could not reserve a loopback port.');
+	throw new Error('Could not reserve a port on the intended network interfaces.');
 }
 export async function startServer({ open = false } = {}) {
 	await initializeAccessSettings();
@@ -311,7 +350,10 @@ export async function startServer({ open = false } = {}) {
 			} catch (e) {
 				if (e.ownedConflict) throw e;
 			}
-			const port = await freePort(preferred);
+			const port = await freePort(
+				preferred,
+				readAccessSettings().allow_lan ? '0.0.0.0' : '127.0.0.1'
+			);
 			const child = spawn(
 				installation.node_path,
 				[join(installation.code_root, 'scripts', 'start.mjs'), '--supervise', String(port)],
@@ -401,15 +443,19 @@ export async function runSupervisor(port) {
 		}
 	};
 	async function launch() {
+		record.allow_lan = readAccessSettings().allow_lan;
+		// The prior port may now be occupied on a non-loopback interface.
+		record.port = await freePort(record.port, record.allow_lan ? '0.0.0.0' : '127.0.0.1');
+		record.url = `http://127.0.0.1:${record.port}`;
 		record.status = 'starting';
 		await save();
-		child = spawn(installation.node_path, [join(installation.code_root, 'build', 'index.js')], {
+		child = spawn(installation.node_path, [join(installation.code_root, 'scripts', 'web.mjs')], {
 			cwd: installation.code_root,
 			env: {
 				...installationEnvironment(installation),
-				HOST: '127.0.0.1',
-				PORT: String(port),
-				ORIGIN: record.url,
+				PORT: String(record.port),
+				SATURDAY_LOCAL_ORIGIN: record.url,
+				SATURDAY_RUNNING_ALLOW_LAN: String(record.allow_lan),
 				BODY_SIZE_LIMIT: 'Infinity',
 				SATURDAY_SERVER_TOKEN: record.token,
 				SATURDAY_SERVER_GENERATION: record.generation
