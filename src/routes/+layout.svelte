@@ -5,6 +5,8 @@
 	import { page } from '$app/state';
 	import { setLucideProps } from '@lucide/svelte';
 	import Logo from '$lib/components/app/logo.svelte';
+	import SessionActivity from '$lib/components/app/session-activity.svelte';
+	import { authNotice } from '$lib/auth-notice.svelte';
 	import Toast from '$lib/components/app/toast.svelte';
 	import { SAVED_MESSAGES, toast } from '$lib/toast.svelte';
 	import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard';
@@ -76,21 +78,22 @@
 
 <div class="scroll-edge" aria-hidden="true"></div>
 
-<div class="app-shell">
+<SessionActivity access={data.access} />
+<div class="app-shell" style:visibility={authNotice.restoring ? 'hidden' : undefined}>
 	<header class="app-topbar glass-surface">
 		<Logo class="topbar-brand" />
-		<nav aria-label="Primary" class="desktop-navigation">
-			{#each links as link (link.href)}
-				<a
-					href={link.href}
-					aria-current={isCurrent(link.href) ? 'page' : undefined}
-					class="navigation-item"
-				>
-					<link.icon class="size-5" />
-					<span>{link.label}</span>
-				</a>
-			{/each}
-		</nav>
+		{#if page.url.pathname !== '/signin'}<nav aria-label="Primary" class="desktop-navigation">
+				{#each links as link (link.href)}
+					<a
+						href={link.href}
+						aria-current={isCurrent(link.href) ? 'page' : undefined}
+						class="navigation-item"
+					>
+						<link.icon class="size-5" />
+						<span>{link.label}</span>
+					</a>
+				{/each}
+			</nav>{/if}
 	</header>
 
 	<main id="main" tabindex="-1" class="app-main">
@@ -100,13 +103,16 @@
 </div>
 
 <!-- Below 48rem the same destinations move to a floating tab bar. -->
-<nav aria-label="Primary" class="tab-bar glass-surface">
-	{#each links as link (link.href)}
-		<a href={link.href} aria-current={isCurrent(link.href) ? 'page' : undefined} class="tab-item">
-			<link.icon class="size-5" />
-			<span>{link.label}</span>
-		</a>
-	{/each}
-</nav>
+{#if page.url.pathname !== '/signin' && !authNotice.restoring}<nav
+		aria-label="Primary"
+		class="tab-bar glass-surface"
+	>
+		{#each links as link (link.href)}
+			<a href={link.href} aria-current={isCurrent(link.href) ? 'page' : undefined} class="tab-item">
+				<link.icon class="size-5" />
+				<span>{link.label}</span>
+			</a>
+		{/each}
+	</nav>{/if}
 
 <Toast />

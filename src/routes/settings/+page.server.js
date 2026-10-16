@@ -6,6 +6,24 @@ import {
 	ownedRemovalTargets,
 	operationPaths
 } from '$lib/server/installation-operations.js';
+import {
+	accessForm,
+	accessCookieName,
+	localBrowser,
+	sameOrigin,
+	readAccessSettings,
+	updateAccessSettings,
+	parseIdleHours,
+	AccessError
+} from '$lib/server/access-settings.js';
+import {
+	authState,
+	loginCookie,
+	logout,
+	checkPassword,
+	passwordHash
+} from '$lib/server/access-auth.js';
+import { withAccessChange } from '$lib/server/access-admin.js';
 import { serverSummary, controlServer, validServerSession } from '$lib/server/server-lifecycle.js';
 import {
 	assistantConfiguration,
@@ -53,7 +71,8 @@ import { join } from 'node:path';
 import { getDatabasePath, getProjectRoot, openDatabase } from '$lib/server/database.js';
 import { buildInfo, storageCompatibility } from '$lib/server/compatibility.js';
 
-export async function load({ setHeaders, url }) {
+export async function load(event) {
+	const { setHeaders, url } = event;
 	setHeaders({ 'x-saturday-build': buildInfo.id });
 	let filesError = null,
 		fileSummary = null,
@@ -73,7 +92,10 @@ export async function load({ setHeaders, url }) {
 	}
 	let server;
 	try {
-		server = { ...serverSummary(), controlsAvailable: Boolean(process.env.SATURDAY_SERVER_TOKEN) };
+		server = {
+			...serverSummary(),
+			controlsAvailable: Boolean(process.env.SATURDAY_SERVER_TOKEN) && localBrowser(event)
+		};
 	} catch (e) {
 		server = { managed: false, status: 'unavailable', controlsAvailable: false, error: e.message };
 	}
@@ -120,6 +142,7 @@ export async function load({ setHeaders, url }) {
 		deletionUnavailable = e.message;
 	}
 	return {
+		access: event.locals.access,
 		installationOperation,
 		updateCheck,
 		installationError,
@@ -182,14 +205,77 @@ async function boundedForm(request) {
 		headers: { 'content-type': request.headers.get('content-type') ?? '' }
 	}).formData();
 }
-function installationAuthorized({ request, cookies, url }) {
+function installationAuthorized(event) {
+	const { request, cookies, url } = event;
 	return (
 		request.headers.get('origin') === url.origin &&
-		url.origin === process.env.ORIGIN &&
-		validServerSession(cookies.get('saturday-server-session'))
+		localBrowser(event) &&
+		validServerSession(cookies.get(accessCookieName('control')))
 	);
 }
 export const actions = {
+	password: async (event) => {
+		if (!sameOrigin(event) || !localBrowser(event))
+			return fail(403, {
+				accessError: 'Change sign-in settings from the computer’s local browser.'
+			});
+		try {
+			const values = await accessForm(event.request);
+			await withAccessChange(async () => {
+				const before = readAccessSettings(),
+					operation = values.get('operation');
+				if (!['enable', 'change', 'disable', 'timeout'].includes(String(operation)))
+					throw new AccessError('Choose a valid sign-in setting.');
+				if ((operation === 'enable') === Boolean(before.password))
+					throw new AccessError(
+						'The sign-in setting changed. Refresh Settings and try again.',
+						409
+					);
+				if (
+					['change', 'disable'].includes(String(operation)) &&
+					!(await checkPassword(values.get('current_password'), event.getClientAddress(), before))
+				)
+					throw new AccessError('Incorrect current password.');
+				if (operation === 'disable' && values.get('confirm') !== 'true')
+					throw new AccessError('Confirm disabling password login.');
+				let verifier = before.password;
+				if (operation === 'enable' || operation === 'change') {
+					if (values.get('password') !== values.get('confirm_password'))
+						throw new AccessError('The new passwords do not match.');
+					verifier = await passwordHash(values.get('password'));
+				} else if (operation === 'disable') verifier = null;
+				const next = await updateAccessSettings((current) => {
+					if (JSON.stringify(current) !== JSON.stringify(before))
+						throw new AccessError('The sign-in setting changed. Refresh and try again.', 409);
+					return {
+						...current,
+						password: verifier,
+						idle_timeout_seconds:
+							operation === 'timeout'
+								? parseIdleHours(values.get('hours'), values.get('no_expiration') === 'on')
+								: current.idle_timeout_seconds
+					};
+				});
+				authState(next);
+				if (operation === 'enable' || operation === 'change') loginCookie(event, next);
+				if (operation === 'disable') logout(event, true);
+			});
+		} catch (e) {
+			return fail(e.status ?? 503, {
+				accessError: e.status ? e.message : 'Sign-in settings could not be saved.'
+			});
+		}
+		redirect(303, '/settings?saved=access#password');
+	},
+	logout: async (event) => {
+		if (!sameOrigin(event)) return fail(403, { accessError: 'Log out from this Saturday page.' });
+		const values = await accessForm(event.request);
+		const all = values.get('all') === 'true';
+		if (all && values.get('confirm') !== 'true')
+			return fail(400, { accessError: 'Confirm logging out all devices.' });
+		logout(event, all);
+		redirect(303, '/signin');
+	},
 	checkUpdates: async (event) => {
 		if (!installationAuthorized(event))
 			return fail(403, { installationError: 'Use this installation’s local browser session.' });
@@ -220,12 +306,9 @@ export const actions = {
 			return fail(409, { installationError: e.message });
 		}
 	},
-	loginStartup: async ({ request, cookies, url }) => {
-		if (
-			request.headers.get('origin') !== url.origin ||
-			url.origin !== process.env.ORIGIN ||
-			!validServerSession(cookies.get('saturday-server-session'))
-		)
+	loginStartup: async (event) => {
+		const { request } = event;
+		if (!installationAuthorized(event))
 			return fail(403, {
 				loginError: 'Startup controls require this installation’s local browser session.'
 			});
@@ -238,12 +321,9 @@ export const actions = {
 			return fail(409, { loginError: e.message });
 		}
 	},
-	serverControl: async ({ request, cookies, url, setHeaders }) => {
-		if (
-			request.headers.get('origin') !== url.origin ||
-			url.origin !== process.env.ORIGIN ||
-			!validServerSession(cookies.get('saturday-server-session'))
-		)
+	serverControl: async (event) => {
+		const { request, setHeaders } = event;
+		if (!installationAuthorized(event))
 			return fail(403, {
 				serverError: 'Server controls require this installation’s local browser session.'
 			});
@@ -259,7 +339,9 @@ export const actions = {
 			return fail(409, { serverError: e.message });
 		}
 	},
-	openFolder: async () => {
+	openFolder: async (event) => {
+		if (!localBrowser(event) || !sameOrigin(event))
+			return fail(403, { storageError: 'Open folders from this computer’s local browser.' });
 		try {
 			const path = getInstallation().data_root;
 			if (!existsSync(path)) throw new Error('The data directory is unavailable.');

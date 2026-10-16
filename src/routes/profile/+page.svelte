@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { checkAuthResponse } from '$lib/auth-notice.svelte';
 	import { tick } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { enhance } from '$app/forms';
@@ -52,6 +53,7 @@
 		`?${new URLSearchParams({ select: data.select ?? '', query: data.query, page: String(page) })}`;
 	async function upload(file: File) {
 		if (uploading) return;
+		const key = uploadKey;
 		uploading = true;
 		uploadError = '';
 		try {
@@ -59,6 +61,13 @@
 				`/api/files/upload?${new URLSearchParams({ scope: 'documents', filename: file.name, designation: uploadKey, catalog_token: data.catalog_token })}`,
 				{ method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file }
 			);
+			checkAuthResponse(r, {
+				label: file.name,
+				run: () => {
+					uploadKey = key;
+					return upload(file);
+				}
+			});
 			const value = await r.json();
 			if (!r.ok) throw new Error(value.error);
 			toast.show('Document uploaded and selected.');

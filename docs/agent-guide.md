@@ -9,6 +9,14 @@ Use this guide for authorized local installation, maintenance, and recovery. The
 3. Use the [development installer](installation-guide.md#development-installer) for normal installation or [source setup](installation-guide.md#source-checkout) for development. Use the same descriptor and its runtime for all commands, following [managed command invocation](installation-guide.md#running-commands-for-a-managed-installation).
 4. Treat missing initialized storage, locks, and publication journals as recovery conditions. Preserve them and inspect the error; do not delete them to force a fresh setup.
 
+## Browser password settings
+
+Browser password login is optional and independent of trusted local stdio MCP. Prefer opening **Settings → Password login** for private user entry. Do not ask the user to paste a password into chat or store it in assistant configuration.
+
+Forgotten-password recovery is a host command-line operation. Saturday's MCP tools provide no authentication management or command execution. To help a locked-out user, use a separate terminal/process capability that executes on the computer running Saturday, following [Locked out of Saturday](installation-guide.md#locked-out-of-saturday). If you have only Saturday MCP access, explain that limitation and give the user the host-terminal steps. Do not attempt lockout recovery through MCP document writes, backup restoration, browser requests, or edits to access/installation files. A signed-in user who knows the current password can still disable protection through Settings on the host computer, with confirmation.
+
+For explicitly authorized maintenance, use the descriptor-aware [access commands](installation-guide.md#password-login-and-local-recovery). They stop and verify the owned web process before changing credentials/inactivity/recovery, coordinate with installation maintenance, and leave it stopped. Reopen using the desktop shortcut afterward. Use `status --json` for nonsecret state. Password setting accepts protected JSON stdin only; recovery requires `--confirm`, removes UI protection and saves LAN off, preserving records. Do not edit `access.json` or its initialization marker to bypass a missing/corrupt store.
+
 ## Verify installation and MCP
 
 1. Open through the shared lifecycle commands or shortcut. Wait for installation/build readiness, not merely HTTP success; [status checks](installation-guide.md#open-stop-and-restart) verify `/health` identity and the actual URL.

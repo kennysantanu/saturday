@@ -1,3 +1,4 @@
+import { authenticationRequired } from '$lib/auth-notice.svelte';
 import { tick } from 'svelte';
 import type { SubmitFunction } from '@sveltejs/kit';
 
@@ -16,13 +17,21 @@ export function focusFirstError() {
 }
 
 /** Marks the form busy while it is being sent, so its submit button shows progress. */
-export function withPending(handler: SubmitFunction = () => undefined): SubmitFunction {
+export function withPending(
+	handler: SubmitFunction = () => undefined,
+	onAuthRequired?: () => void
+): SubmitFunction {
 	return async (input) => {
 		const { formElement } = input;
 		formElement.setAttribute('aria-busy', 'true');
 		const callback = await handler(input);
 		return async (result) => {
 			try {
+				if (result.result.type === 'failure' && result.result.status === 401) {
+					authenticationRequired();
+					onAuthRequired?.();
+					return;
+				}
 				if (callback) await callback(result);
 				else await result.update();
 			} finally {

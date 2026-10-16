@@ -16,6 +16,7 @@ import {
 	atomicJson,
 	acquireDirectoryLock
 } from '../src/lib/server/installation.js';
+import { initializeAccessSettings } from '../src/lib/server/access-settings.js';
 import { storageCompatibility } from '../src/lib/server/compatibility.js';
 import { readBuildInfo } from './build-info.mjs';
 let json = process.argv.includes('--json'),
@@ -145,6 +146,11 @@ try {
 			say('PDF export is unavailable; setup will continue. Retry with npm run setup:pdf.');
 		}
 	}
+	await initializeAccessSettings({
+		installation: { ...config, descriptor_path: path },
+		locked: true
+	});
+	config.initialized.access = true;
 	await step('dependencies', values['skip-dependencies'], () => command([npm, 'ci']));
 	const { withFileLock, validateWholeStore } = await import('../src/lib/server/files/store.js');
 	const { migrateDatabase } = await import('../src/lib/server/database.js');

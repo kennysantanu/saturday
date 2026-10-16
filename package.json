@@ -9,6 +9,7 @@
 	"scripts": {
 		"setup": "node scripts/setup.mjs",
 		"assistant": "node scripts/assistant.mjs",
+		"access": "node scripts/access.mjs",
 		"dev": "node scripts/dev.mjs",
 		"build": "vite build && npm run build:mcp",
 		"build:mcp": "node scripts/build-mcp.mjs",
@@ -24,7 +25,7 @@
 		"backup": "node scripts/backup.mjs",
 		"restore": "node scripts/restore.mjs",
 		"test": "npm run build:mcp && node --test tests/*.test.mjs",
-		"test:web": "npm run build && node --test tests/web.integration.mjs tests/server-lifecycle.integration.mjs",
+		"test:web": "npm run build && node --test tests/web.integration.mjs tests/server-lifecycle.integration.mjs tests/access.integration.mjs tests/access.browser.mjs",
 		"test:beta": "node scripts/review-documents.mjs",
 		"verify": "npm run lint && npm run check && npm test && npm run test:web && npm run test:beta",
 		"files": "node scripts/files.mjs",
@@ -75,6 +76,7 @@
 	},
 	"saturday": {
 		"installation_api": 1,
+		"access_api": 1,
 		"node_minimum": "22.13.0",
 		"storage": {
 			"database": {

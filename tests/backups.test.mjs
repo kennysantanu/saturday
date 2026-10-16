@@ -28,6 +28,8 @@ import {
 import * as backups from '../src/lib/server/backups.js';
 import { schemaVersion } from '../src/lib/server/migrations.js';
 import { readBuildInfo } from '../scripts/build-info.mjs';
+import { defaultAccessSettings } from '../src/lib/server/access-settings.js';
+import { passwordHash } from '../src/lib/server/access-auth.js';
 let scratch;
 const initialPath = process.env.SATURDAY_DB_PATH;
 const initialFiles = process.env.SATURDAY_FILES_PATH;
@@ -414,6 +416,12 @@ test('development build identity handles clean, dirty and non-Git sources', () =
 	assert.equal(readBuildInfo(source).dirty, true);
 });
 test('built MCP preserves legacy tools and exposes document tools and complete backup/restore workflow without private paths', async () => {
+	const accessPath = join(scratch, 'access.json');
+	const protectedAccess = JSON.stringify({
+		...defaultAccessSettings(),
+		password: await passwordHash('test')
+	});
+	writeFileSync(accessPath, protectedAccess, { mode: 0o600 });
 	const child = spawn(process.execPath, ['build/mcp/index.js'], {
 		env: { ...process.env },
 		stdio: ['pipe', 'pipe', 'pipe']
@@ -458,6 +466,21 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n'
 		);
 		const listing = await request('tools/list', {});
+		assert.ok(
+			!listing.tools.some((tool) =>
+				/password|access_settings|run_command|execute_command/.test(tool.name)
+			),
+			'core MCP has no authentication-management or command-execution tool'
+		);
+		for (const name of ['disable_password', 'recover_access', 'set_password', 'run_command']) {
+			await request('tools/call', { name, arguments: { confirm: true } }).then(
+				(result) => assert.equal(result.isError, true),
+				(error) => assert.match(error.message, /"code":-3260[12]/)
+			);
+		}
+		const traversal = await call('create_document', { filename: '../access.json', content: '{}' });
+		assert.ok(traversal.error, 'MCP document writes cannot overwrite authentication settings');
+		assert.equal(readFileSync(accessPath, 'utf8'), protectedAccess);
 		const info = await call('get_saturday_info', {});
 		assert.equal(typeof info.dataset_id, 'string');
 		assert.equal(info.jobs, 0);
@@ -802,6 +825,11 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 		assert.ok(
 			(await call('restore_files', { restore_id: filePreview.restore_id, confirm: true }))
 				.recovery_backup_id
+		);
+		assert.equal(
+			readFileSync(accessPath, 'utf8'),
+			protectedAccess,
+			'MCP writes and career backup/restore must preserve password protection'
 		);
 	} finally {
 		lines.close();

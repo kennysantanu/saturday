@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { checkAuthResponse } from '$lib/auth-notice.svelte';
 	import { tick } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { toast } from '$lib/toast.svelte';
@@ -10,6 +11,7 @@
 	import Clipboard from '@lucide/svelte/icons/clipboard';
 	import Check from '@lucide/svelte/icons/check';
 	import Archive from '@lucide/svelte/icons/archive';
+	import PasswordSettings from '$lib/components/app/password-settings.svelte';
 	import Pagination from '$lib/components/app/pagination.svelte';
 	import BackupList from '$lib/components/app/backup-list.svelte';
 	import ConfirmDialog from '$lib/components/app/confirm-dialog.svelte';
@@ -65,6 +67,9 @@
 	async function importArchive(e: Event, bundle = false) {
 		const file = (e.currentTarget as HTMLInputElement).files?.[0];
 		if (!file) return;
+		await uploadArchive(file, bundle);
+	}
+	async function uploadArchive(file: File, bundle: boolean) {
 		uploading = true;
 		uploadError = '';
 		try {
@@ -73,6 +78,7 @@
 				headers: { 'content-type': 'application/zip' },
 				body: file
 			});
+			checkAuthResponse(r, { label: file.name, run: () => uploadArchive(file, bundle) });
 			const body = await r.json();
 			if (!r.ok) throw new Error(body.error);
 			toast.show('Backup imported. Choose it in Saved backup to preview restore.');
@@ -87,7 +93,7 @@
 		serverState = operation.operation === 'stop' ? 'stopped' : 'restarting';
 		serverMessage =
 			operation.operation === 'stop'
-				? 'The UI server is stopped. Use npm run open to return. Your assistant connection remains independent.'
+				? 'The UI server is stopped. Use the Open Saturday desktop shortcut to return. Your assistant connection remains independent.'
 				: 'Restarting Saturday…';
 		if (operation.operation !== 'restart') return;
 		const deadline = Date.now() + 25000;
@@ -112,12 +118,19 @@
 		}
 		serverState = 'failed';
 		serverMessage =
-			'Saturday has not reconnected. Try refreshing or use npm run open, then check the server log in Diagnostics.';
+			'Saturday has not reconnected. Try refreshing or use the Open Saturday desktop shortcut, then check the server log in Diagnostics.';
 	}
 	$effect(() => {
 		if (form?.serverOperation) void reconnectServer(form.serverOperation);
 	});
 	async function pollInstallation(initial: any, cancelled: () => boolean) {
+		if (data.access.password_enabled) {
+			installationProgress = {
+				...initial,
+				step: 'Operation continues. Reopen Saturday to sign in and check the result in Settings.'
+			};
+			return;
+		}
 		let operation = initial;
 		const deadline = Date.now() + 20 * 60 * 1000;
 		while (!cancelled() && Date.now() < deadline) {
@@ -205,12 +218,19 @@
 	/>
 
 	<nav aria-label="Settings sections" class="section-nav">
+		<a href="#password">Password</a>
 		<a href="#assistant">Assistant</a>
 		<a href="#backups">Backups</a>
 		<a href="#updates">Updates</a><a href="#storage">Storage</a><a href="#server">Server</a><a
 			href="#extensions">Extensions</a
 		>
 	</nav>
+
+	<PasswordSettings
+		access={data.access}
+		error={form?.accessError}
+		setupRequired={!data.installation.descriptor_path}
+	/>
 
 	<SectionCard
 		id="extensions"

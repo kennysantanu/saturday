@@ -11,6 +11,7 @@ Saturday is a local career dashboard for your job search, career pivot, or next 
 - **Backups:** manually save the database, files, or both; download, import, preview restores, and retain recovery snapshots.
 - **Assistant access:** read and update jobs, people, and documents through local stdio MCP. Assistant assessments are readable in the UI.
 - **Extensions:** install trusted packages with their own page, optional database, and MCP tools. Interview Practice is included as a starter package.
+- **Optional password login:** protect the browser UI with one local password, configurable inactivity logout or No expiration, and change/disable/logout controls in Settings. Forgotten-password recovery requires the [server computer’s command line](docs/installation-guide.md#locked-out-of-saturday); MCP cannot manage authentication.
 - **Installation controls:** open in the background, create a desktop shortcut, opt into startup at login, and manually update, repair, or uninstall.
 
 Saturday does not currently apply to jobs, import job postings, extract PDF text, sync computers, or run built-in AI. Extensions run trusted code and have [separate backups](docs/extension-guide.md).
@@ -42,6 +43,8 @@ The installer prepares a private runtime, builds Saturday, and opens Dashboard. 
 See the [installation guide](docs/installation-guide.md) for requirements, source development, PDF setup, data locations, server controls, updates, repair, and uninstall. Platform support is [provisional](docs/contributing.md#provisional-support-matrix).
 
 ## Your data and privacy
+
+Use **Settings → Password login** to enable optional browser protection. It is off by default and does not affect local MCP. See [password login](docs/user-guide.md#password-login) for session behavior and recovery. The UI remains on this computer; LAN access is not implemented yet.
 
 **Settings → Local database** shows your actual data paths. Managed installs use a per-user application directory; source setup defaults to the repository's ignored `data/` folder. See [data locations and the shared installation descriptor](docs/installation-guide.md#data-locations-and-installation-descriptor) before configuring custom paths.
 

@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { createServer as createSocket } from 'node:net';
 import { spawn } from 'node:child_process';
 import { randomUUID, randomBytes, timingSafeEqual } from 'node:crypto';
+import { initializeAccessSettings } from './access-settings.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {
 	mkdirSync,
@@ -275,6 +276,7 @@ async function freePort(preferred) {
 	throw new Error('Could not reserve a loopback port.');
 }
 export async function startServer({ open = false } = {}) {
+	await initializeAccessSettings();
 	if (maintenanceActive())
 		fail('Installation maintenance is running. Wait or repair an interrupted operation.');
 	assertInstallationStorage();
