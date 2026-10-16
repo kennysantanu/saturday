@@ -32,7 +32,7 @@ To fix an ordinary update, use its **Edit** action. To remove one, choose **Remo
 
 **Active now** counts jobs still being pursued. **Progress so far** counts distinct jobs that ever reached each step or outcome, including inactive jobs. A job that reached Applied and Interview 1 appears in both counts; repeating Interview 1 still counts that job only once for that step. Dismissing and later reopening a job does not erase its earlier progress or its historical Dismissed count.
 
-Select a progress count to see the jobs behind it. **Recently updated** links to jobs with recent activity. **Coming up** appears when active jobs have future dated updates.
+Select a progress count to see the jobs behind it. **Needs attention** lists active-job follow-ups and application deadlines, earliest first, and says so when nothing is due. **Recently updated** links to jobs with recent activity. **Coming up** appears when active jobs have future dated updates. On wide screens, Coming up and Progress so far sit in a side column.
 
 ## Follow-ups, starred jobs, and assessments
 

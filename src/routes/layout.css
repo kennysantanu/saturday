@@ -596,13 +596,108 @@ p {
 /* ---- Dashboard ---- */
 .activity-summary {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	justify-content: space-between;
-	gap: 24px;
+	gap: 20px 24px;
 	padding: 28px 32px;
 	border-radius: var(--r-card);
-	background: var(--accent);
+	/* Mixing toward the card keeps contrast with --accent-foreground in both themes. */
+	background: linear-gradient(
+		135deg,
+		var(--accent),
+		color-mix(in srgb, var(--accent) 60%, var(--card))
+	);
 	color: var(--accent-foreground);
+}
+.activity-main {
+	display: flex;
+	align-items: center;
+	gap: 24px;
+	min-width: 0;
+	border-radius: var(--r-group);
+}
+.activity-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+.activity-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 44px;
+	padding: 0 18px;
+	border-radius: 999px;
+	background: var(--card);
+	color: var(--foreground);
+	font-size: 0.875rem;
+}
+@media (hover: hover) {
+	.activity-chip:hover {
+		background: var(--muted);
+	}
+}
+.dashboard-layout {
+	display: grid;
+	gap: 32px;
+}
+.dashboard-main,
+.dashboard-side {
+	display: contents;
+}
+.group-title {
+	padding: 12px 24px;
+	font-size: 0.875rem;
+	font-weight: 600;
+	background: var(--muted);
+}
+@media (width < 64rem) {
+	.dash-attention {
+		order: 1;
+	}
+	.dash-upcoming {
+		order: 2;
+	}
+	.dash-recent {
+		order: 3;
+	}
+	.dash-progress {
+		order: 4;
+	}
+}
+@media (width >= 64rem) {
+	.dashboard-layout {
+		grid-template-columns: minmax(0, 1fr) minmax(19rem, 24rem);
+		align-items: start;
+	}
+	.dashboard-main,
+	.dashboard-side {
+		display: grid;
+		gap: 32px;
+		min-width: 0;
+	}
+	/* The side column is narrow, so rows use the stacked phone layout. */
+	.dashboard-side .list-row {
+		grid-template-columns: 36px minmax(0, 1fr) 16px;
+		column-gap: 12px;
+		row-gap: 10px;
+		padding: 20px;
+	}
+	.dashboard-side .row-mark {
+		width: 36px;
+		height: 36px;
+		border-radius: 11px;
+	}
+	.dashboard-side .list-row-status {
+		grid-column: 2;
+		grid-row: 2;
+		align-items: flex-start;
+	}
+	.dashboard-side .list-row > svg {
+		grid-column: 3;
+		grid-row: 1;
+	}
 }
 .activity-count {
 	font-size: 3.5rem;
@@ -614,16 +709,18 @@ p {
 .funnel {
 	display: grid;
 	overflow: hidden;
+	container-type: inline-size;
 	border-radius: var(--r-card);
 	background: var(--card);
 	box-shadow: 0 2px 8px rgb(25 39 67 / 3%);
 }
 .funnel-row {
 	display: grid;
-	grid-template-columns: minmax(8rem, 11rem) minmax(0, 1fr) 3rem;
+	grid-template-columns: minmax(0, 1fr) auto;
 	align-items: center;
-	gap: 16px;
-	padding: 16px 24px;
+	column-gap: 16px;
+	row-gap: 10px;
+	padding: 16px 20px;
 	transition: background-color 160ms;
 }
 .funnel-row + .funnel-row {
@@ -635,9 +732,13 @@ p {
 	outline-offset: -4px;
 	border-radius: var(--r-group);
 }
+.activity-main:focus-visible,
+.activity-chip:focus-visible {
+	outline-offset: 2px;
+}
 .funnel-track {
-	grid-column: 2;
-	grid-row: 1;
+	grid-column: 1 / -1;
+	grid-row: 2;
 	height: 8px;
 	border-radius: 999px;
 	background: var(--muted);
@@ -654,12 +755,26 @@ p {
 	grid-row: 1;
 }
 .funnel-count {
-	grid-column: 3;
+	grid-column: 2;
 	grid-row: 1;
 	text-align: right;
 	font-size: 1.25rem;
 	font-weight: 650;
 	font-variant-numeric: tabular-nums;
+}
+@container (min-width: 32rem) {
+	.funnel-row {
+		grid-template-columns: minmax(8rem, 11rem) minmax(0, 1fr) 3rem;
+		row-gap: 0;
+		padding: 16px 24px;
+	}
+	.funnel-track {
+		grid-column: 2;
+		grid-row: 1;
+	}
+	.funnel-count {
+		grid-column: 3;
+	}
 }
 .history-grid {
 	display: grid;
@@ -843,26 +958,13 @@ html {
 		padding: 20px;
 		gap: 16px;
 	}
-	.activity-summary > div {
+	.activity-main {
 		flex-wrap: wrap;
 		gap: 12px;
-		min-width: 0;
 	}
 	.activity-count {
 		font-size: 3rem;
 		overflow-wrap: anywhere;
-	}
-	.funnel-row {
-		grid-template-columns: minmax(0, 1fr) auto;
-		row-gap: 10px;
-		padding: 16px 20px;
-	}
-	.funnel-count {
-		grid-column: 2;
-	}
-	.funnel-track {
-		grid-column: 1 / -1;
-		grid-row: 2;
 	}
 	.list-row {
 		grid-template-columns: 36px minmax(0, 1fr) 16px;

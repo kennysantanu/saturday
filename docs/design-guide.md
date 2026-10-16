@@ -77,6 +77,8 @@ Successful server saves redirect with `?saved=<key>` from `SAVED_MESSAGES` in `$
 
 ### Dashboard and Jobs
 
+Dashboard shows today's date under the title, then an Active now hero whose Ever applied and Offers received chips link to their step filters. Below it, `.dashboard-layout` is two columns from 64rem: Needs attention (follow-ups and deadlines as grouped rows, with an always-visible all-caught-up state) and Recently updated on the left; Coming up and Progress so far on the right. Narrower screens use one column ordered hero, Needs attention, Coming up, Recently updated, Progress. The funnel is a container-query card that stacks its label, count, and bar when narrow; the side column's rows use the stacked phone row layout.
+
 Progress counts link to `/jobs?step=<key>` and count distinct jobs that ever reached a step, including inactive jobs. Counts overlap; decorative funnel bars do not replace the number. Show active follow-ups/deadlines and future dated updates with readable date cues. Use `DueBadge` everywhere; overdue meaning must not rely on color alone.
 
 Jobs uses a GET filter form, explicit Apply, URL state, removable chips, and Pagination. Historical-step filters imply All and disable Activity selection. Advanced groups use opaque disclosures and labelled choices. Both paging buttons stay visible, with unavailable ones disabled. Attribution appears once at job level; history entries use an accessible icon. Dates sit beneath timeline labels; future entries get Scheduled cues.
