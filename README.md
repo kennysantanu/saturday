@@ -12,6 +12,7 @@ Saturday is a local career dashboard for your job search, career pivot, or next 
 - **Assistant access:** read and update jobs, people, and documents through local stdio MCP. Assistant assessments are readable in the UI.
 - **Extensions:** install trusted packages with their own page, optional database, and MCP tools. Interview Practice is included as a starter package.
 - **Optional password login:** protect the browser UI with one local password, configurable inactivity logout or No expiration, and change/disable/logout controls in Settings. Forgotten-password recovery requires the [server computer’s command line](docs/installation-guide.md#locked-out-of-saturday); MCP cannot manage authentication.
+- **Optional LAN access:** allow your phone to use the same workspace through Settings, a confirmation warning, and a server restart. LAN and password protection are independent and off by default.
 - **Installation controls:** open in the background, create a desktop shortcut, opt into startup at login, and manually update, repair, or uninstall.
 
 Saturday does not currently apply to jobs, import job postings, extract PDF text, sync computers, or run built-in AI. Extensions run trusted code and have [separate backups](docs/extension-guide.md).
@@ -44,7 +45,9 @@ See the [installation guide](docs/installation-guide.md) for requirements, sourc
 
 ## Your data and privacy
 
-Use **Settings → Password login** to enable optional browser protection. It is off by default and does not affect local MCP. See [password login](docs/user-guide.md#password-login) for session behavior and recovery. The UI remains on this computer; LAN access is not implemented yet.
+Open the desktop shortcut, then use **Settings → LAN access → Allow LAN access** to enable phone access. Accept the warning, restart now or later, then open a displayed **Phone address** on your phone’s browser while connected to the same trusted network. See [LAN access](docs/user-guide.md#lan-access) for disabling, pending changes, and connection help.
+
+Use **Settings → Password login** for optional browser protection; it does not affect local MCP. See [password login](docs/user-guide.md#password-login) for sessions and recovery. LAN and passwords are independent. LAN binds all IPv4 interfaces and can be reached by devices beyond one Wi-Fi network. HTTP does not encrypt passwords, sessions, or records. Without a password, reachable devices can read and edit the workspace after LAN is enabled.
 
 **Settings → Local database** shows your actual data paths. Managed installs use a per-user application directory; source setup defaults to the repository's ignored `data/` folder. See [data locations and the shared installation descriptor](docs/installation-guide.md#data-locations-and-installation-descriptor) before configuring custom paths.
 

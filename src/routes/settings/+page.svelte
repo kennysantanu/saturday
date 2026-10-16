@@ -12,6 +12,7 @@
 	import Check from '@lucide/svelte/icons/check';
 	import Archive from '@lucide/svelte/icons/archive';
 	import PasswordSettings from '$lib/components/app/password-settings.svelte';
+	import LanSettings from '$lib/components/app/lan-settings.svelte';
 	import Pagination from '$lib/components/app/pagination.svelte';
 	import BackupList from '$lib/components/app/backup-list.svelte';
 	import ConfirmDialog from '$lib/components/app/confirm-dialog.svelte';
@@ -110,7 +111,7 @@
 					health.installation_id === operation.installation_id &&
 					health.server_generation === operation.generation
 				) {
-					window.location.assign('/settings#server');
+					window.location.reload();
 					return;
 				}
 			} catch {}
@@ -118,7 +119,7 @@
 		}
 		serverState = 'failed';
 		serverMessage =
-			'Saturday has not reconnected. Try refreshing or use the Open Saturday desktop shortcut, then check the server log in Diagnostics.';
+			'Saturday has not reconnected. Its address may have changed or restart may have failed. Use the Open Saturday desktop shortcut to reopen the actual server, then check Diagnostics.';
 	}
 	$effect(() => {
 		if (form?.serverOperation) void reconnectServer(form.serverOperation);
@@ -218,6 +219,7 @@
 	/>
 
 	<nav aria-label="Settings sections" class="section-nav">
+		<a href="#lan">LAN access</a>
 		<a href="#password">Password</a>
 		<a href="#assistant">Assistant</a>
 		<a href="#backups">Backups</a>
@@ -230,6 +232,16 @@
 		access={data.access}
 		error={form?.accessError}
 		setupRequired={!data.installation.descriptor_path}
+		lanActive={data.network.effective_allow_lan === true}
+	/>
+	<LanSettings
+		network={data.network}
+		local={data.access.local}
+		controlsAvailable={data.server.controlsAvailable}
+		setupRequired={!data.installation.descriptor_path}
+		error={form?.lanError}
+		saved={form?.lanSaved}
+		lifecycle={serverState}
 	/>
 
 	<SectionCard
@@ -706,7 +718,7 @@
 			<p class="text-sm text-muted-foreground">
 				{data.server.controlsAvailable
 					? 'The UI server stays running when you close the browser.'
-					: 'Start through npm run start or npm run open to use these controls.'}
+					: 'Use Open Saturday on the server computer to operate these controls.'}
 			</p>
 			{#if data.server.error}<Notice title="Server status">{data.server.error}</Notice>{/if}
 			<div class="flex flex-wrap gap-2">
@@ -867,6 +879,7 @@
 			</form>
 			{#if data.updateCheck?.target?.available && !data.updateCheck.local?.dirty}<Button
 					variant="outline"
+					disabled={!data.server.controlsAvailable}
 					onclick={() => (updateDialog = true)}>Update Saturday</Button
 				>{/if}
 			<form
@@ -985,8 +998,11 @@
 				/>{/snippet}
 		</Field>
 		<form method="POST" action="?/openFolder" use:enhance={enhanceWithFocus}>
-			<Button type="submit" variant="outline" size="sm" disabled={!data.folderSupported}
-				>Open folder</Button
+			<Button
+				type="submit"
+				variant="outline"
+				size="sm"
+				disabled={!data.folderSupported || !data.access.local}>Open folder</Button
 			>
 		</form>
 		<div class="flex flex-wrap items-center gap-3">

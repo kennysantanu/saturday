@@ -17,6 +17,10 @@ Forgotten-password recovery is a host command-line operation. Saturday's MCP too
 
 For explicitly authorized maintenance, use the descriptor-aware [access commands](installation-guide.md#password-login-and-local-recovery). They stop and verify the owned web process before changing credentials/inactivity/recovery, coordinate with installation maintenance, and leave it stopped. Reopen using the desktop shortcut afterward. Use `status --json` for nonsecret state. Password setting accepts protected JSON stdin only; recovery requires `--confirm`, removes UI protection and saves LAN off, preserving records. Do not edit `access.json` or its initialization marker to bypass a missing/corrupt store.
 
+## LAN access maintenance
+
+LAN and password settings are independent. For an explicitly authorized preference change, use the descriptor-aware [LAN commands](installation-guide.md#lan-access-and-startup) from the server computer: `lan --enable --confirm` or `lan --disable`. Enable confirmation accepts reachable-device access and the unencrypted HTTP transport; it does not enable a password. These commands save a startup preference without stopping the UI or changing live login sessions. Status reports saved/effective mode, restart required, and candidate addresses. Restart separately through the owned lifecycle when authorized; opening an already-running instance only reuses it. Do not change firewall/router settings or use forwarded headers to bypass host-only controls. MCP does not expose LAN/authentication management.
+
 ## Verify installation and MCP
 
 1. Open through the shared lifecycle commands or shortcut. Wait for installation/build readiness, not merely HTTP success; [status checks](installation-guide.md#open-stop-and-restart) verify `/health` identity and the actual URL.

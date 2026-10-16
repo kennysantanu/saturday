@@ -29,7 +29,7 @@ export function validateAccessSettings(value) {
 	if (
 		value?.format !== 'saturday.access' ||
 		value.version !== 1 ||
-		value.allow_lan !== false ||
+		typeof value.allow_lan !== 'boolean' ||
 		!(
 			value.idle_timeout_seconds === null ||
 			(Number.isInteger(value.idle_timeout_seconds) &&
@@ -135,6 +135,8 @@ export function localBrowser(event) {
 	return (
 		['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(event.getClientAddress()) &&
 		['127.0.0.1', 'localhost', '[::1]'].includes(event.url.hostname) &&
+		(!process.env.SATURDAY_LOCAL_ORIGIN ||
+			event.url.origin === process.env.SATURDAY_LOCAL_ORIGIN) &&
 		(!process.env.ORIGIN || event.url.origin === process.env.ORIGIN)
 	);
 }

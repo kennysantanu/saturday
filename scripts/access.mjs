@@ -16,6 +16,7 @@ import {
 	controlServer,
 	claimInstallationMaintenance
 } from '../src/lib/server/server-lifecycle.js';
+import { networkSummary } from '../src/lib/server/server-lifecycle.js';
 try {
 	const { values, positionals } = parseArgs({
 		allowPositionals: true,
@@ -25,7 +26,9 @@ try {
 			stdin: { type: 'boolean' },
 			confirm: { type: 'boolean' },
 			hours: { type: 'string' },
-			'no-expiration': { type: 'boolean' }
+			'no-expiration': { type: 'boolean' },
+			enable: { type: 'boolean' },
+			disable: { type: 'boolean' }
 		}
 	});
 	if (values.installation) {
@@ -42,10 +45,16 @@ try {
 	const action = positionals[0] ?? 'status';
 	if (
 		positionals.length > 1 ||
-		!['status', 'set-password', 'timeout', 'disable', 'recover'].includes(action)
+		!['status', 'lan', 'set-password', 'timeout', 'disable', 'recover'].includes(action)
 	)
 		throw new AccessError(
-			'Use status, set-password --stdin, timeout --hours <number>/--no-expiration, or disable/recover --confirm.'
+			'Use status, lan --enable --confirm/--disable, set-password --stdin, timeout --hours <number>/--no-expiration, or disable/recover --confirm.'
+		);
+	if (action === 'lan' && values.enable === values.disable)
+		throw new AccessError('Choose lan --enable --confirm or lan --disable.');
+	if (action === 'lan' && values.enable && !values.confirm)
+		throw new AccessError(
+			'Use --confirm to allow reachable network devices to use Saturday. HTTP does not encrypt traffic; enable password login separately if wanted.'
 		);
 	if (action === 'set-password' && !values.stdin)
 		throw new AccessError('Use --stdin with JSON containing password and confirm_password.');
@@ -75,7 +84,11 @@ try {
 		verifier = await passwordHash(secret.password);
 	}
 	let stopped = false;
-	if (action !== 'status')
+	if (action === 'lan')
+		await withAccessChange(() =>
+			updateAccessSettings((current) => ({ ...current, allow_lan: values.enable === true }))
+		);
+	else if (action !== 'status')
 		await withAccessChange(async () => {
 			if (serverSummary().managed) {
 				await controlServer('stop');
@@ -106,7 +119,7 @@ try {
 				await updateAccessSettings(
 					(current) => ({
 						...current,
-						allow_lan: false,
+						allow_lan: ['disable', 'recover'].includes(action) ? false : current.allow_lan,
 						password:
 							action === 'set-password' ? verifier : action === 'timeout' ? current.password : null,
 						idle_timeout_seconds: action === 'timeout' ? timeout : current.idle_timeout_seconds
@@ -126,9 +139,15 @@ try {
 			password_enabled: Boolean(settings.password),
 			idle_timeout_hours:
 				settings.idle_timeout_seconds === null ? null : settings.idle_timeout_seconds / 3600,
-			allow_lan: false,
+			allow_lan: settings.allow_lan,
+			...networkSummary(settings),
 			server_stopped: stopped,
-			reopen: action !== 'status' ? 'Use Open Saturday to start the server.' : undefined
+			reopen:
+				action === 'lan'
+					? 'Restart Saturday to apply a pending change. Opening a running instance does not restart it.'
+					: action !== 'status'
+						? 'Use Open Saturday to start the server.'
+						: undefined
 		})
 	);
 } catch (e) {

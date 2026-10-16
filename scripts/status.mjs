@@ -1,4 +1,4 @@
-import { serverSummary } from '../src/lib/server/server-lifecycle.js';
+import { serverSummary, networkSummary } from '../src/lib/server/server-lifecycle.js';
 import { getInstallation, assertInstallationStorage } from '../src/lib/server/installation.js';
 const json = process.argv.includes('--json');
 try {
@@ -6,7 +6,7 @@ try {
 	assertInstallationStorage();
 	const owned = serverSummary();
 	const port = Number(
-		process.env.PORT || (owned.url ? new URL(owned.url).port : installation.port)
+		owned.managed && owned.url ? new URL(owned.url).port : process.env.PORT || installation.port
 	);
 	if (!Number.isInteger(port) || port < 1 || port > 65535)
 		throw new Error('Choose a valid server port.');
@@ -25,7 +25,7 @@ try {
 		throw new Error(
 			'The running build differs from this installation. Rebuild/restart with the matching setup.'
 		);
-	if (json) console.log(JSON.stringify({ ok: true, url, ...result }));
+	if (json) console.log(JSON.stringify({ ok: true, url, ...result, network: networkSummary() }));
 	else console.log(`Saturday is running at ${url} (${result.build.id}).`);
 } catch (e) {
 	if (json)

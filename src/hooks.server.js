@@ -10,6 +10,7 @@ import {
 } from '$lib/server/access-settings.js';
 import { validLogin } from '$lib/server/access-auth.js';
 import { registerExtensionRuntime } from '$lib/server/extensions.js';
+import { allowedRequestHost } from '$lib/server/access-network.js';
 let runtimeUnavailable = false;
 // Record web startup even before the first request. Stale PID leases are reclaimed offline.
 export async function init() {
@@ -43,6 +44,17 @@ export async function handle({ event, resolve }) {
 		);
 	}
 	const path = event.url.pathname;
+	if (
+		!allowedRequestHost(
+			event.request.headers.get('host'),
+			Number(event.url.port || (event.url.protocol === 'https:' ? 443 : 80)),
+			process.env.SATURDAY_RUNNING_ALLOW_LAN === 'true'
+		)
+	)
+		return new Response('Use Saturday’s local or displayed phone address.', {
+			status: 421,
+			headers: { 'cache-control': 'no-store' }
+		});
 	const local = localBrowser(event);
 	const passive =
 		path === '/auth/session' || path === '/health' || path === '/settings/installation';

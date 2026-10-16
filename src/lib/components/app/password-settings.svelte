@@ -8,7 +8,7 @@
 	import ConfirmDialog from './confirm-dialog.svelte';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
-	let { access, error, setupRequired = false } = $props();
+	let { access, error, setupRequired = false, lanActive = false } = $props();
 	let noExpiration = $state(false);
 	let logoutAll = $state(false),
 		disablePassword = $state(false);
@@ -179,7 +179,9 @@
 		<ConfirmDialog
 			bind:open={disablePassword}
 			title="Disable password login?"
-			description="Saturday will open without a password, and all existing sessions will be revoked."
+			description={lanActive
+				? 'Reachable network devices will be able to read and edit Saturday without a password. All existing sessions will be revoked.'
+				: 'Saturday will open without a password, and all existing sessions will be revoked.'}
 			confirmLabel="Disable password login"
 			formId="disable-password"
 		/>

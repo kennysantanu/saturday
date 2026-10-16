@@ -244,6 +244,10 @@ async function candidateMetadata(commit, request, target) {
 		throw new Error('Candidate package metadata is unavailable.');
 	const pkg = JSON.parse(Buffer.from(content.content, 'base64').toString('utf8'));
 	validateDistribution(pkg.saturday);
+	if (readAccessSettings().allow_lan && pkg.saturday.lan_api !== 1)
+		throw new Error(
+			'This candidate does not support saved LAN preferences. Disable LAN and restart before changing to this build.'
+		);
 	if (readAccessSettings().password && pkg.saturday.access_api !== 1)
 		throw new Error(
 			'This candidate does not support password login. Keep the current build or explicitly disable password login before changing to an older build.'
@@ -564,6 +568,7 @@ export async function queueOperation(
 			'scripts/install.mjs',
 			'src/lib/server/installation.js',
 			'src/lib/server/access-settings.js',
+			'src/lib/server/access-network.js',
 			'src/lib/server/server-lifecycle.js',
 			'src/lib/server/installation-operations.js'
 		])
@@ -1117,6 +1122,10 @@ export async function executeOperation(
 			await stageExtensions(config, workspace);
 			const pkg = JSON.parse(await fs.readFile(join(app, 'package.json'), 'utf8'));
 			validateDistribution(pkg.saturday);
+			if (readAccessSettings().allow_lan && pkg.saturday.lan_api !== 1)
+				throw new Error(
+					'This candidate does not support saved LAN preferences. Disable LAN and restart before changing to this build.'
+				);
 			if (readAccessSettings().password && pkg.saturday.access_api !== 1)
 				throw new Error(
 					'This candidate does not support password login. Keep the current build or explicitly disable password login before changing to an older build.'
