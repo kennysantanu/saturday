@@ -1070,13 +1070,31 @@ form[aria-busy='true'] [data-slot='button'][type='submit']::after {
 		transform: rotate(360deg);
 	}
 }
+/* Settings: sticky chip row on narrow screens, sticky sidebar from 64rem. */
+.settings-layout {
+	display: grid;
+	gap: 16px;
+}
+.settings-sections {
+	min-width: 0;
+}
 .section-nav {
+	position: sticky;
+	top: 0;
+	z-index: 30;
 	display: flex;
-	flex-wrap: wrap;
 	gap: 8px;
+	padding-block: max(8px, env(safe-area-inset-top)) 8px;
+	overflow-x: auto;
+	background: var(--background);
+	scrollbar-width: none;
+}
+.section-nav::-webkit-scrollbar {
+	display: none;
 }
 .section-nav a {
 	display: inline-flex;
+	flex: none;
 	align-items: center;
 	min-height: 40px;
 	padding: 0 16px;
@@ -1085,10 +1103,54 @@ form[aria-busy='true'] [data-slot='button'][type='submit']::after {
 	color: var(--secondary-foreground);
 	font-size: 0.875rem;
 	font-weight: 550;
+	white-space: nowrap;
+}
+.section-nav a[aria-current='location'] {
+	background: var(--selection);
+	color: var(--primary);
+	font-weight: 650;
 }
 @media (hover: hover) {
 	.section-nav a:hover {
 		background: var(--hover-fill);
+	}
+	.section-nav a[aria-current='location']:hover {
+		background: var(--selection);
+	}
+}
+@media (48rem <= width < 64rem) {
+	/* Clears the sticky top bar. */
+	.section-nav {
+		top: 5.5rem;
+		padding-block: 6px;
+	}
+	.settings-sections [data-slot='card'][id] {
+		scroll-margin-top: 3rem;
+	}
+}
+@media (width >= 64rem) {
+	.settings-layout {
+		grid-template-columns: 13rem minmax(0, 52rem);
+		gap: 32px;
+		align-items: start;
+	}
+	.section-nav {
+		top: 7rem;
+		flex-direction: column;
+		gap: 2px;
+		padding: 0;
+		overflow: visible;
+		background: none;
+	}
+	.section-nav a {
+		min-height: 40px;
+		padding: 0 12px;
+		border-radius: var(--r-control);
+		background: none;
+		color: var(--muted-foreground);
+	}
+	.section-nav a[aria-current='location'] {
+		color: var(--foreground);
 	}
 }
 .editor-toolbar [aria-pressed='true'] {
