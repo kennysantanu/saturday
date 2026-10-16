@@ -161,7 +161,9 @@
 					class="disclosure-body space-y-3"
 					method="POST"
 					action="?/saveCopy"
-					use:enhance={withPending()}
+					use:enhance={withPending(undefined, () => {
+						guard.saving = false;
+					})}
 				>
 					<input type="hidden" name="content" value={content} />
 					<Field id="copy_filename" label="New filename" required>
@@ -197,13 +199,18 @@
 		<form
 			method="POST"
 			action="?/pdf"
-			use:enhance={withPending(() => {
-				pdfBusy = true;
-				return async ({ update }) => {
-					await update();
+			use:enhance={withPending(
+				() => {
+					pdfBusy = true;
+					return async ({ update }) => {
+						await update();
+						pdfBusy = false;
+					};
+				},
+				() => {
 					pdfBusy = false;
-				};
-			})}
+				}
+			)}
 		>
 			<input type="hidden" name="token" value={doc.token} /><Button
 				type="submit"

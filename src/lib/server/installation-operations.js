@@ -1,4 +1,5 @@
 // Shared manual installation operations. No web framework or store initialization on import.
+import { readAccessSettings, accessCookieName } from './access-settings.js';
 import { createServer } from 'node:http';
 import * as fs from 'node:fs/promises';
 import { existsSync, readFileSync, lstatSync } from 'node:fs';
@@ -243,6 +244,10 @@ async function candidateMetadata(commit, request, target) {
 		throw new Error('Candidate package metadata is unavailable.');
 	const pkg = JSON.parse(Buffer.from(content.content, 'base64').toString('utf8'));
 	validateDistribution(pkg.saturday);
+	if (readAccessSettings().password && pkg.saturday.access_api !== 1)
+		throw new Error(
+			'This candidate does not support password login. Keep the current build or explicitly disable password login before changing to an older build.'
+		);
 	if (
 		pkg.name !== 'saturday' ||
 		pkg.engines?.node !== `>=${pkg.saturday.node_minimum}` ||
@@ -558,6 +563,7 @@ export async function queueOperation(
 		for (const file of [
 			'scripts/install.mjs',
 			'src/lib/server/installation.js',
+			'src/lib/server/access-settings.js',
 			'src/lib/server/server-lifecycle.js',
 			'src/lib/server/installation-operations.js'
 		])
@@ -890,11 +896,14 @@ export async function executeOperation(
 	let gateway;
 	const browserOrigin = readJson(serverPaths().record)?.url;
 	process.env.SATURDAY_SERVER_TOKEN ||= readJson(serverPaths().record)?.token || '';
-	if (browserOrigin && process.env.SATURDAY_SERVER_TOKEN) {
+	if (browserOrigin && process.env.SATURDAY_SERVER_TOKEN && !readAccessSettings().password) {
 		gateway = createServer((request, response) => {
-			const cookie = /(?:^|;\s*)saturday-server-session=([^;]+)/.exec(
-				request.headers.cookie || ''
-			)?.[1];
+			const name = accessCookieName('control');
+			const cookie = (request.headers.cookie || '')
+				.split(';')
+				.map((part) => part.trim())
+				.find((part) => part.startsWith(name + '='))
+				?.slice(name.length + 1);
 			if (
 				request.method !== 'GET' ||
 				request.url !== `/status?id=${id}` ||
@@ -1108,6 +1117,10 @@ export async function executeOperation(
 			await stageExtensions(config, workspace);
 			const pkg = JSON.parse(await fs.readFile(join(app, 'package.json'), 'utf8'));
 			validateDistribution(pkg.saturday);
+			if (readAccessSettings().password && pkg.saturday.access_api !== 1)
+				throw new Error(
+					'This candidate does not support password login. Keep the current build or explicitly disable password login before changing to an older build.'
+				);
 			if (
 				pkg.name !== 'saturday' ||
 				pkg.engines?.node !== `>=${pkg.saturday.node_minimum}` ||

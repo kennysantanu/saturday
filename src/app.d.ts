@@ -9,7 +9,14 @@ declare global {
 
 	namespace App {
 		// interface Error {}
-		// interface Locals {}
+		interface Locals {
+			access: {
+				password_enabled: boolean;
+				authenticated: boolean;
+				idle_timeout_seconds: number | null;
+				local: boolean;
+			};
+		}
 		// interface PageData {}
 		// interface PageState {}
 		// interface Platform {}

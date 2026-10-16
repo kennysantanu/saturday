@@ -126,6 +126,22 @@ Enable the master switch in **Settings → Extensions** to show navigation. Inst
 
 The Extensions directory provides open, enable/disable, independent backup/restore, and confirmed removal. Disable preserves data. Removal disables the extension and requires stopping Saturday/MCP and completing the displayed uninstall command. The master switch preserves individual choices. Back up each extension separately; core database/file backups exclude its database.
 
+## Password login
+
+Open Saturday with its desktop shortcut, then go to **Settings → Password login**. Protection is optional and off by default. Choose **Enable password login**, enter and confirm a password, and save. Any non-empty password is accepted, with no minimum length or required character mix. The current browser stays signed in; other browsers must enter the same password. No username or online account is needed. The UI still listens only on this computer; this feature does not enable phone/LAN access.
+
+**Sign out after inactivity (hours)** accepts 0.25–720 hours, including fractions such as 0.5 for 30 minutes. The default is 1 hour. Navigation, actions, scrolling, and typing keep the session active; passive reading without interaction eventually counts as inactivity. Background polling does not keep you signed in. Without JavaScript, only navigation and form requests count. Each browser session has its own timer; tabs sharing a session share its activity.
+
+Select **No expiration** to disable inactivity logout. Saving either preference takes effect without restarting. Reducing a timeout can sign out other idle browsers; increasing it cannot revive expired sessions. Switching from No expiration to hours gives live sessions a fresh inactivity period. Closing the browser may end a session. Restarting Saturday, changing the password, or logging out ends it even with No expiration selected. Up to 100 sessions are retained; a successful new login at that limit signs out the oldest.
+
+**Log out** and **Log out all devices** are together in Settings. Logout-all confirms before revoking every session, including the current browser. Other browsers must sign in on their next request. When signed in on the host computer, **Change password** and **Disable password login** both require the current password. Disabling also asks for confirmation and takes effect immediately without restarting. Changing the password signs out other sessions; disabling revokes all sessions. Forgotten-password recovery requires the server computer's command line. Saturday's MCP tools cannot manage authentication. Sign-in changes wait while installation/update work is queued or running.
+
+If a session expires during editing, Saturday keeps enhanced-form inputs in the original tab and offers **Sign in in another tab**. After signing in, return and retry the action yourself; writes are never automatically replayed. Previously downloaded/copied data cannot be recalled by logout.
+
+With password protection on, a server restart returns you to Sign in. Installation operations continue after the UI shuts down, but their separate live progress gateway is disabled. Reopen Saturday later, sign in, and inspect the result in Settings. Your trusted local stdio MCP connection remains independent of browser login.
+
+If you forget the password, follow [Locked out of Saturday](installation-guide.md#locked-out-of-saturday). Open a terminal on the computer hosting Saturday and run its local disable command. An authorized AI agent can help only if it has command-line access to that computer; Saturday MCP access alone cannot recover or disable the password. Recovery stops the UI, turns network access off, and preserves records, documents, and backups. Reopen the desktop shortcut afterward and optionally enable a new password. The guide also covers missing/corrupt access settings.
+
 ## Installation and server settings
 
 Use the desktop shortcut to reopen Saturday. Settings provides server controls, optional startup at login, and manual update/repair/uninstall. See the installation guide for:

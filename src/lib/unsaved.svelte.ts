@@ -12,13 +12,18 @@ export class UnsavedChanges {
 	};
 
 	/** Use with `use:enhance`: a save in progress never triggers the leave prompt. */
-	enhance: SubmitFunction = withPending(() => {
-		this.saving = true;
-		return async ({ update }) => {
-			await update({ reset: false });
+	enhance: SubmitFunction = withPending(
+		() => {
+			this.saving = true;
+			return async ({ update }) => {
+				await update({ reset: false });
+				this.saving = false;
+				await tick();
+				focusFirstError();
+			};
+		},
+		() => {
 			this.saving = false;
-			await tick();
-			focusFirstError();
-		};
-	});
+		}
+	);
 }

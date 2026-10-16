@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { checkAuthResponse, authenticationRequired } from '$lib/auth-notice.svelte';
 	import { tick } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { enhance } from '$app/forms';
@@ -101,6 +102,7 @@
 			const r = await fetch(
 				`/api/documents?${new URLSearchParams({ query: pickerQuery, page: String(page) })}`
 			);
+			checkAuthResponse(r);
 			const value = await r.json();
 			if (!r.ok) throw new Error(value.error);
 			candidates = value.documents;
@@ -151,6 +153,8 @@
 				} catch {
 					uploadError = 'Upload failed.';
 				}
+				if (xhr.status === 401 && xhr.getResponseHeader('x-saturday-auth') === 'required')
+					authenticationRequired({ label: file.name, run: () => upload(file) });
 			}
 		};
 		xhr.send(file);

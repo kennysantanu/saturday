@@ -264,12 +264,46 @@ export async function setExtensionState(id, enabled, { remove = false } = {}) {
 		return entry;
 	});
 }
-export async function registerExtensionRuntime() {
+export async function registerExtensionRuntime(role = 'mcp') {
 	const p = extensionPaths();
 	await fs.mkdir(join(p.state, 'processes'), { recursive: true });
 	await withServerActivity(() =>
-		atomicJson(join(p.state, 'processes', `${process.pid}.json`), { pid: process.pid })
+		atomicJson(join(p.state, 'processes', `${process.pid}.json`), { pid: process.pid, role })
 	);
+}
+// Access maintenance must also refuse an independently launched development/preview UI.
+export async function assertWebRuntimeStopped() {
+	const directory = join(extensionPaths().state, 'processes');
+	let names;
+	try {
+		names = await fs.readdir(directory);
+	} catch (e) {
+		if (e.code === 'ENOENT') return;
+		throw e;
+	}
+	for (const name of names) {
+		if (!/^\d+\.json$/.test(name)) continue;
+		let record;
+		try {
+			record = JSON.parse(await fs.readFile(join(directory, name), 'utf8'));
+		} catch (e) {
+			if (e.code === 'ENOENT') continue;
+			throw e;
+		}
+		// Older leases do not identify web versus MCP: require them to stop once.
+		if (record.role === 'mcp') continue;
+		try {
+			process.kill(Number(name.slice(0, -5)), 0);
+		} catch (e) {
+			if (e.code !== 'ESRCH') throw e;
+			await fs.rm(join(directory, name), { force: true });
+			continue;
+		}
+		rejectExtension(
+			'RUNNING',
+			'Stop the independently launched Saturday web server or older unclassified runtime before changing sign-in settings.'
+		);
+	}
 }
 export async function assertExtensionProcessesStopped() {
 	let names = [];

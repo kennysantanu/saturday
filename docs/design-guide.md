@@ -97,8 +97,9 @@ Existing-document selection keeps search/paging in the URL. Copy to this job loa
 
 ### Settings
 
-Section navigation covers Assistant, Backups, Updates, Storage, Server, and Extensions. Each section uses SectionCard.
+Section navigation covers Password, Assistant, Backups, Updates, Storage, Server, and Extensions. Each section uses SectionCard.
 
+- **Password:** optional password-only login. Use Field/Input for passwords and hours, Checkbox for No expiration, and ConfirmDialog for disabling protection/logout-all. Signed-in host users can disable protection in Settings with the current password and confirmation. Forgotten-password recovery is host-command-line-only; Sign in has a Forgot your password disclosure with recovery instructions and an explicit MCP limitation. Log out and Log out all devices stay together in Settings; native logout/disable navigation clears client state. Enhanced forms preserve drafts on authentication-required responses and offer separate-tab sign-in.
 - **Assistant:** show copyable JSON/TOML, built-entry status, and installation/dataset/build identities. Distinguish configuration prepared from real-client verification. Copy actions do not modify client files; instructions belong in the [assistant guide](assistant-guide.md).
 - **Backups:** one Back up now action with Database and files / Database only / Files only. BackupList groups pairs with Download, Restore, and confirmed Delete. Partial entries show an available-artifact download. RestorePreview shows the selected contents and warnings. Independent import/additive restore/unmatched folders belong in Advanced file recovery. No schedule/retention panel.
 - **Storage:** copyable data directory with Open folder; failure preserves the path and shows an error Notice. Keep build, storage versions, descriptor/log/backup/recovery paths in collapsed Diagnostics. Do not display secrets or present the placeholder package version as a release.

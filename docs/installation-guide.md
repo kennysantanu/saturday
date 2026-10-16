@@ -87,7 +87,7 @@ Use the descriptor's absolute `node_path` with scripts under `code_root`, rather
 "<node_path>" "<code_root>/scripts/assistant.mjs" config --installation "<descriptor>" --format json
 ```
 
-`start.mjs`, `install.mjs`, and `assistant.mjs` accept `--installation`. For scripts without that option (including status, backup, restore, files, and extension commands), set `SATURDAY_INSTALLATION_PATH` in their environment. Use absolute script paths outside `code_root`.
+`start.mjs`, `install.mjs`, `assistant.mjs`, and `access.mjs` accept `--installation`. For scripts without that option (including status, backup, restore, files, and extension commands), set `SATURDAY_INSTALLATION_PATH` in their environment. Use absolute script paths outside `code_root`.
 
 Maintenance examples below use `node scripts/...` for readability; substitute managed paths as above. When parsing output, invoke scripts directly because npm may add a banner. Setup's `--json` emits one final result on stdout and progress/logs on stderr.
 
@@ -108,6 +108,48 @@ Open reuses an existing owned UI. Occupied preferred ports fall back to another 
 **Settings → Saturday server** provides Restart and confirmed Stop. Active data operations or backup streaming can block these controls; wait for completion before retrying. Stop/restart acknowledge requests; after restarting, use `node scripts/status.mjs --json` to verify `/health` readiness and identity. The UI polls readiness and reloads, or shows log/reopen guidance on timeout. Without JavaScript, reopen/reload after readiness.
 
 The supervisor owns only the UI. Stopping or restarting it does not stop client-owned MCP or require an MCP reconnect. Code updates do require reconnecting MCP to load new code. Ownership/credentials/state live under `<data_root>/server.state/`; keep `server.json` private and never share controller tokens.
+
+## Password login and local recovery
+
+Configure optional browser protection through **Settings → Password login**, after opening the installed desktop shortcut. See the [user guide](user-guide.md#password-login) for inactivity, No expiration, logout, and restart behavior. Source developers must run setup to persist an installation descriptor before changing sign-in settings.
+
+Access preferences and the password verifier live in `<data_root>/access.json`, with an initialization marker in `installation.json`. Sessions exist only in the web process. These settings are independent of career database migrations and excluded from career database/file/extension backups. Repeated setup, retained-data reinstall, and ordinary updates retain them; deleting owned user data during uninstall removes them. Missing or corrupt initialized access settings block UI startup rather than opening unprotected records.
+
+The following local-owner maintenance commands are for an authorized agent or technical support, not ordinary startup. Substitute the managed installation's `node_path`, `code_root`, and `--installation <descriptor>` as described above:
+
+```sh
+node scripts/access.mjs status --json
+node scripts/access.mjs timeout --hours 2 --json
+node scripts/access.mjs timeout --no-expiration --json
+node scripts/access.mjs disable --confirm --json
+node scripts/access.mjs recover --confirm --json
+```
+
+Mutating commands stop an owned UI and verify it has exited, then hold the lifecycle maintenance guard while saving. A competing operation/shutdown failure refuses the change. An independently launched development/preview UI must be stopped first; current local MCP may remain connected. Older runtimes without an identified process role must be stopped once before access maintenance. The command leaves the UI stopped; use **Open Saturday** afterward. `recover --confirm` explicitly clears password protection, repairs the access settings file, and saves LAN off while retaining career data. It refuses linked settings files. No browser endpoint can reset a forgotten password.
+
+`set-password --stdin` accepts JSON containing `password` and `confirm_password` through protected standard input. It follows the same stop/save rules. Never put passwords in command-line arguments, shell history, diagnostics, or assistant configuration. Results are JSON with account-enabled status and inactivity hours; no verifier, cookie, or plaintext password is returned.
+
+### Locked out of Saturday
+
+If you are signed in and know the current password, use **Settings → Password login → Disable password login** on the server computer and confirm. This takes effect immediately without stopping Saturday.
+
+Forgotten-password recovery is command-line-only. Run the command on the computer hosting Saturday, using an OS account allowed to manage that installation. Saturday's MCP tools cannot disable, reset, or change browser authentication. An AI agent must have a separate terminal/process capability on the server computer; a connection to Saturday through MCP is insufficient. There is no browser recovery endpoint or recovery desktop launcher.
+
+1. Open a terminal on the server computer (Command Prompt on Windows). Locate its `installation.json` using [Data locations](#data-locations-and-installation-descriptor). Source setup normally keeps it in `<Saturday folder>/data/installation.json`; custom database paths keep it beside the database.
+2. Read `node_path` and `code_root` from that descriptor. Run the following command there, replacing all three placeholders with absolute paths:
+
+   ```sh
+   "<node_path>" "<code_root>/scripts/access.mjs" disable --installation "<descriptor>" --confirm --json
+   ```
+
+   For a source checkout with Node available, run `node scripts/access.mjs disable --confirm --json` from the Saturday folder instead. The old password is not required. Do not send passwords to an AI agent or paste them into this command.
+
+3. Confirm the result reports `ok: true` and `password_enabled: false`. The command stops the owned UI, clears password protection, saves LAN off and leaves Saturday stopped. If it refuses because an independently launched development/preview server is still running, stop that server and retry. Wait for any installation operation to finish rather than removing its locks.
+4. Open the **Open Saturday** desktop shortcut again. It opens without a password. Optionally enable a new password through Settings. Career records, documents, and backups are preserved.
+
+If access settings are missing/corrupt, use the same invocation with `recover --confirm` instead of `disable --confirm`. Recovery also resets inactivity to its default and keeps LAN off. Preserve `installation.json`; do not delete credentials/settings files or edit initialization markers to bypass protection. A missing/invalid installation descriptor needs setup repair, not password recovery.
+
+With protection enabled, updates must advertise `saturday.access_api: 1`; an incompatible candidate is refused rather than silently dropping login protection. The installer’s optional password support adds no npm dependency or career database migration. It does not add LAN binding or HTTPS.
 
 ## Start at login
 
@@ -142,7 +184,7 @@ node scripts/install.mjs update --installation <descriptor> --check-id <reviewed
 node scripts/install.mjs status --installation <descriptor> --json
 ```
 
-Wait for persisted status `complete`. `--background` returns an operation receipt, not completion. `install.mjs status` reports installation operations; `status.mjs` checks UI readiness. Progress remains available through the external local controller while the UI is stopped. Readiness reloads the UI; keep operation logs/recovery paths if it fails.
+Wait for persisted status `complete`. `--background` returns an operation receipt, not completion. `install.mjs status` reports installation operations; `status.mjs` checks UI readiness. With password login off, progress remains available through the external local controller while the UI is stopped, and readiness reloads the UI. With password login on, the separate browser progress gateway is disabled; the operation continues, and **Open Saturday** followed by sign-in shows its durable result. CLI status and local logs remain available. Keep operation logs/recovery paths if reopening fails.
 
 Development updates compare exact `main` commits. Stable-release selection uses verified release metadata and version ordering; released installations never silently fall back to `main`. Dirty source checkouts block updates. Successful source updates retain the previous HEAD/build and switch to a pinned detached checkout. Managed updates retain previous code and independent database/file/extension recovery snapshots. Updates never silently reset development data or downgrade over migrated storage.
 

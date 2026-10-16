@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { checkAuthResponse } from '$lib/auth-notice.svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { enhance } from '$app/forms';
 	import { withPending, focusFirstError } from '$lib/forms';
@@ -75,6 +76,7 @@
 				headers: { 'content-type': 'application/octet-stream' },
 				body: file
 			});
+			checkAuthResponse(r, { label: file.name, run: () => upload(file) });
 			const v = await r.json();
 			if (!r.ok) throw new Error(v.error);
 			await invalidateAll();
