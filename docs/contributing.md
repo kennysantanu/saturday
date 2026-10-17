@@ -63,6 +63,8 @@ History records local macOS source/setup, PDF, HTTP/browser, and limited managed
 
 Backup/file commands are in the [agent guide](agent-guide.md#backup-and-recovery-commands); extension commands are in the [extension guide](extension-guide.md).
 
+`npm run check` also runs `npm run check:scripts`, which uses the existing TypeScript dependency to detect unresolved names in `scripts/**/*.mjs`. This is a focused name-resolution check; other JavaScript typing diagnostics remain outside its scope. Installer tests cover fresh managed installation from an empty root as well as repair/reinstallation. The fresh-install test reuses local dependencies while exercising runtime configuration, web/MCP builds, setup, publication, desktop shortcut creation, and UI readiness.
+
 Run checks appropriate to a change. Before sharing a candidate, install Chrome and run `npm run verify`. `test:beta` requires `npm run build` first when run independently. Browser screenshots and failure evidence are written to the printed OS temporary directory. Tests use disposable stores; real Chrome checks need sandboxed browser startup. HTTP and compilation checks do not replace visual or screen-reader review.
 
 For the optional large-archive case, run `node --max-old-space-size=128 --test tests/files.large.integration.mjs`; allow several GiB of temporary space. It exercises a ZIP and expanded collection above 1 GiB.

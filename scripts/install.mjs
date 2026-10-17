@@ -232,7 +232,8 @@ export async function recoverPublication(root) {
 	await fs.rm(journal);
 	await fs.rm(stage, { recursive: true, force: true });
 }
-export async function install(values) {
+export async function install(values, services = {}) {
+	const execute = services.run || run;
 	if (!runtimeHashes[`${process.platform}-${process.arch}`])
 		throw new Error('This OS/CPU is outside the initial installation matrix. See README.');
 	if (process.versions.node.split('.')[0] < 24)
@@ -377,7 +378,7 @@ export async function install(values) {
 			const packageInfo = JSON.parse(await fs.readFile(join(candidate, 'package.json'), 'utf8'));
 			operationServices.validateDistribution(packageInfo.saturday);
 			const baseRuntime = {
-				descriptor_path: path,
+				descriptor_path: descriptor,
 				installation_id: randomUUID(),
 				node_path: process.execPath,
 				runtime_root:
@@ -386,7 +387,7 @@ export async function install(values) {
 						: dirname(dirname(process.execPath)),
 				runtime_owned: process.execPath.startsWith(join(root, 'runtime') + sep)
 			};
-			const preparedRuntime = await operationServices.prepareRuntime(
+			const preparedRuntime = await (services.prepareRuntime || operationServices.prepareRuntime)(
 				baseRuntime,
 				packageInfo.saturday
 			);
@@ -408,7 +409,7 @@ export async function install(values) {
 				SATURDAY_BUILD_DIRTY: ''
 			};
 			say('Building Saturday before activation…');
-			await run(
+			await execute(
 				preparedRuntime.node_path,
 				[
 					join(candidate, 'scripts', 'setup.mjs'),
@@ -479,7 +480,7 @@ export async function install(values) {
 			}
 		);
 		say('Preparing your workspace…');
-		await run(
+		await execute(
 			config.node_path,
 			[
 				join(app, 'scripts', 'setup.mjs'),

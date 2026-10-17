@@ -20,7 +20,7 @@ import {
 	codeFingerprint,
 	prepareRuntime
 } from '../src/lib/server/installation-operations.js';
-import { copySource } from '../scripts/install.mjs';
+import { copySource, install, run as installerRun } from '../scripts/install.mjs';
 import { getInstallation, createDesktopShortcut } from '../src/lib/server/installation.js';
 import { readBuildInfo } from '../scripts/build-info.mjs';
 const run = promisify(execFile);
@@ -130,6 +130,75 @@ test('removal targets retain data by default and refuse uncertain custom ownersh
 });
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+test('fresh managed installation uses its descriptor for runtime preparation and starts the UI', async () => {
+	const temporary = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'saturday-fresh-install-')));
+	const root = join(temporary, 'Saturday ü');
+	const source = join(temporary, 'source');
+	const desktop = join(temporary, 'desktop');
+	const descriptor = join(root, 'installation.json');
+	const prior = { ...process.env };
+	let runtimePrepared = false;
+	let setups = 0;
+	try {
+		await copySource(resolve('.'), source);
+		await fs.mkdir(root);
+		await fs.mkdir(desktop);
+		assert.deepEqual(await fs.readdir(root), []);
+		assert.equal(existsSync(join(source, 'data', 'installation.json')), false);
+		const receipt = await install(
+			{ root, source, desktop, 'skip-pdf': true, 'no-open': true },
+			{
+				prepareRuntime: async (config, metadata) => {
+					assert.equal(config.descriptor_path, descriptor);
+					runtimePrepared = true;
+					return prepareRuntime(config, metadata);
+				},
+				run: async (command, args, options) => {
+					setups++;
+					if (args.includes('--managed')) {
+						// Reuse local dependencies; keep the real build, setup and publication steps.
+						await fs.symlink(resolve('node_modules'), join(options.cwd, 'node_modules'), 'dir');
+						args = [...args, '--skip-dependencies'];
+					}
+					await installerRun(command, args, options);
+				}
+			}
+		);
+		assert.equal(runtimePrepared, true);
+		assert.equal(setups, 2);
+		assert.equal(receipt.ok, true);
+		assert.equal(receipt.descriptor_path, descriptor);
+		assert.equal(receipt.data_path, join(root, 'data'));
+		const config = JSON.parse(await fs.readFile(descriptor, 'utf8'));
+		assert.equal(config.installation_id, receipt.installation_id);
+		assert.equal(config.code_root, join(root, 'app'));
+		assert.equal(config.pdf_cache, join(root, 'runtime', 'chrome'));
+		assert.ok(existsSync(config.database));
+		assert.ok(existsSync(join(config.files, 'manifest.json')));
+		assert.ok(receipt.shortcut && existsSync(receipt.shortcut));
+		const health = await fetch(new URL('/health', receipt.url));
+		assert.equal(health.status, 200);
+		assert.equal((await health.json()).installation_id, receipt.installation_id);
+	} finally {
+		try {
+			if (existsSync(join(root, 'app', 'scripts', 'start.mjs')) && existsSync(descriptor))
+				await run(process.execPath, [
+					join(root, 'app', 'scripts', 'start.mjs'),
+					'stop',
+					'--installation',
+					descriptor,
+					'--json'
+				]).catch((error) => {
+					if (!error.stdout?.includes('No owned Saturday supervisor is running.')) throw error;
+				});
+		} finally {
+			for (const key of Object.keys(process.env)) if (!(key in prior)) delete process.env[key];
+			Object.assign(process.env, prior);
+			await fs.rm(temporary, { recursive: true, force: true });
+		}
+	}
+});
+
 async function fixture() {
 	const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'saturday-operation-'))),
 		app = join(root, 'app');
@@ -338,6 +407,7 @@ test('a required private runtime is pinned, validated and leaves the existing ru
 			'22.13.0'
 		);
 		assert.equal(prepared.runtime_owned, true);
+		assert.equal(resolve(prepared.runtime_root, '..'), join(root, 'runtime'));
 		assert.notEqual(prepared.node_path, config.node_path);
 		assert.ok(existsSync(config.node_path));
 		assert.equal(
