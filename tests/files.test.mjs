@@ -618,7 +618,7 @@ test('cross-dataset pair restore publishes one namespace and retains incoming em
 		await d.createDocument({ scope: original.id, filename: 'resume.md', content: 'A' });
 		database.withDatabase((db) =>
 			db.exec(
-				"UPDATE sqlite_sequence SET seq=40 WHERE name='jobs'; INSERT INTO sqlite_sequence(name,seq) VALUES('job_updates',30);"
+				"UPDATE sqlite_sequence SET seq=40 WHERE name='jobs'; UPDATE sqlite_sequence SET seq=30 WHERE name='job_updates';"
 			)
 		);
 		const pair = await pairs.createBackupPair();
@@ -637,7 +637,7 @@ test('cross-dataset pair restore publishes one namespace and retains incoming em
 		assert.equal(next.id, 41);
 		assert.equal(
 			jobs.addJobUpdate({ job_id: next.id, event_date: '2026-10-08', note: 'Next' }).id,
-			31
+			32
 		);
 	});
 });

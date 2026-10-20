@@ -202,7 +202,7 @@
 				recordNumber={job.id}
 				href={`/jobs/${job.id}`}
 				title={job.job_title}
-				subtitle={`${job.company_name}${!job.is_active ? ' · Inactive' : ''}`}
+				subtitle={`${job.company_name}${!job.is_active ? ' · Closed' : ''}`}
 				note={job.job_link.notes}
 			>
 				{#snippet actions()}
@@ -507,7 +507,7 @@
 						disabled={data.linkedIds.includes(job.id)}
 						checked={values.job_id === String(job.id)}
 						label={`${job.title} #${job.id}`}
-						description={`${job.company}${!job.isActive ? ' · Inactive' : ''}${data.linkedIds.includes(job.id) ? ' · Already linked' : ''}`}
+						description={`${job.company}${!job.isActive ? ' · Closed' : ''}${data.linkedIds.includes(job.id) ? ' · Already linked' : ''}`}
 					/>
 				{/each}
 				{#if !data.picker?.jobs.length}<p class="text-sm text-muted-foreground">

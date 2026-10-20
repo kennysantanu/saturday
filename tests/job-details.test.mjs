@@ -1,3 +1,4 @@
+import { stageId, closeJob, reopenJob } from './workflow-fixture.mjs';
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
@@ -17,8 +18,6 @@ import {
 	setJobFollowUp,
 	setJobStarred,
 	getDashboardStats,
-	dismissJob,
-	reopenJob,
 	addJobUpdate,
 	correctJobUpdate
 } from '../src/lib/server/services.js';
@@ -76,17 +75,17 @@ test('numeric baseline allocates records, retains dataset identity and never reu
 	assert.equal(job.id, 1);
 	assert.equal(createJob(details).id, 2);
 	const first = addJobUpdate({ job_id: job.id, event_date: '2026-01-02', note: 'First' });
-	correctJobUpdate(first.id, { remove: true });
+	correctJobUpdate(first.id, { job_id: job.id, remove: true });
 	const next = addJobUpdate({ job_id: '1', event_date: '2026-01-01', note: 'Second' });
-	assert.equal(first.id, 1);
-	assert.equal(next.id, 2);
+	assert.equal(first.id, 3);
+	assert.equal(next.id, 4);
 	const state = () =>
 		withDatabase((db) => ({
 			metadata: db.prepare('SELECT * FROM app_metadata').get(),
 			counters: db.prepare('SELECT * FROM sqlite_sequence ORDER BY name').all()
 		}));
 	const before = state();
-	assert.equal(before.metadata.format, 'saturday.database.numeric');
+	assert.equal(before.metadata.format, 'saturday.database.workflow');
 	assert.match(before.metadata.dataset_id, /^[a-f0-9-]{36}$/);
 	migrateDatabase();
 	assert.deepEqual(state(), before);
@@ -160,7 +159,7 @@ test('manual edits preserve assessment, omitted fields and history, and can clea
 	assert.equal(saved.scoreComment, 'Strong fit');
 	assert.equal(saved.isStarred, true);
 	assert.equal(saved.status.label, 'New');
-	assert.deepEqual(saved.updates, []);
+	assert.equal(saved.updates.length, 1);
 	editJob(job.id, { location: '', employment_type: null, follow_up_date: null });
 	const cleared = getJob(job.id);
 	assert.equal(cleared.location, null);
@@ -205,8 +204,8 @@ test('follow-ups sort earliest, retain inactive data, reschedule or clear withou
 	);
 	assert.equal(stats.deadlines.length, 2);
 	setJobFollowUp(early.id, '2026-10-05', 'Today');
-	assert.equal(getJob(early.id).updates.length, 0);
-	dismissJob(early.id, '2026-10-05');
+	assert.equal(getJob(early.id).updates.length, 1);
+	closeJob(early.id, '2026-10-05');
 	assert.equal(getJob(early.id).followUpDate, '2026-10-05');
 	assert.deepEqual(
 		getDashboardStats().followUps.map((item) => item.jobId),
@@ -303,9 +302,9 @@ test('original and added fields share validation, mappings, and access rules', (
 	assert.equal(followUpMcpSchema.safeParse({}).success, false);
 	assert.equal(followUpMcpSchema.safeParse({ follow_up_date: null }).success, true);
 	assert.equal(new Set(jobFields.map((field) => field.key)).size, jobFields.length);
-	dismissJob(job.id, '2026-10-05');
-	const entry = getJob(job.id).updates[0];
-	assert.equal(entry.eventType, 'dismissed');
+	closeJob(job.id, '2026-10-05');
+	const entry = getJob(job.id).updates.find((row) => row.stageId === stageId('Dismissed'));
+	assert.equal(entry.stageId, stageId('Dismissed'));
 	assert.equal('score' in entry, false);
 	assert.equal('location' in entry, false);
 });

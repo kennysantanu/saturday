@@ -52,7 +52,7 @@ Use `.link` for content links. Headings use balanced wrapping, paragraphs use pr
 
 - Keep at most one tinted primary action per view/header. If an empty state repeats that primary action, hide the duplicate header action.
 - Prominent actions inside `.page-actions`, `.form-actions`, `Dialog.Footer`, and EmptyState use capsules. Other controls use `--r-control`. The shared Button exposes `data-variant` for styling.
-- Use `default` for primary, `outline` for secondary, `ghost` for Cancel/low emphasis, and `destructive` for permanent deletion. Dismiss is reversible and uses a normal confirmation button.
+- Use `default` for primary, `outline` for secondary, `ghost` for Cancel/low emphasis, and `destructive` for permanent deletion. Stage changes use ordinary action styling; permanent history deletion uses destructive styling.
 - Pair Create/Upload/Link actions with `Plus`/`Upload`/`Link2`. Icon-only buttons require an accessible name and title.
 - Use shared labelled controls; never hand-write bare `<label>`, `<select>`, checkbox, or radio elements in page code.
 - Add/Edit forms share field components. Mark required fields with `*` and include a “* Required” cue.
@@ -77,11 +77,11 @@ Successful server saves redirect with `?saved=<key>` from `SAVED_MESSAGES` in `$
 
 ### Dashboard and Jobs
 
-Dashboard shows today's date under the title, then an Active now hero whose Ever applied and Offers received chips link to their step filters. Below it, `.dashboard-layout` is two columns from 64rem: Needs attention (follow-ups and deadlines as grouped rows, with an always-visible all-caught-up state) and Recently updated on the left; Coming up and Progress so far on the right. Narrower screens use one column ordered hero, Needs attention, Coming up, Recently updated, Progress. The funnel is a container-query card that stacks its label, count, and bar when narrow; the side column's rows use the stacked phone row layout.
+Dashboard shows today's date, Add job, Active now, Needs attention, Recently updated, Coming up and dynamic Milestone history totals. Stage names/order come from storage, with open stages before closed destinations. Milestone totals count distinct jobs including closed jobs and scheduled entries, link to `/jobs?view=all&milestone_stage=<id>`, and stay distinct from current placement. Archived history remains searchable. Show readable date/DueBadge cues; status never relies on color alone. Dashboard remains an overview without stage mutations.
 
-Progress counts link to `/jobs?step=<key>` and count distinct jobs that ever reached a step, including inactive jobs. Counts overlap; decorative funnel bars do not replace the number. Show active follow-ups/deadlines and future dated updates with readable date cues. Use `DueBadge` everywhere; overdue meaning must not rely on color alone.
+Jobs is list-only with a visible Search jobs field, GET Apply, URL/chip state, sort choices and Pagination. Specific text fields belong in Advanced filters. Current stage and Milestone history filters use stable stage IDs and force All while selected. Use Active/Closed/All labels. Rows open detail with validated internal return URLs; preserve filters/pages across edits and show an explanation if changed placement leaves the original results.
 
-Jobs uses a GET filter form, explicit Apply, URL state, removable chips, and Pagination. Historical-step filters imply All and disable Activity selection. Advanced groups use opaque disclosures and labelled choices. Both paging buttons stay visible, with unavailable ones disabled. Attribution appears once at job level; history entries use an accessible icon. Dates sit beneath timeline labels; future entries get Scheduled cues.
+On job detail, Change stage is primary; Add history, Edit and Star/Unstar are secondary. Change stage saves placement and a milestone together. Add history records a note/past/scheduled milestone without moving the job. Reuse stage/date/note fields with distinct help, required cues and success feedback. Native disclosures/forms support keyboard and no-JavaScript use; protect drafts with one combined unsaved-changes prompt. Do not add dedicated Dismiss/Reopen buttons or a second placement field to ordinary editing. History edit/delete never changes placement and blocks removal of sole current-stage evidence with Change stage first guidance. Keep future Scheduled and retired Archived cues readable.
 
 ### Network
 

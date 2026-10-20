@@ -56,7 +56,7 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		assert.ok(settings.includes('Backup and restore'));
 		assert.ok(settings.includes('Diagnostics'));
 		assert.ok(settings.includes('Database schema'));
-		assert.ok(settings.includes('saturday.database.numeric'));
+		assert.ok(settings.includes('saturday.database.workflow'));
 		assert.ok(settings.includes('saturday.files.numeric'));
 		assert.ok(settings.includes(join(scratch, 'backups', 'database')));
 		assert.ok(settings.includes(process.env.SATURDAY_DB_PATH + '.restore'));
@@ -281,7 +281,7 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		assert.ok(jobsPage.includes('Apply filters'));
 		assert.ok(jobsPage.includes(`Job number ${newId}`));
 		assert.ok(jobsPage.includes('Advanced filters'));
-		assert.ok(jobsPage.includes(`href="/jobs/${newId}"`));
+		assert.ok(jobsPage.includes(`href="/jobs/${newId}?return_to=`));
 		assert.ok(
 			jobsPage
 				.replace(/<!--[\s\S]*?-->/g, '')

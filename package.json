@@ -26,7 +26,7 @@
 		"backup": "node scripts/backup.mjs",
 		"restore": "node scripts/restore.mjs",
 		"test": "npm run build:mcp && node --test tests/*.test.mjs",
-		"test:web": "npm run build && node --test tests/web.integration.mjs tests/server-lifecycle.integration.mjs tests/access.integration.mjs tests/access.browser.mjs tests/lan.integration.mjs",
+		"test:web": "npm run build && node --test tests/web.integration.mjs tests/server-lifecycle.integration.mjs tests/access.integration.mjs tests/access.browser.mjs tests/lan.integration.mjs tests/workflow.integration.mjs",
 		"test:beta": "node scripts/review-documents.mjs",
 		"verify": "npm run lint && npm run check && npm test && npm run test:web && npm run test:beta",
 		"files": "node scripts/files.mjs",

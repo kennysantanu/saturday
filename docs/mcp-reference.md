@@ -20,48 +20,48 @@ Jobs and people have separate ID sequences; clarify ambiguous references before 
 
 ## Jobs and identity tools
 
-| Tool                | What it does                                                                       | Changes data |
-| ------------------- | ---------------------------------------------------------------------------------- | ------------ |
-| `get_saturday_info` | Reads installation/dataset identity, build and record counts for connection checks | No           |
-| `list_jobs`         | Filters and sorts jobs with counts and pagination (50 per page by default)         | No           |
-| `get_job`           | Reads one job with its notes and dated update history                              | No           |
-| `create_job`        | Adds a job with a title, company, and optional details                             | Yes          |
-| `edit_job`          | Updates job details; omitted fields are preserved                                  | Yes          |
-| `set_job_follow_up` | Sets/reschedules one follow-up, or clears it with a null date                      | Yes          |
-| `set_job_score`     | Sets assistant score and its explanation, read-only in the UI                      | Yes          |
-| `add_job_update`    | Records a dated progress step or note on an existing job                           | Yes          |
+| Tool                   | Behavior                                                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `get_saturday_info`    | Installation/dataset/build identity and counts, including empty workspaces                                          |
+| `list_workflow_stages` | Read stable stage IDs, names, order, closure/archive flags and usage; no configuration writes                       |
+| `create_job`           | Required `job_title` and `company_name`; starts at the first available open stage with an initial milestone         |
+| `list_jobs`            | Search, filters, sorting, matching counts and pagination                                                            |
+| `get_job`              | Job details, `current_stage_id`, `current_stage`, computed `is_active` and complete history                         |
+| `edit_job`             | Partial detail changes; cannot override placement, IDs, origin or assessment                                        |
+| `change_job_stage`     | Required `job_id`, `stage_id`, `event_date`; optional `note`; changes placement and records a milestone atomically  |
+| `add_job_update`       | History only: `job_id`, `event_date`, optional `stage_id` and `note`; omitting/null stage requires note text        |
+| `edit_job_update`      | Scoped `job_id`, `update_id`, date/stage/note corrections; never changes placement                                  |
+| `delete_job_update`    | Scoped `job_id`, `update_id`, `confirm:true`; irreversible, requires user authorization and reading the entry first |
+| `set_job_follow_up`    | Required nullable `follow_up_date`, optional comment; no history or placement change                                |
+| `set_job_score`        | Required finite numeric or null score, optional comment; assistant-only assessment                                  |
 
-Jobs and history entries created through MCP are labeled **Added by assistant**. Editing or removing job history updates, dismissing jobs, and reopening jobs stay in the web app. Your assistant app may ask you to approve changes before it makes them.
+Discover stage IDs before writes; do not infer behavior from names or assume default IDs. A stage's `is_closed` decides whether its current jobs are active. Archived stages are invalid movement destinations but can be used for historical milestones. No reserved Accepted/Rejected/Dismissed actions or fixed event enums exist. UI **Change stage** maps to `change_job_stage`; **Add history** maps to `add_job_update`.
 
-For `create_job`, required input keys are `job_title` and `company_name` (each up to 200 characters). Read results expose these as `title` and `company`; use the input names for `edit_job` too. For example, `create_job({job_title: "Product Manager", company_name: "Acme"})`. Other details include `posting_url`, `job_description`, `notes`, `location`, `work_arrangement` (`remote`, `hybrid`, `on-site`), `employment_type` (`full-time`, `part-time`, `contract`, `internship`, `temporary`), `compensation`, `source`, `application_deadline`, `follow_up_date`, `follow_up_comment`, and `is_starred`. Dates must be real `YYYY-MM-DD` calendar dates; a follow-up comment requires a date. Empty/null optional text, date, and category values clear them; `is_starred` is a boolean. Clearing the follow-up date clears its comment. `edit_job` preserves omitted fields and never writes assessment fields.
+Change stage requires a real non-future calendar date and takes effect immediately. Same-stage requests do nothing. Last committed move wins without revision tokens. Both actual moves retain history. After an uncertain response, read placement/history before manually retrying. Historical additions can use confirmed future dates; scheduled milestones count in history and never move placement. Removing/retargeting sole evidence of current placement is blocked: change stage first. General notes require text, and history notes allow 10,000 characters.
 
-`create_job` can include `score` and `score_comment`. For an existing job use `set_job_score` with a required finite numeric `score` (decimals allowed, no fixed range) or null for unscored, plus an optional `score_comment` (up to 10,000 characters). This replaces the assessment; omitting the comment clears the previous one. Explain the scoring criteria and keep a consistent scale. Follow-up writes do not create history or change status; inactive follow-ups remain stored and are hidden from Dashboard.
+Job title/company are required, trimmed and at most 200 characters. Optional fields include `posting_url`, `job_description`, `notes`, `location`, `work_arrangement` (remote/hybrid/on-site), `employment_type` (full-time/part-time/contract/internship/temporary), `compensation`, `source`, `application_deadline`, `follow_up_date`, `follow_up_comment` and boolean `is_starred`. Read results use `title`/`company`; input uses `job_title`/`company_name`. Blank/null optional values clear them; omitted fields remain on partial edits. Clearing follow-up date clears its comment. `create_job` can include assessment; existing assessment changes use `set_job_score`. There is no fixed score scale; zero/decimals are valid. Normal editing ignores assessment/placement overrides.
 
-`add_job_update` requires `job_id` and `event_date`. Optional `event_type` is `applied`, `prescreened`, `interview_1`, `interview_2`, `offer`, `accepted`, or `rejected`; omit it for a Note and supply nonblank `note` (up to 10,000 characters). Inactive jobs accept notes but must be reopened in the UI before another milestone. Future event dates do not defer status changes.
+### Searching jobs
 
-### Searching and filtering jobs
+`list_jobs` defaults to All, 50 per page (maximum 100), sorted by recently updated. UI defaults to Active. `query` matches title/company/location; separate `title`, `company`, `location` and `source` filters combine with AND. `%`, `_` and backslash match literally.
 
-`list_jobs` defaults to **all** active and inactive jobs, 50 per page, recently updated. Existing `query` searches title **or** company. Use separate `title`, `company`, `location`, and `source` contains filters to narrow results. All filters combine with AND; arrays match any selected choice. Text searches escape literal `%`, `_`, and backslash.
+| Input                                   | Values                                                                                   |
+| --------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `view`                                  | `active`, `closed`, `all`                                                                |
+| `current_stage`                         | Array of numeric stage IDs for current placement                                         |
+| `milestone_stage`                       | Array of numeric stage IDs for recorded history, including scheduled/archived milestones |
+| `starred`                               | `all`, `starred`, `not_starred`                                                          |
+| `work_arrangement`, `employment_type`   | Arrays of supported values or `unset`                                                    |
+| `created_via`                           | Array of `manual` and/or `mcp`                                                           |
+| `follow_up`, `deadline`                 | `any`, `unset`, `set`, `overdue`, `today`, `upcoming`, `range`                           |
+| `follow_up_from/to`, `deadline_from/to` | Optional inclusive real calendar date bounds for range filters                           |
+| `created_from/to`, `updated_from/to`    | Optional inclusive host-local calendar bounds                                            |
+| `score`                                 | `any`, `scored`, `unscored`                                                              |
+| `score_min/max`                         | Finite bounds, no fixed scale; ignored for unscored                                      |
+| `sort`                                  | `updated`, `created`, `score`, `follow_up`, `deadline`                                   |
+| `page`, `limit`                         | Positive integers; default 1/50; maximum limit 100                                       |
 
-| Input                                                            | Values                                                                                                               |
-| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `view`                                                           | `active`, `inactive`, `all`                                                                                          |
-| `status`                                                         | Array of `new`, `applied`, `prescreened`, `interview_1`, `interview_2`, `offer`, `accepted`, `rejected`, `dismissed` |
-| `step`                                                           | Array of historical event types above except `new`; forces `view: all`                                               |
-| `starred`                                                        | `all`, `starred`, `not_starred`                                                                                      |
-| `work_arrangement`, `employment_type`                            | Arrays of existing job-field options, plus `unset` for missing values                                                |
-| `created_via`                                                    | Array of `manual`, `mcp`                                                                                             |
-| `follow_up`, `deadline`                                          | `any`, `unset`, `set`, `overdue`, `today`, `upcoming`, `range`                                                       |
-| `follow_up_from`, `follow_up_to`, `deadline_from`, `deadline_to` | Inclusive `YYYY-MM-DD` bounds, used only in `range` mode                                                             |
-| `score`                                                          | `any`, `scored`, `unscored`                                                                                          |
-| `score_min`, `score_max`                                         | Optional finite numeric bounds, no fixed scale; ignored for `unscored`                                               |
-| `created_from`, `created_to`, `updated_from`, `updated_to`       | Inclusive local-calendar date bounds                                                                                 |
-| `sort`                                                           | `updated`, `created`, `score`, `follow_up`, `deadline`                                                               |
-| `page`, `limit`                                                  | Positive integers; default page 1 and limit 50; limit at most 100                                                    |
-
-Responses retain `jobs` and add `total`, `page`, `limit`, and `totalPages`. Advance pages to inspect all matches; an out-of-range page clamps to the last available page. Dates use the computer running Saturday’s local calendar. Upcoming means strictly after today; overdue means strictly before today. Current status follows recorded state changes and furthest milestones, independently of event dates. Missing values sort last for scores and dates. No filter changes data.
-
-For example, `{ "title": "Engineer", "company": "Acme", "work_arrangement": ["remote", "hybrid"], "starred": "starred" }` finds starred Engineer jobs at Acme that are remote or hybrid.
+Categories combine with AND, choices within each category with OR. Either stage filter forces All; current and history filters remain distinct. Unknown/archived current IDs fail validation instead of silently removing the filter. Results contain `jobs`, `total`, `page`, `limit`, `totalPages`; out-of-range pages clamp. Missing scores/dates sort last with stable ID ties. Querying changes no records or backup scope.
 
 ## Backup tools
 
@@ -89,7 +89,7 @@ These tools share the web app's Network validation and services.
 | Tool                    | Inputs / result                                                                                                                                              |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `list_networks`         | Optional `query`, `name`, `role`, `organization`, `job_id`, `follow_up`, `sort`, `page`, `limit`; returns `networks`, `total`, `page`, `limit`, `totalPages` |
-| `get_network`           | `network_id`; optional `jobs_page`, `jobs_limit`; returns `network` and paginated `linked_jobs` including inactive jobs                                      |
+| `get_network`           | `network_id`; optional `jobs_page`, `jobs_limit`; returns `network` and paginated `linked_jobs` including closed jobs                                        |
 | `create_network`        | `name`; optional `role`, `organization`, `phone`, `email`, `link`, `notes`, `follow_up_date`, `follow_up_comment`; returns `network`                         |
 | `edit_network`          | `network_id` plus at least one editable field; returns saved `network`                                                                                       |
 | `link_job_network`      | `job_id`, `network_id`, optional `notes`; returns link fields and `linked: true`, `created`                                                                  |

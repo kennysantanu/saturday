@@ -70,6 +70,8 @@ For candidate testing on disposable data, see the [agent verification checklist]
 
 ## Using your assistant
 
+Discover stages with `list_workflow_stages` before changing placement. Use `change_job_stage` to change the current stage and record a milestone; `add_job_update` records history only. Never infer current placement from the newest history entry. Read current placement after an uncertain response before retrying a write.
+
 Ask your assistant to find a job, record progress, manage a follow-up, link a person, or tailor a document from your Profile selections. For example:
 
 - “List my active jobs in Saturday.”

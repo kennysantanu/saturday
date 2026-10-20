@@ -15,7 +15,8 @@ export class UnsavedChanges {
 	enhance: SubmitFunction = withPending(
 		() => {
 			this.saving = true;
-			return async ({ update }) => {
+			return async ({ result, update }) => {
+				if (result.type === 'redirect' || result.type === 'success') this.dirty = false;
 				await update({ reset: false });
 				this.saving = false;
 				await tick();

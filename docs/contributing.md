@@ -17,7 +17,9 @@ For an isolated source workspace, set absolute `SATURDAY_DB_PATH`, `SATURDAY_FIL
 
 Development remains unversioned until `0.1.0`: leave placeholder package/lockfile versions unchanged and do not create numbered beta releases. Breaking development APIs/storage may require an explicitly authorized reset; startup and setup must never reset data silently. Retain compatible backups and their source/build when testing upgrades.
 
-Dashboard, Jobs, Network, Documents/Profile, backups, local MCP, extensions, managed installers, and manual update/repair/uninstall are implemented. Implementation does not establish platform certification. After `0.1.0`, released storage baselines are immutable and supported data changes use migrations independently of application version numbers.
+Dashboard, Jobs, Network, Documents/Profile, backups, local MCP, extensions, managed installers, and manual update/repair/uninstall are implemented. Implementation does not establish platform certification. The current development database format is `saturday.database.workflow`, schema 1. Older numeric-format databases/backups reject unchanged; use disposable storage for development.
+
+After `0.1.0`, released storage baselines are immutable and supported data changes use migrations independently of application version numbers.
 
 ### Build identity
 

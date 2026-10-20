@@ -1,3 +1,4 @@
+import * as backups from '../src/lib/server/backups.js';
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
@@ -207,4 +208,38 @@ test('old numeric-baseline databases reject unchanged', () => {
 	process.env.SATURDAY_DB_PATH = file;
 	assert.throws(() => migrateDatabase(), /Unsupported/);
 	assert.deepEqual(readFileSync(file), bytes);
+});
+
+test('restore replaces seeded stages, preserves archived history and IDs, and never reseeds retired defaults', () => {
+	const j = job();
+	move(j.id, 'Interview');
+	archiveWorkflowStage(stage('New').id, { confirm_starting_stage: true });
+	renameWorkflowStage(stage('Interview').id, 'Technical interview');
+	addWorkflowStage({ name: 'Extra' });
+	const before = listWorkflowStages();
+	const saved = getJob(j.id);
+	const backup = backups.createBackup();
+	addWorkflowStage({ name: 'Later' });
+	renameWorkflowStage(stage('Technical interview').id, 'Changed');
+	const preview = backups.prepareRestore(backup.backup_id);
+	backups.restoreBackup(preview.restore_id, true);
+	assert.deepEqual(listWorkflowStages(), before);
+	assert.deepEqual(getJob(j.id), saved);
+	migrateDatabase();
+	assert.equal(stage('New').is_archived, true);
+	assert.equal(listWorkflowStages().length, 9);
+	const max = Math.max(...before.map((s) => s.id));
+	addWorkflowStage({ name: 'After restore' });
+	assert(stage('After restore').id > max + 1);
+});
+test('workflow configuration changes invalidate an existing restore preview', () => {
+	job();
+	const backup = backups.createBackup();
+	const preview = backups.prepareRestore(backup.backup_id);
+	renameWorkflowStage(stage('Screening').id, 'Phone screen');
+	assert.throws(
+		() => backups.restoreBackup(preview.restore_id, true),
+		(e) => e.code === 'restore_stale'
+	);
+	assert(stage('Phone screen'));
 });

@@ -1,3 +1,7 @@
+import { jobReturn, jobDetailUrl } from '$lib/job-navigation.js';
+export function load({ url }) {
+	return { returnTo: jobReturn(url.searchParams.get('return_to')) };
+}
 import { fail, redirect } from '@sveltejs/kit';
 import { createJob, ServiceError, ValidationError } from '$lib/server/services.js';
 
@@ -8,7 +12,7 @@ function formValues(formData) {
 }
 
 export const actions = {
-	default: async ({ request }) => {
+	default: async ({ request, url }) => {
 		const values = formValues(await request.formData());
 		let job;
 		try {
@@ -23,6 +27,6 @@ export const actions = {
 				values
 			});
 		}
-		redirect(303, `/jobs/${job.id}?saved=job`);
+		redirect(303, jobDetailUrl(job.id, url.searchParams.get('return_to'), 'job'));
 	}
 };

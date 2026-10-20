@@ -9,18 +9,25 @@
 	type Entry = {
 		id: number;
 		date: string;
-		eventType: string | null;
+		stageId: number | null;
+		isArchived?: boolean;
 		label: string;
 		note: string | null;
 		createdVia: 'manual' | 'mcp';
 	};
 	let {
 		entries,
+		stages,
+		jobId,
+		historyGuard,
 		scheduled = false,
 		errors = {},
 		values = {}
 	}: {
 		entries: Entry[];
+		stages: { id: number; name: string; is_closed: boolean; is_archived: boolean }[];
+		jobId: number;
+		historyGuard: import('$lib/unsaved.svelte').UnsavedChanges;
 		/** True for future-dated entries: hollow marker and a Scheduled badge. */
 		scheduled?: boolean;
 		errors?: Record<string, string | undefined>;
@@ -41,7 +48,7 @@
 			<div class="flex items-start justify-between gap-3">
 				<div class="min-w-0 space-y-1">
 					<p class="flex flex-wrap items-center gap-2 font-medium">
-						{entry.label}
+						{entry.label}{#if entry.isArchived}<Badge variant="outline">Archived</Badge>{/if}
 						{#if scheduled}<Badge variant="secondary">Scheduled</Badge>{/if}
 					</p>
 					<p class="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -55,9 +62,6 @@
 						{/if}
 					</p>
 				</div>
-				{#if entry.eventType !== 'dismissed' && entry.eventType !== 'reopened'}
-					<UpdateCorrection {entry} {errors} {values} />
-				{/if}
 			</div>
 			{#if entry.note}
 				<p
@@ -66,6 +70,7 @@
 					{entry.note}
 				</p>
 			{/if}
+			<UpdateCorrection {entry} {stages} {jobId} {historyGuard} {errors} {values} />
 		</li>
 	{/each}
 </ol>

@@ -17,22 +17,20 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import * as Card from '$lib/components/ui/card/index.js';
-	import {
-		statusOptions,
-		stepOptions,
-		workOptions,
-		employmentOptions,
-		sortOptions
-	} from '$lib/job-search.js';
+	import { workOptions, employmentOptions, sortOptions } from '$lib/job-search.js';
+	import { jobDetailUrl } from '$lib/job-navigation.js';
+	import { page } from '$app/state';
 	import { focusFirstError } from '$lib/forms';
 
 	let { data } = $props();
 	// Draft controls change only on Apply; URL-backed data remains the applied result.
 	let values = $state(untrack(() => ({ ...data.filters })));
 	let hydrated = $state(false);
-	let hadHistorical = untrack(() => data.filters.step.length > 0);
+	let hadHistorical = untrack(
+		() => data.filters.current_stage.length + data.filters.milestone_stage.length > 0
+	);
 	$effect(() => {
-		const hasHistorical = values.step.length > 0;
+		const hasHistorical = values.current_stage.length + values.milestone_stage.length > 0;
 		if (hasHistorical !== hadHistorical) {
 			values.view = hasHistorical ? 'all' : 'active';
 			hadHistorical = hasHistorical;
@@ -42,15 +40,19 @@
 		hydrated = true;
 	});
 	$effect(() => {
-		values = { ...data.filters };
-		hadHistorical = data.filters.step.length > 0;
+		values = {
+			...data.filters,
+			current_stage: data.filters.current_stage.map(String),
+			milestone_stage: data.filters.milestone_stage.map(String)
+		};
+		hadHistorical = data.filters.current_stage.length + data.filters.milestone_stage.length > 0;
 		if (Object.keys(data.errors).length) void tick().then(focusFirstError);
 	});
 	const errors = $derived(data.errors as Record<string, string>);
 	const invalid = $derived(Object.keys(errors).length > 0);
-	const historical = $derived(values.step.length > 0);
+	const historical = $derived(values.current_stage.length + values.milestone_stage.length > 0);
 	const advancedKeys = [
-		'step',
+		'milestone_stage',
 		'work_arrangement',
 		'employment_type',
 		'created_via',
@@ -73,8 +75,15 @@
 		data.chips.some((chip: { key: string }) => advancedKeys.includes(chip.key.split(':')[0])) ||
 			Object.keys(errors).some((key) => advancedKeys.includes(key))
 	);
-	const categoryGroups = [
-		{ key: 'step', label: 'Ever reached', options: stepOptions },
+	const categoryGroups = $derived([
+		{
+			key: 'milestone_stage',
+			label: 'Milestone history (includes scheduled)',
+			options: data.stages.map((stage: { id: number; name: string; is_archived: boolean }) => ({
+				value: String(stage.id),
+				label: stage.name + (stage.is_archived ? ' · Archived' : '')
+			}))
+		},
 		{
 			key: 'work_arrangement',
 			label: 'Work arrangement',
@@ -99,7 +108,7 @@
 				{ value: 'mcp', label: 'MCP' }
 			]
 		}
-	] as const;
+	] as const);
 	const dateGroups = [
 		{ key: 'follow_up', label: 'Follow-up date' },
 		{ key: 'deadline', label: 'Application deadline' }
@@ -110,7 +119,10 @@
 	<PageHeader title="Jobs" description="Find jobs and review their latest progress.">
 		{#snippet actions()}
 			{#if data.totalJobs > 0 || invalid}
-				<Button href="/jobs/new" size="lg"><Plus data-icon="inline-start" />Add job</Button>
+				<Button
+					href={'/jobs/new?return_to=' + encodeURIComponent(page.url.pathname + page.url.search)}
+					size="lg"><Plus data-icon="inline-start" />Add job</Button
+				>
 			{/if}
 		{/snippet}
 	</PageHeader>
@@ -128,42 +140,21 @@
 		<p class="text-sm text-muted-foreground">
 			All filters must match. Multiple choices within a category match any selected choice.
 		</p>
-		<div class="grid gap-4 sm:grid-cols-3">
-			<Field id="title" label="Title contains" error={errors.title}>
-				{#snippet control(attrs)}<Input
-						{...attrs}
-						name="title"
-						bind:value={values.title}
-						maxlength={200}
-						placeholder="Engineer"
-					/>{/snippet}
-			</Field>
-			<Field id="company" label="Company contains" error={errors.company}>
-				{#snippet control(attrs)}<Input
-						{...attrs}
-						name="company"
-						bind:value={values.company}
-						maxlength={200}
-						placeholder="Company name"
-					/>{/snippet}
-			</Field>
-			<Field id="location" label="Location contains" error={errors.location}>
-				{#snippet control(attrs)}<Input
-						{...attrs}
-						name="location"
-						bind:value={values.location}
-						maxlength={200}
-						placeholder="City or region"
-					/>{/snippet}
-			</Field>
-		</div>
-		{#if values.query}<input type="hidden" name="query" value={values.query} />{/if}
+
+		<Field id="query" label="Search jobs" error={errors.query}>
+			{#snippet control(attrs)}<Input
+					{...attrs}
+					name="query"
+					bind:value={values.query}
+					placeholder="Title, company or location"
+				/>{/snippet}
+		</Field>
 		<div class="grid gap-4 sm:grid-cols-3">
 			<Field
 				id="view"
 				label="Activity"
 				error={errors.view}
-				hint={historical ? 'Ever reached includes active and inactive jobs.' : undefined}
+				hint={historical ? 'Stage filters include active and closed jobs.' : undefined}
 			>
 				{#snippet control(attrs)}
 					<NativeSelect
@@ -173,7 +164,7 @@
 						onchange={(event) => (values.view = event.currentTarget.value)}
 						disabled={historical}
 					>
-						<option value="active">Active</option><option value="inactive">Inactive</option><option
+						<option value="active">Active</option><option value="closed">Closed</option><option
 							value="all">All</option
 						>
 					</NativeSelect>
@@ -193,21 +184,24 @@
 					>{/snippet}
 			</Field>
 		</div>
-		<fieldset class="space-y-3" aria-describedby={errors.status ? 'status-error' : undefined}>
-			<legend class="text-sm font-medium">Current status</legend>
+		<fieldset
+			class="space-y-3"
+			aria-describedby={errors.current_stage ? 'current_stage-error' : undefined}
+		>
+			<legend class="text-sm font-medium">Current stage</legend>
 			<div class="flex flex-wrap gap-x-5 gap-y-3">
-				{#each statusOptions as option}
+				{#each data.stages.filter((stage: { is_archived: boolean }) => !stage.is_archived) as option}
 					<Checkbox
-						name="status"
-						value={option.value}
-						label={option.label}
-						bind:group={values.status}
-						aria-invalid={Boolean(errors.status)}
+						name="current_stage"
+						value={String(option.id)}
+						label={option.name}
+						bind:group={values.current_stage}
+						aria-invalid={Boolean(errors.current_stage)}
 					/>
 				{/each}
 			</div>
-			{#if errors.status}<p id="status-error" class="text-sm text-destructive">
-					{errors.status}
+			{#if errors.current_stage}<p id="current_stage-error" class="text-sm text-destructive">
+					{errors.current_stage}
 				</p>{/if}
 		</fieldset>
 		{#snippet more()}
@@ -216,6 +210,35 @@
 					><span>Advanced filters</span><ChevronDown class="disclosure-chevron size-4" /></summary
 				>
 				<div class="disclosure-body space-y-6">
+					<div class="grid gap-4 sm:grid-cols-3">
+						<Field id="title" label="Title contains" error={errors.title}>
+							{#snippet control(attrs)}<Input
+									{...attrs}
+									name="title"
+									bind:value={values.title}
+									maxlength={200}
+									placeholder="Engineer"
+								/>{/snippet}
+						</Field>
+						<Field id="company" label="Company contains" error={errors.company}>
+							{#snippet control(attrs)}<Input
+									{...attrs}
+									name="company"
+									bind:value={values.company}
+									maxlength={200}
+									placeholder="Company name"
+								/>{/snippet}
+						</Field>
+						<Field id="location" label="Location contains" error={errors.location}>
+							{#snippet control(attrs)}<Input
+									{...attrs}
+									name="location"
+									bind:value={values.location}
+									maxlength={200}
+									placeholder="City or region"
+								/>{/snippet}
+						</Field>
+					</div>
 					<div class="grid gap-6 sm:grid-cols-2">
 						{#each categoryGroups as group}
 							<fieldset
@@ -232,8 +255,9 @@
 											aria-invalid={Boolean(errors[group.key])}
 										/>{/each}
 								</div>
-								{#if group.key === 'step'}<p class="text-sm text-muted-foreground">
-										Includes active and inactive jobs that ever reached any selected step.
+								{#if group.key === 'milestone_stage'}<p class="text-sm text-muted-foreground">
+										Includes active and closed jobs with any selected milestone, including scheduled
+										milestones.
 									</p>{/if}
 								{#if errors[group.key]}<p
 										id={`${group.key}-error`}
@@ -390,11 +414,13 @@
 						? 'Add a job to start tracking it. Only a title and company are needed.'
 						: data.chips.length
 							? 'Try fewer filters or clear them to see active jobs.'
-							: 'View all jobs to review inactive opportunities.'}
+							: 'View all jobs to review closed opportunities.'}
 				>
 					{#snippet icon()}<Briefcase class="size-5" />{/snippet}
-					{#snippet actions()}{#if data.totalJobs === 0}<Button href="/jobs/new" size="lg"
-								><Plus data-icon="inline-start" />Add job</Button
+					{#snippet actions()}{#if data.totalJobs === 0}<Button
+								href={'/jobs/new?return_to=' +
+									encodeURIComponent(page.url.pathname + page.url.search)}
+								size="lg"><Plus data-icon="inline-start" />Add job</Button
 							>{:else}<Button
 								href={data.chips.length ? '/jobs' : '/jobs?view=all'}
 								variant="outline"
@@ -405,7 +431,7 @@
 				<Card.Root class="gap-0 divide-y divide-border p-0">
 					{#each data.jobs as job (job.id)}<JobRow
 							recordNumber={job.id}
-							href={`/jobs/${job.id}`}
+							href={jobDetailUrl(job.id, page.url.pathname + page.url.search)}
 							title={job.title}
 							company={job.company}
 							status={job.status}
