@@ -4,7 +4,7 @@ Saturday is a local career dashboard for your job search, career pivot, or next 
 
 ## What Saturday can do
 
-- **Jobs:** track opportunities, posting details, stars, follow-ups, deadlines, and dated progress or notes. Search, combine filters, sort, and paginate results.
+- **Jobs:** track opportunities with editable workflow stages, posting details, stars, follow-ups and deadlines. Change stage on job detail or add history separately. Search, combine filters, sort and paginate the job list; configure stages in Settings.
 - **Dashboard:** see active jobs, upcoming events, due follow-ups, application deadlines, and historical progress counts.
 - **Network:** save people, link them to jobs, keep relationship notes, schedule follow-ups, and record interactions.
 - **Documents and Profile:** upload files, edit Markdown/HTML/TXT, designate a Master CV and templates, attach independent copies to jobs, and generate PDFs from saved HTML.

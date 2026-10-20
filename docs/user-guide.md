@@ -26,6 +26,16 @@ History entries offer **Edit history** and confirmed **Delete history**. Deletio
 
 Updates from an assistant use the same rules. Refresh to see other-client changes. If two clients change stage, the last successfully committed move determines placement and both actual moves retain their milestones. After an uncertain save response, inspect placement/history before retrying.
 
+## Configure workflow stages
+
+Open **Settings → Workflow**. One stage list shows open progression first, closed destinations next, and archived stages last. The Starting stage cue identifies where new jobs begin. Add a stage with a unique name and optional **Closes the job**; use Up/Down to reorder within its type. A starting-stage change asks for confirmation and affects future jobs only.
+
+Use **Edit stage** on a row to rename it or change whether it closes jobs. Closure is locked while jobs or history reference that stage; create a replacement stage if you need different behavior. Renaming updates labels throughout existing history without changing IDs or counts.
+
+**Archive stage** is available only when it has no current jobs and at least one open stage remains. Move occupied jobs first. Archiving retains milestones and removes the stage from movement choices. **Restore stage** retains its ID and appends it within its open/closed type. If another available stage uses its name, rename the archived row before restoring. There is no permanent stage deletion.
+
+Configuration takes effect immediately without restarting. Other open browsers or assistant clients see it on their next read/refresh. Workflow is ordinary application data available through allowed browser access; server and authentication maintenance remain host-only. MCP can discover stages but has no workflow-configuration tools.
+
 ## Read the Dashboard
 
 **Active now** counts jobs in open stages. **Milestone history** counts distinct jobs with each milestone across active and closed jobs, including scheduled milestones. Counts overlap; repeat milestones count a job once. Count links open the matching Jobs history filter, separately from current-stage filters.

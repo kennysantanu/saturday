@@ -1,4 +1,14 @@
 import {
+	listWorkflowStages,
+	addWorkflowStage,
+	renameWorkflowStage,
+	setWorkflowStageClosed,
+	reorderWorkflowStage,
+	archiveWorkflowStage,
+	restoreWorkflowStage
+} from '$lib/server/workflow.js';
+import { ServiceError, ValidationError } from '$lib/server/validation.js';
+import {
 	checkUpdates,
 	installedCheck,
 	operationStatus,
@@ -146,8 +156,18 @@ export async function load(event) {
 	} catch (e) {
 		deletionUnavailable = e.message;
 	}
+	let workflowStages = [],
+		workflowError = null;
+	try {
+		workflowStages = listWorkflowStages();
+	} catch {
+		workflowError =
+			'Workflow is unavailable. Repair storage before editing stages; diagnostics and recovery remain available.';
+	}
 	return {
 		access: event.locals.access,
+		workflowStages,
+		workflowError,
 		network: networkSummary(readAccessSettings(), Number(url.port || 80)),
 		installationOperation,
 		updateCheck,
@@ -220,6 +240,58 @@ function installationAuthorized(event) {
 	);
 }
 export const actions = {
+	workflow: async (event) => {
+		if (!sameOrigin(event))
+			return fail(403, { workflowError: 'Use this Saturday browser to save workflow changes.' });
+		const values = Object.fromEntries(
+			Array.from((await event.request.formData()).entries(), ([key, value]) => [
+				key,
+				typeof value === 'string' ? value : ''
+			])
+		);
+		const options = { confirm_starting_stage: values.confirm_starting_stage === '1' };
+		try {
+			switch (values.kind) {
+				case 'add':
+					addWorkflowStage({ name: values.name, is_closed: values.is_closed === '1' });
+					break;
+				case 'rename':
+					renameWorkflowStage(values.stage_id, values.name);
+					break;
+				case 'closure':
+					setWorkflowStageClosed(values.stage_id, values.is_closed === '1', options);
+					break;
+				case 'reorder':
+					reorderWorkflowStage(values.stage_id, values.direction, options);
+					break;
+				case 'archive':
+					archiveWorkflowStage(values.stage_id, options);
+					break;
+				case 'restore':
+					restoreWorkflowStage(values.stage_id);
+					break;
+				default:
+					throw new ServiceError('Choose an available workflow action.');
+			}
+			return { workflowSaved: true };
+		} catch (error) {
+			if (error instanceof ServiceError && error.code === 'starting_stage_confirmation')
+				return fail(400, { workflowConfirm: values, workflowValues: values });
+			if (error instanceof ValidationError)
+				return fail(400, {
+					workflowError: 'Check the workflow fields.',
+					workflowErrors: error.fieldErrors,
+					workflowValues: values
+				});
+			if (error instanceof ServiceError)
+				return fail(400, { workflowError: error.message, workflowValues: values });
+			console.error('Workflow setting could not be saved:', error);
+			return fail(500, {
+				workflowError: 'Workflow could not be saved. Try again.',
+				workflowValues: values
+			});
+		}
+	},
 	lan: async (event) => {
 		if (!localBrowser(event) || !sameOrigin(event))
 			return fail(403, {
