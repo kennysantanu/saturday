@@ -1,3 +1,4 @@
+import { stageId } from './workflow-fixture.mjs';
 import { jobSearchSchema } from '../src/lib/server/validation.js';
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,8 +11,7 @@ import {
 	searchJobs,
 	listJobs,
 	addJobUpdate,
-	dismissJob,
-	reopenJob,
+	moveJobStage,
 	correctJobUpdate,
 	setJobScore,
 	ValidationError
@@ -38,7 +38,7 @@ const job = (fields = {}, origin = 'manual') =>
 	createJob({ job_title: 'Engineer', company_name: 'Acme', ...fields }, origin);
 const ids = (filters) => searchJobs(filters).jobs.map((job) => job.id);
 const update = (jobId, type, date = '2026-10-01') =>
-	addJobUpdate({ job_id: jobId, event_type: type, event_date: date });
+	addJobUpdate({ job_id: jobId, stage_id: stageId(type), event_date: date });
 
 test('literal contains searches use AND, categories use OR, and missing values remain searchable', () => {
 	const target = job({
@@ -76,27 +76,16 @@ test('literal contains searches use AND, categories use OR, and missing values r
 	assert.equal(searchJobs({ query: 'Acme', title: '100' }).total, 2);
 });
 
-test('current status uses milestone rank and recorded state; historical steps force all activity', () => {
-	const reopened = job();
-	update(reopened.id, 'interview_2', '2026-11-01');
-	update(reopened.id, 'applied', '2026-09-01');
-	dismissJob(reopened.id, '2026-12-01');
-	reopenJob(reopened.id, '2026-08-01');
-	const inactive = job();
-	update(inactive.id, 'offer');
-	const accepted = update(inactive.id, 'accepted', '2026-08-01');
-	assert.deepEqual(ids({ status: ['interview_2'] }), [reopened.id]);
-	assert.deepEqual(ids({ status: ['accepted'], view: 'all' }), [inactive.id]);
-	assert.equal(searchJobs({ status: ['accepted'] }).total, 0);
-	assert.deepEqual(ids({ view: 'active', step: ['offer', 'dismissed'], status: ['accepted'] }), [
-		inactive.id
-	]);
-	assert.equal(searchJobs({ step: ['offer', 'dismissed'] }).total, 2);
-	correctJobUpdate(accepted.id, { event_type: 'rejected' });
-	assert.deepEqual(ids({ step: ['offer'], status: ['rejected'] }), [inactive.id]);
-	const fresh = job();
-	assert.deepEqual(ids({ status: ['new'] }), [fresh.id]);
-	assert.deepEqual(ids({ view: 'inactive' }), [inactive.id]);
+test('current placement is independent of historical milestones, including closed jobs and scheduled history', () => {
+	const first = job();
+	update(first.id, 'Interview', '2099-01-01');
+	update(first.id, 'Applied');
+	const second = job();
+	moveJobStage(second.id, { stage_id: stageId('Accepted'), event_date: '2020-01-01' });
+	assert.deepEqual(new Set(ids({ current_stage: [stageId('New')] })), new Set([first.id]));
+	assert.deepEqual(ids({ current_stage: [stageId('Accepted')] }), [second.id]);
+	assert.deepEqual(ids({ milestone_stage: [stageId('Interview')] }), [first.id]);
+	assert.deepEqual(ids({ view: 'closed' }), [second.id]);
 });
 
 test('date presets and open inclusive ranges distinguish missing, overdue, today, and upcoming', () => {
@@ -171,12 +160,13 @@ test('scores include zero and decimals, have no fixed scale, and sort missing va
 });
 
 test('pagination counts and status filtering work beyond 100 records and use stable ties', () => {
+	const offerId = stageId('Offer');
 	withDatabase((db) => {
 		const insert = db.prepare(
-			'INSERT INTO jobs (id,job_title,company_name,is_active,created_via,created_at,updated_at) VALUES (?,?,?,1,?,?,?)'
+			'INSERT INTO jobs (id,job_title,company_name,current_stage_id,created_via,created_at,updated_at) VALUES (?,?,?,1,?,?,?)'
 		);
 		const history = db.prepare(
-			'INSERT INTO job_updates (id,job_id,event_type,event_date,created_via,created_at,updated_at) VALUES (?,?,?,?,?,?,?)'
+			'INSERT INTO job_updates (id,job_id,stage_id,event_date,created_via,created_at,updated_at) VALUES (?,?,?,?,?,?,?)'
 		);
 		for (let i = 0; i < 125; i++) {
 			const id = i + 1;
@@ -188,16 +178,18 @@ test('pagination counts and status filtering work beyond 100 records and use sta
 				'2026-10-01T00:00:00.000Z',
 				'2026-10-01T00:00:00.000Z'
 			);
-			if (i >= 110)
+			if (i >= 110) {
+				db.prepare('UPDATE jobs SET current_stage_id=? WHERE id=?').run(offerId, id);
 				history.run(
 					i + 1,
 					id,
-					'offer',
+					offerId,
 					'2026-10-01',
 					'manual',
 					'2026-10-01T00:00:00.000Z',
 					'2026-10-01T00:00:00.000Z'
 				);
+			}
 		}
 	});
 	const pages = [1, 2, 3].map((page) => searchJobs({ page }));
@@ -208,8 +200,8 @@ test('pagination counts and status filtering work beyond 100 records and use sta
 	assert.equal(pages[0].total, 125);
 	assert.equal(new Set(pages.flatMap((result) => result.jobs.map((job) => job.id))).size, 125);
 	assert.equal(searchJobs({ page: 999 }).page, 3);
-	assert.equal(searchJobs({ status: ['offer'] }).total, 15);
-	assert.equal(searchJobs({ status: ['offer'], limit: 5, page: 3 }).jobs[0].id, 121);
+	assert.equal(searchJobs({ current_stage: [offerId] }).total, 15);
+	assert.equal(searchJobs({ current_stage: [offerId], limit: 5, page: 3 }).jobs[0].id, 121);
 	assert.equal(listJobs().length, 100);
 });
 
@@ -220,8 +212,8 @@ test('sorts put missing dates last and validation rejects malformed filter value
 	for (const sort of ['follow_up', 'deadline'])
 		assert.deepEqual(ids({ sort }), [early.id, late.id, missing.id]);
 	for (const filters of [
-		{ status: ['unknown'] },
-		{ step: ['reopened'] },
+		{ current_stage: ['unknown'] },
+		{ milestone_stage: ['invalid'] },
 		{ view: 'bad' },
 		{ work_arrangement: ['invalid'] },
 		{ created_via: ['remote'] },
@@ -243,17 +235,19 @@ test('URL state round trips, deduplicates categories, and chip removal preserves
 	const filters = jobSearchSchema.parse({
 		title: '  Engineer  ',
 		company: 'Acme',
-		view: 'inactive',
-		step: ['applied', 'applied'],
+		view: 'closed',
+		milestone_stage: [stageId('Applied'), stageId('Applied')],
 		work_arrangement: ['remote', 'hybrid'],
 		score_min: 0,
 		page: 3
 	});
 	assert.equal(filters.view, 'all');
-	assert.deepEqual(filters.step, ['applied']);
+	assert.deepEqual(filters.milestone_stage, [stageId('Applied')]);
 	const url = new URL(searchUrl(filters, 3), 'http://localhost');
 	assert.deepEqual(jobSearchSchema.parse(searchFromUrl(url.searchParams)), filters);
-	const stepChip = filterChips(filters).find((chip) => chip.key === 'step:applied');
+	const stepChip = filterChips(filters).find(
+		(chip) => chip.key === 'milestone_stage:' + stageId('Applied')
+	);
 	const removed = jobSearchSchema.parse(
 		searchFromUrl(new URL(stepChip.href, 'http://localhost').searchParams)
 	);

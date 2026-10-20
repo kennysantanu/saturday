@@ -8,7 +8,7 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { UnsavedChanges } from '$lib/unsaved.svelte';
 
-	let { form } = $props();
+	let { data, form } = $props();
 	const errors = $derived(form?.errors ?? {});
 	const values = $derived(form?.values ?? {});
 	const guard = new UnsavedChanges();
@@ -26,7 +26,7 @@
 
 <PageShell title="Add job" width="form">
 	<PageHeader
-		back={{ href: '/jobs', label: 'Jobs' }}
+		back={{ href: data.returnTo, label: data.returnTo.startsWith('/jobs') ? 'Jobs' : 'Dashboard' }}
 		title="Add job"
 		description="Start with the title and company. You can add more later."
 	/>
@@ -46,7 +46,7 @@
 			detailsOpen={detailKeys.some((key) => errors[key])}
 		/>
 		<div class="form-actions justify-end">
-			<Button href="/jobs" variant="ghost" size="lg">Cancel</Button>
+			<Button href={data.returnTo} variant="ghost" size="lg">Cancel</Button>
 			<Button type="submit" size="lg">Save job</Button>
 		</div>
 	</form>

@@ -15,17 +15,26 @@
 	import JobRow from '$lib/components/app/job-row.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Card from '$lib/components/ui/card/index.js';
-	import { DASHBOARD_CARDS } from '$lib/status';
+	import { jobDetailUrl } from '$lib/job-navigation.js';
+	import { page } from '$app/state';
 	let { data } = $props();
 
-	const isEmpty = $derived(data.recentJobs.length === 0);
-	const history = DASHBOARD_CARDS.filter((card) => card.group === 'history');
+	const isEmpty = $derived(data.totalJobs === 0);
+	const history = $derived(
+		data.stages.filter((stage: { is_archived: boolean; is_closed: boolean }) => !stage.is_archived)
+	);
 	// Steps in the order a job moves through them; the two endings are shown separately.
-	const steps = history.filter((card) => !['rejected', 'dismissed'].includes(card.key));
-	const endings = history.filter((card) => ['rejected', 'dismissed'].includes(card.key));
-	const widest = $derived(Math.max(1, ...steps.map((card) => data.stats[card.key])));
+	const steps = $derived(
+		history.filter((stage: { is_archived: boolean; is_closed: boolean }) => !stage.is_closed)
+	);
+	const endings = $derived(
+		history.filter((stage: { is_archived: boolean; is_closed: boolean }) => stage.is_closed)
+	);
+	const widest = $derived(
+		Math.max(1, ...steps.map((card: { history_count: number }) => card.history_count))
+	);
 	const barWidth = (count: number) => (count === 0 ? 0 : Math.max(3, (count / widest) * 100));
-	const endingIcons = { rejected: CircleX, dismissed: EyeOff };
+
 	const attentionGroups = $derived(
 		[
 			{ key: 'follow-ups', label: 'Follow-ups', items: data.followUps },
@@ -48,7 +57,7 @@
 	<PageHeader title="Dashboard" description={todayLabel}>
 		{#snippet actions()}
 			{#if !isEmpty}
-				<Button href="/jobs/new" size="lg">
+				<Button href={'/jobs/new?return_to=' + encodeURIComponent('/')} size="lg">
 					<Plus data-icon="inline-start" />
 					Add job
 				</Button>
@@ -63,7 +72,7 @@
 		>
 			{#snippet icon()}<Briefcase class="size-5" />{/snippet}
 			{#snippet actions()}
-				<Button href="/jobs/new" size="lg">
+				<Button href={'/jobs/new?return_to=' + encodeURIComponent('/')} size="lg">
 					<Plus data-icon="inline-start" />
 					Add job
 				</Button>
@@ -81,12 +90,7 @@
 				</div>
 			</a>
 			<div class="activity-chips">
-				<a href="/jobs?step=applied" class="activity-chip">
-					<span class="font-semibold tabular-nums">{data.stats.applied}</span> Ever applied
-				</a>
-				<a href="/jobs?step=offer" class="activity-chip">
-					<span class="font-semibold tabular-nums">{data.stats.offer}</span> Offers received
-				</a>
+				<a href="/jobs?view=all" class="activity-chip">View all jobs</a>
 			</div>
 		</div>
 
@@ -113,7 +117,7 @@
 								</h3>
 								{#each group.items as item (item.jobId)}
 									<DateRow
-										href="/jobs/{item.jobId}"
+										href={jobDetailUrl(item.jobId, page.url.pathname + page.url.search)}
 										title={item.title}
 										subtitle={item.company}
 										comment={'comment' in item ? item.comment : null}
@@ -132,13 +136,13 @@
 							<Clock class="size-5 text-muted-foreground" aria-hidden="true" />
 							Recently updated
 						</h2>
-						<a href="/jobs" class="link text-sm">View all jobs</a>
+						<a href="/jobs?view=all" class="link text-sm">View all jobs</a>
 					</div>
 					<Card.Root class="gap-0 divide-y divide-border p-0">
 						{#each data.recentJobs as job (job.id)}
 							<JobRow
 								recordNumber={job.id}
-								href={`/jobs/${job.id}`}
+								href={jobDetailUrl(job.id, page.url.pathname + page.url.search)}
 								title={job.title}
 								company={job.company}
 								status={job.status}
@@ -161,7 +165,7 @@
 						<Card.Root class="gap-0 divide-y divide-border p-0">
 							{#each data.upcoming as item (item.id)}
 								<DateRow
-									href="/jobs/{item.jobId}"
+									href={jobDetailUrl(item.jobId, page.url.pathname + page.url.search)}
 									title={item.label}
 									subtitle="{item.title} · {item.company}"
 									date={item.date}
@@ -176,33 +180,32 @@
 					<div class="space-y-0.5">
 						<h2 id="history-heading" class="section-title flex items-center gap-2">
 							<TrendingUp class="size-5 text-muted-foreground" aria-hidden="true" />
-							Progress so far
+							Milestone history
 						</h2>
 						<p class="text-sm text-muted-foreground">
-							Jobs that reached each step, including inactive ones. Counts overlap. Select a step to
-							see its jobs.
+							Jobs with each milestone, including closed jobs and scheduled milestones. Counts
+							overlap. Select a stage to see its history matches.
 						</p>
 					</div>
 					<div class="funnel">
 						{#each steps as card (card.key)}
-							<a href="/jobs?step={card.key}" class="funnel-row">
-								<span class="funnel-label text-sm font-medium">{card.label}</span>
-								<span class="funnel-count">{data.stats[card.key]}</span>
+							<a href="/jobs?view=all&milestone_stage={card.id}" class="funnel-row">
+								<span class="funnel-label text-sm font-medium">{card.name}</span>
+								<span class="funnel-count">{card.history_count}</span>
 								<span class="funnel-track" aria-hidden="true">
-									<span class="funnel-bar" style="width: {barWidth(data.stats[card.key])}%"></span>
+									<span class="funnel-bar" style="width: {barWidth(card.history_count)}%"></span>
 								</span>
 							</a>
 						{/each}
 					</div>
 					<div class="history-grid">
 						{#each endings as card (card.key)}
-							{@const Icon = endingIcons[card.key as keyof typeof endingIcons]}
-							<a href="/jobs?step={card.key}" class="history-stat">
+							<a href="/jobs?view=all&milestone_stage={card.id}" class="history-stat">
 								<p class="flex items-center gap-2 text-sm text-muted-foreground">
-									<Icon class="size-4 shrink-0" aria-hidden="true" />{card.label}
+									{card.name}
 								</p>
 								<p class="mt-3 text-3xl font-semibold tracking-tight tabular-nums">
-									{data.stats[card.key]}
+									{card.history_count}
 								</p>
 							</a>
 						{/each}

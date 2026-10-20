@@ -1,3 +1,4 @@
+import { listWorkflowStages } from './workflow.js';
 import { getInstallation } from './installation.js';
 import { openDatabase } from './database.js';
 import { withServerActivity } from './server-lifecycle.js';
@@ -49,6 +50,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
 import {
 	addJobUpdate,
+	moveJobStage,
+	correctJobUpdate,
 	createJob,
 	editJob,
 	setJobScore,
@@ -66,19 +69,14 @@ import {
 import { ServiceError, ValidationError } from './validation.js';
 
 const server = new McpServer({ name: 'saturday', version: buildInfo.id });
-const milestoneTypes = [
-	'applied',
-	'prescreened',
-	'interview_1',
-	'interview_2',
-	'offer',
-	'accepted',
-	'rejected'
-];
-
 /** @returns {import('@modelcontextprotocol/server').CallToolResult} */
 function toolError(error) {
-	const message = error instanceof Error ? error.message : String(error);
+	const message =
+		error instanceof ValidationError
+			? Object.values(error.fieldErrors).join(' ')
+			: error instanceof Error
+				? error.message
+				: String(error);
 	return { content: [{ type: 'text', text: `Error: ${message}` }], isError: true };
 }
 
@@ -131,7 +129,9 @@ server.registerTool(
 				id: job.id,
 				title: job.title,
 				company: job.company,
-				status: job.status.label
+				status: job.status.label,
+				current_stage_id: job.currentStageId,
+				current_stage: job.currentStage
 			});
 		} catch (error) {
 			return toolError(error);
@@ -143,7 +143,7 @@ server.registerTool(
 	'list_jobs',
 	{
 		description:
-			'Find jobs with AND across filters and OR within category selections. Legacy query matches title or company. Defaults to all jobs, 50 per page, recently updated. Historical step filters always include inactive jobs. Dates use the local calendar; score has no fixed scale. Returns total and pagination metadata.',
+			'Find jobs with AND across filters and OR within category selections. Search matches title, company or location. Defaults to all jobs, 50 per page, recently updated. Current-stage and milestone-stage filters include active and closed jobs. Dates use the local calendar; score has no fixed scale. Returns total and pagination metadata.',
 		inputSchema: z.object({ ...jobSearchShape, view: jobSearchShape.view.default('all') })
 	},
 	async (input) => {
@@ -180,9 +180,9 @@ server.registerTool(
 			return toolResult({
 				...jobForMcp(job),
 				status: job.status.label,
-				updates: job.updates.map(({ id, eventType, date, note, createdVia }) => ({
+				updates: job.updates.map(({ id, stageId, date, note, createdVia }) => ({
 					id,
-					event_type: eventType,
+					stage_id: stageId,
 					event_date: date,
 					note,
 					created_via: createdVia
@@ -194,46 +194,102 @@ server.registerTool(
 	}
 );
 
+const historyShape = {
+	job_id: recordIdSchema,
+	stage_id: recordIdSchema.nullable().optional(),
+	event_date: z.string(),
+	note: z.string().max(10000).nullable().optional()
+};
+server.registerTool(
+	'list_workflow_stages',
+	{
+		description:
+			'Read saved stage IDs, names, ordering, closure and archive flags. Discover IDs before changing placement or adding history.',
+		inputSchema: z.object({}),
+		annotations: { readOnlyHint: true }
+	},
+	async () => {
+		try {
+			return toolResult({ stages: listWorkflowStages() });
+		} catch (e) {
+			return toolError(e);
+		}
+	}
+);
+server.registerTool(
+	'change_job_stage',
+	{
+		description:
+			'Change current placement now and record one milestone atomically. Confirm the job and destination stage IDs first. Last committed move wins; after an uncertain response inspect the job before retrying. Future dates are not allowed.',
+		inputSchema: z.object({ ...historyShape, stage_id: recordIdSchema })
+	},
+	async ({ job_id, ...input }) => {
+		try {
+			return toolResult(jobForMcp(moveJobStage(job_id, input, 'mcp')));
+		} catch (e) {
+			return toolError(e);
+		}
+	}
+);
 server.registerTool(
 	'add_job_update',
 	{
 		description:
-			'Record a dated milestone or note for a job. This writes to Saturday. Use list_jobs first to confirm the correct ID. Inactive jobs accept notes but must be reopened in the UI before milestones can be added.',
-		inputSchema: z.object({
-			job_id: recordIdSchema.describe('Stable Saturday job ID.'),
-			event_date: z
-				.string()
-				.regex(/^\d{4}-\d{2}-\d{2}$/)
-				.describe('Required real calendar date in YYYY-MM-DD format.'),
-			event_type: z
-				.enum(milestoneTypes)
-				.optional()
-				.describe(
-					'Optional milestone: applied, prescreened, interview_1, interview_2, offer, accepted, or rejected.'
-				),
-			note: z
-				.string()
-				.trim()
-				.max(10000)
-				.optional()
-				.describe('Optional context; required when event_type is omitted.')
-		})
+			'Add history only: a note, past milestone or scheduled milestone. Never changes current placement, even for a closed stage. Omit stage_id for a general note, which requires text.',
+		inputSchema: z.object(historyShape)
 	},
 	async (input) => {
 		try {
-			if (!input.event_type && !input.note?.trim()) {
-				throw new ValidationError({ note: 'Enter a note when event_type is omitted.' });
-			}
-			const update = addJobUpdate(input, 'mcp');
+			const row = addJobUpdate(input, 'mcp');
 			return toolResult({
-				id: update.id,
-				job_id: update.jobId,
-				event_type: update.eventType,
-				event_date: update.date,
-				note: update.note
+				id: row.id,
+				job_id: row.jobId,
+				stage_id: row.stageId,
+				event_date: row.date,
+				note: row.note
 			});
-		} catch (error) {
-			return toolError(error);
+		} catch (e) {
+			return toolError(e);
+		}
+	}
+);
+server.registerTool(
+	'edit_job_update',
+	{
+		description:
+			'Correct one scoped history entry after reading it. Never changes placement. Removing sole evidence for current placement is blocked; change stage first.',
+		inputSchema: z.object({
+			job_id: recordIdSchema,
+			update_id: recordIdSchema,
+			stage_id: recordIdSchema.nullable().optional(),
+			event_date: z.string().optional(),
+			note: z.string().max(10000).nullable().optional()
+		})
+	},
+	async ({ update_id, ...input }) => {
+		try {
+			return toolResult(jobForMcp(correctJobUpdate(update_id, input)));
+		} catch (e) {
+			return toolError(e);
+		}
+	}
+);
+server.registerTool(
+	'delete_job_update',
+	{
+		description:
+			'Permanently delete one scoped history entry only after explicit user authorization and reading it. Never changes placement. Sole current-stage evidence cannot be deleted. No automatic retry.',
+		inputSchema: z.object({
+			job_id: recordIdSchema,
+			update_id: recordIdSchema,
+			confirm: z.literal(true)
+		})
+	},
+	async ({ job_id, update_id }) => {
+		try {
+			return toolResult(jobForMcp(correctJobUpdate(update_id, { job_id, remove: true })));
+		} catch (e) {
+			return toolError(e);
 		}
 	}
 );
@@ -250,7 +306,7 @@ const jobTools = [
 	],
 	[
 		'set_job_follow_up',
-		'Set or reschedule one follow-up without adding history or changing status. Null date clears date and comment. Inactive jobs retain follow-ups but hide them from Dashboard.',
+		'Set or reschedule one follow-up without adding history or changing status. Null date clears date and comment. Closed jobs retain follow-ups but hide them from Dashboard.',
 		followUpMcpSchema.extend({ job_id: recordIdSchema }),
 		({ job_id, follow_up_date, follow_up_comment }) =>
 			setJobFollowUp(job_id, follow_up_date, follow_up_comment)

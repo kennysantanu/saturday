@@ -12,11 +12,7 @@
 	import FileText from '@lucide/svelte/icons/file-text';
 	import Link2 from '@lucide/svelte/icons/link-2';
 	import UserPlus from '@lucide/svelte/icons/user-plus';
-	import Ban from '@lucide/svelte/icons/ban';
-	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import { jobInfoFields } from '$lib/job-fields.js';
-	import ActionMenu, { type MenuItem } from '$lib/components/app/action-menu.svelte';
-	import ConfirmDialog from '$lib/components/app/confirm-dialog.svelte';
 	import DueBadge from '$lib/components/app/due-badge.svelte';
 	import EmptyState from '$lib/components/app/empty-state.svelte';
 	import Field from '$lib/components/app/field.svelte';
@@ -38,12 +34,14 @@
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import { focusFirstError, enhanceWithFocus, withPending } from '$lib/forms';
 	import { hostOf, formatDate } from '$lib/format';
-	import { UPDATE_CHOICES } from '$lib/status';
+	import JobHistoryFields from '$lib/components/app/job-history-fields.svelte';
+	import UnsavedGuard from '$lib/components/app/unsaved-guard.svelte';
+	import { UnsavedChanges } from '$lib/unsaved.svelte';
 
 	type JobUpdate = {
 		id: number;
 		date: string;
-		eventType: string | null;
+		stageId: number | null;
 		label: string;
 		note: string | null;
 		createdVia: 'manual' | 'mcp';
@@ -54,50 +52,34 @@
 	const updates = $derived(job.updates as JobUpdate[]);
 	const errors = $derived(form?.errors ?? {});
 	const values = $derived(form?.values ?? {});
-	// Each form shows its own errors: Add update and Edit update in their dialogs, the rest here.
+	// Each form shows its own errors: Add history and Edit update in their dialogs, the rest here.
 	const addErrors = $derived(form?.action === 'addUpdate' ? errors : {});
-	const pageError = $derived(
-		['dismiss', 'reopen', 'star'].includes(form?.action ?? '') ? errors.form : undefined
-	);
-	let open = $state(false);
-	let dismissOpen = $state(false);
+	const pageError = $derived(form?.action === 'star' ? errors.form : undefined);
+	const moveErrors = $derived(form?.action === 'changeStage' ? errors : {});
+	const historyGuard = new UnsavedChanges();
+	const stageGuard = new UnsavedChanges();
+	const combinedGuard = {
+		get dirty() {
+			return stageGuard.dirty || historyGuard.dirty;
+		},
+		set dirty(value) {
+			stageGuard.dirty = value;
+			historyGuard.dirty = value;
+		},
+		get saving() {
+			return stageGuard.saving || historyGuard.saving;
+		}
+	};
 	let descriptionOpen = $state(false);
-	let selectedType = $state('applied');
-	const isInterview = $derived(selectedType === 'interview_1' || selectedType === 'interview_2');
-	const choices = $derived(
-		job.isActive ? UPDATE_CHOICES : UPDATE_CHOICES.filter((item) => item.value === 'note')
-	);
 	const upcoming = $derived(
 		updates
 			.filter((entry) => entry.date > data.today)
 			.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id)
 	);
 	const history = $derived(updates.filter((entry) => entry.date <= data.today));
-	const canReopen = $derived(!job.isActive && job.status.label === 'Dismissed');
 	const longDescription = $derived(
 		(job.description?.length ?? 0) > 480 || (job.description?.split('\n').length ?? 0) > 8
 	);
-	const menu = $derived.by(() => {
-		const items: MenuItem[] = [];
-		if (job.isActive)
-			items.push({ label: 'Dismiss job', icon: Ban, onselect: () => (dismissOpen = true) });
-		if (canReopen)
-			items.push({
-				label: 'Reopen job',
-				icon: RotateCcw,
-				onselect: () =>
-					(document.getElementById('reopen-form') as HTMLFormElement | null)?.requestSubmit()
-			});
-		return items;
-	});
-
-	$effect(() => {
-		if (form?.action === 'addUpdate' && form?.errors) open = true;
-	});
-
-	$effect(() => {
-		selectedType = values.event_type ?? (job.isActive ? 'applied' : 'note');
-	});
 	let personPickerOpen = $state(false);
 	let networkNoteOpen = $state(false);
 	let notePersonId = $state('');
@@ -143,11 +125,14 @@
 	});
 </script>
 
-<Dialog.Root bind:open>
+<div>
 	<PageShell title={`${job.title} · ${job.company}`}>
 		<PageHeader
 			recordNumber={job.id}
-			back={{ href: '/jobs', label: 'Jobs' }}
+			back={{
+				href: data.returnTo,
+				label: data.returnTo.startsWith('/jobs') ? 'Jobs' : 'Dashboard'
+			}}
 			title={job.title}
 			eyebrow={job.company}
 		>
@@ -169,27 +154,92 @@
 						/>{job.isStarred ? 'Starred' : 'Star'}
 					</Button>
 				</form>
-				<Button href="/jobs/{job.id}/edit" variant="outline"
-					><Pencil data-icon="inline-start" />Edit</Button
+				<Button
+					href={'/jobs/' + job.id + '/edit?return_to=' + encodeURIComponent(data.returnTo)}
+					variant="outline"><Pencil data-icon="inline-start" />Edit</Button
 				>
-				<Dialog.Trigger>
-					{#snippet child({ props })}
-						<Button {...props}><Plus data-icon="inline-start" />Add update</Button>
-					{/snippet}
-				</Dialog.Trigger>
-				{#if menu.length}<ActionMenu label="More actions for this job" items={menu} />{/if}
+				<Button href={networkHref({ add_history: '1' }) + '#add-history'} variant="outline"
+					><Plus data-icon="inline-start" />Add history</Button
+				>
+				<Button href={networkHref({ change_stage: '1' }) + '#change-stage'}>Change stage</Button>
 			{/snippet}
 		</PageHeader>
 
+		{#if data.outsideResults}<Notice title="This job is outside the original results"
+				>Its current details no longer match those filters. <a
+					class="link"
+					href={'/jobs?view=all&current_stage=' + job.currentStageId}>View current-stage jobs</a
+				>, or return using the original results link.</Notice
+			>{/if}
 		{#if pageError}
 			<Notice tone="error" title="The change was not saved">{pageError}</Notice>
 		{/if}
-		{#if !job.isActive && !canReopen}
-			<Notice title="This job is inactive after an outcome"
-				>Correct that update in History if it was recorded by mistake.</Notice
-			>
-		{/if}
 
+		<section class="space-y-4" aria-label="Stage and history actions">
+			<p class="text-sm text-muted-foreground">
+				Current stage: <strong>{job.currentStage.name}</strong> · {job.isActive
+					? 'Active'
+					: 'Closed'}
+			</p>
+			<details
+				id="change-stage"
+				class="disclosure"
+				open={data.changeStageOpen || form?.action === 'changeStage'}
+			>
+				<summary>Change stage</summary>
+				<form
+					method="POST"
+					action={networkAction('changeStage')}
+					use:enhance={stageGuard.enhance}
+					oninput={stageGuard.markDirty}
+					class="disclosure-body space-y-4"
+				>
+					<p class="text-sm">Change current placement and record a milestone together.</p>
+					<p class="meta-text">* Required</p>
+					{#if moveErrors.form}<Notice tone="error" title="Stage was not changed"
+							>{moveErrors.form}</Notice
+						>{/if}
+					<JobHistoryFields
+						stages={data.stages}
+						prefix="move"
+						moving
+						currentStageId={job.currentStageId}
+						today={data.today}
+						errors={moveErrors}
+						values={form?.action === 'changeStage' ? values : {}}
+					/>
+					<div class="form-actions"><Button type="submit">Change stage</Button></div>
+				</form>
+			</details>
+			<details
+				id="add-history"
+				class="disclosure"
+				open={data.addHistoryOpen || form?.action === 'addUpdate'}
+			>
+				<summary>Add history</summary>
+				<form
+					method="POST"
+					action={networkAction('addUpdate')}
+					use:enhance={historyGuard.enhance}
+					oninput={historyGuard.markDirty}
+					class="disclosure-body space-y-4"
+				>
+					<p class="text-sm">Records history only; does not change the current stage.</p>
+					<p class="meta-text">* Required</p>
+					{#if addErrors.form}<Notice tone="error" title="History was not added"
+							>{addErrors.form}</Notice
+						>{/if}
+					<JobHistoryFields
+						stages={data.stages}
+						prefix="history"
+						today={data.today}
+						errors={addErrors}
+						values={form?.action === 'addUpdate' ? values : {}}
+					/>
+					<div class="form-actions"><Button type="submit">Add history</Button></div>
+				</form>
+			</details>
+		</section>
 		<div class="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
 			<div class="min-w-0 space-y-6">
 				<SectionCard title="History">
@@ -198,7 +248,15 @@
 							<h3 id="upcoming-heading" class="text-sm font-medium text-muted-foreground">
 								Upcoming
 							</h3>
-							<Timeline entries={upcoming} scheduled {errors} {values} />
+							<Timeline
+								{historyGuard}
+								stages={data.stages}
+								jobId={job.id}
+								entries={upcoming}
+								scheduled
+								{errors}
+								{values}
+							/>
 						</section>
 					{/if}
 
@@ -209,13 +267,20 @@
 							description="Record the first step, like applying, when it happens."
 						>
 							{#snippet actions()}
-								<Button onclick={() => (open = true)}
-									><Plus data-icon="inline-start" />Add update</Button
+								<Button href={networkHref({ add_history: '1' }) + '#add-history'}
+									><Plus data-icon="inline-start" />Add history</Button
 								>
 							{/snippet}
 						</EmptyState>
 					{:else if history.length > 0}
-						<Timeline entries={history} {errors} {values} />
+						<Timeline
+							{historyGuard}
+							stages={data.stages}
+							jobId={job.id}
+							entries={history}
+							{errors}
+							{values}
+						/>
 					{/if}
 				</SectionCard>
 
@@ -357,7 +422,7 @@
 							</p>{/if}
 					{:else}<p class="text-sm text-muted-foreground">No follow-up scheduled.</p>{/if}
 					{#if !job.isActive && job.followUpDate}<p class="text-sm text-muted-foreground">
-							Kept here while inactive. Reopening shows it on the Dashboard again.
+							Kept here while closed. Changing to an open stage shows it on the Dashboard again.
 						</p>{/if}
 					<details
 						class="disclosure inset-surface group"
@@ -460,93 +525,8 @@
 			</aside>
 		</div>
 	</PageShell>
-
-	<Dialog.Content class="sm:max-w-md">
-		<form
-			method="POST"
-			action="?/addUpdate"
-			use:enhance={withPending(() => async ({ result, update }) => {
-				await update();
-				if (result.type === 'redirect') {
-					open = false;
-					return;
-				}
-				await tick();
-				focusFirstError();
-			})}
-			class="grid gap-5"
-		>
-			<Dialog.Header>
-				<Dialog.Title>Add update</Dialog.Title>
-				<Dialog.Description>Record what happened on this job.</Dialog.Description>
-			</Dialog.Header>
-			{#if addErrors.form}
-				<Notice tone="error" title="The update was not saved">{addErrors.form}</Notice>
-			{/if}
-			<Field id="event_type" label="What happened?" error={addErrors.event_type}>
-				{#snippet control(attrs)}
-					<NativeSelect {...attrs} name="event_type" bind:value={selectedType}>
-						{#each choices as option (option.value)}<option value={option.value}
-								>{option.label}</option
-							>{/each}
-					</NativeSelect>
-				{/snippet}
-			</Field>
-			<Field
-				id="event_date"
-				label={isInterview ? 'Interview date' : 'Date'}
-				hint={isInterview
-					? 'A confirmed future interview counts as reaching that step.'
-					: undefined}
-				error={addErrors.event_date}
-			>
-				{#snippet control(attrs)}<Input
-						{...attrs}
-						name="event_date"
-						type="date"
-						value={values.event_date ?? data.today}
-					/>{/snippet}
-			</Field>
-			<Field id="note" label="Note" required={selectedType === 'note'} error={addErrors.note}>
-				{#snippet control(attrs)}<Textarea
-						{...attrs}
-						name="note"
-						rows={3}
-						value={values.note ?? ''}
-					/>{/snippet}
-			</Field>
-			<Dialog.Footer>
-				<Button type="button" variant="ghost" onclick={() => (open = false)}>Cancel</Button>
-				<Button type="submit">Save update</Button>
-			</Dialog.Footer>
-		</form>
-	</Dialog.Content>
-</Dialog.Root>
-
-<form
-	id="dismiss-form"
-	method="POST"
-	action="?/dismiss"
-	use:enhance={withPending(() => async ({ update }) => {
-		await update();
-		dismissOpen = false;
-		await tick();
-		focusFirstError();
-	})}
->
-	<input type="hidden" name="event_date" value={data.today} />
-</form>
-<form id="reopen-form" method="POST" action="?/reopen" use:enhance={withPending()}>
-	<input type="hidden" name="event_date" value={data.today} />
-</form>
-
-<ConfirmDialog
-	bind:open={dismissOpen}
-	title="Dismiss this job?"
-	description="Dismiss means you stopped pursuing it, and Saturday will stop counting it as active. Use Add update to record a rejection from the employer. You can reopen a dismissed job from this page."
-	confirmLabel="Dismiss job"
-	formId="dismiss-form"
-/>
+</div>
+<UnsavedGuard guard={combinedGuard} />
 
 <Dialog.Root bind:open={networkNoteOpen}>
 	<Dialog.Content class="sm:max-w-md">

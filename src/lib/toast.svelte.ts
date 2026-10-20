@@ -27,10 +27,12 @@ export const SAVED_MESSAGES: Record<string, string> = {
 	'follow-up': 'Follow-up saved.',
 	'follow-up-cleared': 'Follow-up cleared.',
 	starred: 'Starred status updated.',
-	update: 'Update saved.',
-	correction: 'Update corrected.',
-	removed: 'Update removed.',
-	dismissed: 'Job dismissed.',
+	update: 'History added.',
+	correction: 'History corrected.',
+	removed: 'History deleted.',
+	'stage-changed': 'Stage changed and milestone recorded.',
+	'stage-unchanged': 'Already in this stage; no changes saved.',
+	'job-closed': 'Job closed and milestone recorded.',
 	reopened: 'Job reopened.'
 };
 

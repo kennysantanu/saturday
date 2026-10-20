@@ -1,3 +1,4 @@
+import { normalizeStageName } from './workflow.js';
 import { getInstallation } from './installation.js';
 import { z } from 'zod';
 import {
@@ -32,7 +33,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { getDatabasePath, getProjectRoot, inTransaction, reserveJobFileIds } from './database.js';
 import { applyMigrations, assertMigrationHistory } from './migrations.js';
-import { parseJobInput, parseAssessment, validDate, ordinaryEventTypes } from './validation.js';
+import { parseJobInput, parseAssessment, validDate, parseUpdateInput } from './validation.js';
 import { jobColumns, jobFields } from '../job-fields.js';
 import { storageCompatibility, buildInfo } from './compatibility.js';
 
@@ -42,7 +43,7 @@ const columns = {
 	job_updates: [
 		'id',
 		'job_id',
-		'event_type',
+		'stage_id',
 		'event_date',
 		'note',
 		'created_via',
@@ -180,6 +181,15 @@ function databaseVersion(db) {
 function columnsFor() {
 	return {
 		app_metadata: ['id', 'format', 'dataset_id'],
+		workflow_stages: [
+			'id',
+			'name',
+			'sort_order',
+			'is_closed',
+			'is_archived',
+			'created_at',
+			'updated_at'
+		],
 		jobs: jobColumns(),
 		...columns,
 		networks: [
@@ -209,7 +219,7 @@ function columnsFor() {
 		]
 	};
 }
-const allocatedTables = ['jobs', 'job_updates', 'networks', 'network_updates'];
+const allocatedTables = ['workflow_stages', 'jobs', 'job_updates', 'networks', 'network_updates'];
 function allocatorState(db) {
 	const rows = db.prepare('SELECT name, seq FROM sqlite_sequence ORDER BY name').all();
 	const seen = new Set();
@@ -269,6 +279,7 @@ function summary(db) {
 		schema_version: databaseVersion(db),
 		database_format: db.prepare('SELECT format FROM app_metadata WHERE id=1').get().format,
 		dataset_id: db.prepare('SELECT dataset_id FROM app_metadata WHERE id=1').get().dataset_id,
+		stage_count: Number(db.prepare('SELECT COUNT(*) AS n FROM workflow_stages').get().n),
 		job_count: Number(db.prepare('SELECT COUNT(*) AS n FROM jobs').get().n),
 		update_count: Number(db.prepare('SELECT COUNT(*) AS n FROM job_updates').get().n),
 		...Object.fromEntries(
@@ -317,7 +328,30 @@ function validate(db) {
 		)
 			fail('invalid_backup', 'The backup failed database integrity or relationship checks.');
 		const data = dataset(db);
-		const active = new Map();
+		const jobIds = new Set();
+		const stageIds = new Map(data.workflow_stages.map((row) => [row.id, row]));
+		const names = new Set();
+		for (const stage of data.workflow_stages) {
+			parseSchema(recordIdSchema, stage.id);
+			if (
+				typeof stage.name !== 'string' ||
+				!stage.name.trim() ||
+				stage.name !== stage.name.trim() ||
+				stage.name.length > 80 ||
+				!Number.isSafeInteger(stage.sort_order) ||
+				stage.sort_order < 0 ||
+				![0, 1].includes(stage.is_closed) ||
+				![0, 1].includes(stage.is_archived)
+			)
+				throw new Error('stage');
+			if (!stage.is_archived) {
+				const name = normalizeStageName(stage.name);
+				if (names.has(name)) throw new Error('stage name');
+				names.add(name);
+			}
+		}
+		if (!data.workflow_stages.some((row) => !row.is_closed && !row.is_archived))
+			throw new Error('starting stage');
 		for (const job of data.jobs) {
 			parseSchema(recordIdSchema, job.id);
 			parseJobInput({
@@ -332,26 +366,24 @@ function validate(db) {
 				if (![0, 1].includes(job[field.name])) throw new Error('boolean');
 			}
 			parseAssessment(job);
-			active.set(job.id, true);
+			jobIds.add(job.id);
+			if (!stageIds.has(job.current_stage_id) || stageIds.get(job.current_stage_id).is_archived)
+				throw new Error('current stage');
+			if (
+				!data.job_updates.some(
+					(update) => update.job_id === job.id && update.stage_id === job.current_stage_id
+				)
+			)
+				throw new Error('current stage evidence');
 		}
 		for (const update of data.job_updates) {
+			parseSchema(recordIdSchema, update.id);
+			parseUpdateInput(update);
 			if (
-				!recordIdSchema.safeParse(update.id).success ||
-				!active.has(update.job_id) ||
-				!validDate(update.event_date)
+				!jobIds.has(update.job_id) ||
+				(update.stage_id !== null && !stageIds.has(update.stage_id))
 			)
-				throw new Error('update');
-			if (
-				update.event_type !== null &&
-				![...ordinaryEventTypes, 'dismissed', 'reopened'].includes(update.event_type)
-			)
-				throw new Error('event');
-			if (update.note !== null && (typeof update.note !== 'string' || update.note.length > 10000))
-				throw new Error('note');
-			if (update.event_type === null && !update.note?.trim()) throw new Error('note');
-			if (['accepted', 'rejected', 'dismissed'].includes(update.event_type))
-				active.set(update.job_id, false);
-			if (update.event_type === 'reopened') active.set(update.job_id, true);
+				throw new Error('history reference');
 		}
 		for (const row of data.networks ?? []) {
 			parseSchema(networkIdSchema, row.id);
@@ -367,7 +399,7 @@ function validate(db) {
 			);
 		}
 		for (const row of Object.entries(data)
-			.filter(([table]) => !['app_metadata', '$sequence'].includes(table))
+			.filter(([table]) => !['app_metadata', '$sequence', 'workflow_stages'].includes(table))
 			.flatMap(([, rows]) => rows)) {
 			if (
 				!['manual', 'mcp'].includes(row.created_via) ||
@@ -377,8 +409,13 @@ function validate(db) {
 			)
 				throw new Error('metadata');
 		}
-		if (data.jobs.some((job) => Boolean(job.is_active) !== active.get(job.id)))
-			throw new Error('state');
+		for (const row of data.workflow_stages)
+			if (
+				!['created_at', 'updated_at'].every(
+					(key) => typeof row[key] === 'string' && Number.isFinite(Date.parse(row[key]))
+				)
+			)
+				throw new Error('stage timestamp');
 		return summary(db);
 	} catch (error) {
 		if (error instanceof BackupError) throw error;
@@ -546,7 +583,7 @@ function insertData(db, data, preserveCounters = false) {
 		db.prepare('SELECT dataset_id FROM app_metadata WHERE id=1').get()?.dataset_id ===
 		data.app_metadata[0].dataset_id;
 	const previous = preserveCounters && sameDataset ? allocatorState(db) : {};
-	db.exec('DELETE FROM app_metadata');
+	db.exec('DELETE FROM app_metadata; DELETE FROM workflow_stages');
 	for (const [table, fields] of Object.entries(columnsFor())) {
 		const statement = db.prepare(
 			`INSERT INTO ${table} (${fields.join(',')}) VALUES (${fields.map(() => '?').join(',')})`
@@ -669,7 +706,7 @@ export function restoreBackup(restoreId, confirm, { now = Date.now(), beforeComm
 						fail('restore_stale', 'Current records changed after the preview. Prepare again.');
 					const recovery = snapshot('recovery', now);
 					db.exec(
-						'DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs;'
+						'DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs; DELETE FROM workflow_stages;'
 					);
 					insertData(db, incoming, true);
 					reserveJobFileIds(db);
@@ -777,7 +814,7 @@ export async function restoreDatabaseWithFiles(restoreId, fileOperation) {
 		const recovery = snapshot('recovery');
 		const files = await fileOperation(recovery, summary(stage));
 		db.exec(
-			'DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs;'
+			'DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs; DELETE FROM workflow_stages;'
 		);
 		insertData(db, dataset(stage), true);
 		reserveJobFileIds(db);

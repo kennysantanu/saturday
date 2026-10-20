@@ -79,7 +79,7 @@ const rules = [
 	},
 	{
 		name: 'Wrap use:enhance in enhanceWithFocus, withPending or a guard so the form shows progress',
-		test: /use:enhance(?!=\{(enhanceWithFocus|enhanceNetwork|guard\.enhance|withPending\())/,
+		test: /use:enhance(?!=\{(enhanceWithFocus|enhanceNetwork|(?:guard|[A-Za-z_$][\w$]*Guard)\.enhance|withPending\())/,
 		skip: () => false
 	}
 ];

@@ -1,3 +1,4 @@
+import { stageId, closeJob, reopenJob } from './workflow-fixture.mjs';
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
@@ -11,7 +12,7 @@ import * as n from '../src/lib/server/networks.js';
 import * as b from '../src/lib/server/backups.js';
 import * as pairs from '../src/lib/server/files/pairs.js';
 import { createDocument, getDocument } from '../src/lib/server/files/documents.js';
-import { createJob, getJob, dismissJob } from '../src/lib/server/services.js';
+import { createJob, getJob } from '../src/lib/server/services.js';
 import { migrateDatabase, withDatabase } from '../src/lib/server/database.js';
 import { applyMigrations, schemaVersion } from '../src/lib/server/migrations.js';
 import { ValidationError, localCalendarDate } from '../src/lib/server/validation.js';
@@ -195,7 +196,7 @@ test('many-to-many links are retry safe, scoped notes never change parents, inac
 		c = n.createNetwork({ name: 'Casey' }),
 		j = job(),
 		other = job();
-	dismissJob(other.id, '2026-01-01');
+	closeJob(other.id, '2026-01-01');
 	const beforeJob = getJob(j.id),
 		beforePerson = n.getNetwork(a.id);
 	const first = n.linkJobNetwork({ job_id: j.id, network_id: a.id, notes: ' Referrer ' }, 'mcp');

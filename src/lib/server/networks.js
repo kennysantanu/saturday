@@ -201,7 +201,7 @@ export function listNetworkJobs(input) {
 		person(db, values.network_id);
 		const { rows, ...pagination } = pageRows(
 			db,
-			`SELECT j.*, l.network_id, ${linkColumns} FROM jobs j JOIN job_networks l ON l.job_id=j.id WHERE l.network_id=?`,
+			`SELECT j.*, (1-s.is_closed) AS is_active, s.name AS current_stage_name, l.network_id, ${linkColumns} FROM jobs j JOIN workflow_stages s ON s.id=j.current_stage_id JOIN job_networks l ON l.job_id=j.id WHERE l.network_id=?`,
 			'SELECT COUNT(*) AS total FROM job_networks WHERE network_id=?',
 			[values.network_id],
 			values,

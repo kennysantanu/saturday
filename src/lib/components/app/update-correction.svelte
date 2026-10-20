@@ -1,143 +1,100 @@
 <script lang="ts">
-	import { tick } from 'svelte';
 	import { enhance } from '$app/forms';
-	import Pencil from '@lucide/svelte/icons/pencil';
-	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import Field from './field.svelte';
-	import NativeSelect from './native-select.svelte';
+	import { page } from '$app/state';
+	import JobHistoryFields from './job-history-fields.svelte';
+	import ConfirmDialog from './confirm-dialog.svelte';
 	import Notice from './notice.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import * as Dialog from '$lib/components/ui/dialog/index.js';
-	import { Input } from '$lib/components/ui/input/index.js';
-	import { Textarea } from '$lib/components/ui/textarea/index.js';
-	import { focusFirstError, withPending } from '$lib/forms';
-	import { UPDATE_CHOICES } from '$lib/status';
-
-	type Entry = {
-		id: number;
-		eventType: string | null;
-		label: string;
-		date: string;
-		note: string | null;
-	};
-	type FormValues = Record<string, string | undefined>;
-	type FormErrors = Record<string, string | undefined>;
+	import { enhanceWithFocus } from '$lib/forms';
 	let {
 		entry,
+		stages,
+		jobId,
+		historyGuard,
 		errors = {},
 		values = {}
-	}: { entry: Entry; errors?: FormErrors; values?: FormValues } = $props();
-
-	let open = $state(false);
-	let confirmingRemove = $state(false);
-	let eventType = $state('');
-
-	const isCurrentForm = $derived(values.update_id === String(entry.id));
-	const ownErrors = $derived(isCurrentForm ? errors : {});
-	const fieldValue = (name: string, fallback: string) =>
-		isCurrentForm ? (values[name] ?? fallback) : fallback;
-
-	// A failed correction reopens its own dialog so the error is next to the fields.
-	$effect(() => {
-		if (isCurrentForm && Object.keys(errors).length > 0) open = true;
+	}: {
+		entry: { id: number; stageId: number | null; date: string; note: string | null; label: string };
+		stages: { id: number; name: string; is_closed: boolean; is_archived: boolean }[];
+		jobId: number;
+		historyGuard: import('$lib/unsaved.svelte').UnsavedChanges;
+		errors?: Record<string, string | undefined>;
+		values?: Record<string, string | undefined>;
+	} = $props();
+	let deleting = $state(false);
+	const own = $derived(values.update_id === String(entry.id));
+	const ownErrors = $derived(own ? errors : {});
+	const draft = $derived({
+		stage_id: entry.stageId ? String(entry.stageId) : '',
+		event_date: entry.date,
+		note: entry.note ?? '',
+		...(own ? values : {})
 	});
 	$effect(() => {
-		if (open) eventType = fieldValue('event_type', entry.eventType ?? '');
-		else confirmingRemove = false;
+		if (own && Object.keys(ownErrors).length) deleting = false;
 	});
+	const action = $derived(
+		'?/correctUpdate' +
+			(page.url.searchParams.get('return_to')
+				? '&return_to=' + encodeURIComponent(page.url.searchParams.get('return_to')!)
+				: '')
+	);
 </script>
 
-<Dialog.Root bind:open>
-	<Dialog.Trigger>
-		{#snippet child({ props })}
-			<Button
-				{...props}
-				variant="ghost"
-				size="sm"
-				class="-my-1 -mr-2 shrink-0 text-muted-foreground"
-				aria-label="Edit update: {entry.label}"><Pencil data-icon="inline-start" />Edit</Button
-			>
-		{/snippet}
-	</Dialog.Trigger>
-
-	<Dialog.Content class="sm:max-w-md">
-		<form
-			method="POST"
-			action="?/correctUpdate"
-			use:enhance={withPending(() => async ({ result, update }) => {
-				await update();
-				if (result.type === 'redirect') {
-					open = false;
-					return;
-				}
-				confirmingRemove = false;
-				await tick();
-				focusFirstError();
-			})}
-			class="grid gap-5"
+<details class="disclosure" open={own && Object.keys(ownErrors).length > 0}>
+	<summary aria-label={'Edit history: ' + entry.label}>Edit history</summary>
+	<form
+		id={'history-' + entry.id}
+		method="POST"
+		{action}
+		use:enhance={historyGuard.enhance}
+		oninput={historyGuard.markDirty}
+		class="disclosure-body space-y-4"
+	>
+		<input type="hidden" name="update_id" value={entry.id} />
+		<input type="hidden" name="job_id" value={jobId} />
+		{#if ownErrors.form}<Notice tone="error" title="History was not changed"
+				>{ownErrors.form} <a href="#change-stage" class="link">Change stage first</a>.</Notice
+			>{/if}
+		<p class="text-sm">Correct history without changing the current stage.</p>
+		<p class="meta-text">* Required</p>
+		<JobHistoryFields
+			{stages}
+			prefix={'correction-' + entry.id}
+			today={entry.date}
+			values={draft}
+			errors={ownErrors}
+		/>
+		<div class="form-actions">
+			<Button type="button" variant="ghost" onclick={() => (deleting = true)}>Delete history</Button
+			><Button type="submit">Save history</Button>
+		</div>
+	</form>
+	<form
+		id={'delete-history-' + entry.id}
+		method="POST"
+		{action}
+		use:enhance={historyGuard.enhance}
+		oninput={historyGuard.markDirty}
+	>
+		<input type="hidden" name="update_id" value={entry.id} /><input
+			type="hidden"
+			name="remove"
+			value="1"
+		/>
+		<noscript
+			><p class="text-sm">Deletion is permanent. Confirm removal of this history entry.</p>
+			<Button type="submit" variant="destructive">Confirm delete history</Button></noscript
 		>
-			<input type="hidden" name="update_id" value={entry.id} />
-			{#if confirmingRemove}
-				<Dialog.Header>
-					<Dialog.Title>Remove this update?</Dialog.Title>
-					<Dialog.Description>
-						“{entry.label}” will be removed from History. This cannot be undone.
-					</Dialog.Description>
-				</Dialog.Header>
-				<Dialog.Footer>
-					<Button type="button" variant="ghost" onclick={() => (confirmingRemove = false)}
-						>Keep update</Button
-					>
-					<Button type="submit" name="remove" value="1" variant="destructive"
-						><Trash2 data-icon="inline-start" />Remove update</Button
-					>
-				</Dialog.Footer>
-			{:else}
-				<Dialog.Header>
-					<Dialog.Title>Edit update</Dialog.Title>
-					<Dialog.Description>Correct the details, or remove it from History.</Dialog.Description>
-				</Dialog.Header>
-				{#if ownErrors.form}<Notice tone="error" title="The change was not saved"
-						>{ownErrors.form}</Notice
-					>{/if}
-				<Field id="correction_type_{entry.id}" label="What happened?" error={ownErrors.event_type}>
-					{#snippet control(attrs)}
-						<NativeSelect {...attrs} name="event_type" bind:value={eventType}>
-							<option value="">Note</option>
-							{#each UPDATE_CHOICES.filter((choice) => choice.value !== 'note') as choice (choice.value)}
-								<option value={choice.value}>{choice.label}</option>
-							{/each}
-						</NativeSelect>
-					{/snippet}
-				</Field>
-				<Field id="correction_date_{entry.id}" label="Date" error={ownErrors.event_date}>
-					{#snippet control(attrs)}<Input
-							{...attrs}
-							name="event_date"
-							type="date"
-							value={fieldValue('event_date', entry.date)}
-						/>{/snippet}
-				</Field>
-				<Field id="correction_note_{entry.id}" label="Note" error={ownErrors.note}>
-					{#snippet control(attrs)}<Textarea
-							{...attrs}
-							name="note"
-							rows={3}
-							value={fieldValue('note', entry.note ?? '')}
-						/>{/snippet}
-				</Field>
-				<Dialog.Footer>
-					<Button
-						type="button"
-						variant="ghost"
-						class="text-destructive hover:bg-destructive/10 hover:text-destructive sm:mr-auto"
-						onclick={() => (confirmingRemove = true)}
-						><Trash2 data-icon="inline-start" />Remove</Button
-					>
-					<Button type="button" variant="ghost" onclick={() => (open = false)}>Cancel</Button>
-					<Button type="submit">Save correction</Button>
-				</Dialog.Footer>
-			{/if}
-		</form>
-	</Dialog.Content>
-</Dialog.Root>
+	</form>
+	<ConfirmDialog
+		bind:open={deleting}
+		title="Delete history?"
+		description={'Permanently delete ' +
+			entry.label +
+			'. This cannot be undone and does not change the current stage.'}
+		confirmLabel="Delete history"
+		formId={'delete-history-' + entry.id}
+		destructive
+	/>
+</details>

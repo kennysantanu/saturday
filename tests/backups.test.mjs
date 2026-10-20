@@ -1,3 +1,4 @@
+import { stageId, closeJob, reopenJob } from './workflow-fixture.mjs';
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -19,8 +20,6 @@ import { migrateDatabase, openDatabase, inTransaction } from '../src/lib/server/
 import {
 	createJob,
 	addJobUpdate,
-	dismissJob,
-	reopenJob,
 	getJob,
 	getDashboardStats,
 	editJob
@@ -63,13 +62,13 @@ function rows() {
 }
 function populated() {
 	const job = createJob({ job_title: 'Engineer', company_name: 'Acme' }, 'mcp');
-	for (const event_type of ['applied', 'interview_1', 'interview_1'])
-		addJobUpdate({ job_id: job.id, event_type, event_date: '2028-10-07' }, 'mcp');
-	dismissJob(job.id, '2026-10-05');
+	for (const name of ['Applied', 'Interview', 'Interview'])
+		addJobUpdate({ job_id: job.id, stage_id: stageId(name), event_date: '2028-10-07' }, 'mcp');
+	closeJob(job.id, '2026-10-05');
 	reopenJob(job.id, '2026-10-06');
 	addJobUpdate({ job_id: job.id, event_date: '2026-10-05', note: 'Context' }, 'manual');
 	const accepted = createJob({ job_title: 'Designer', company_name: 'Elsewhere' });
-	addJobUpdate({ job_id: accepted.id, event_type: 'accepted', event_date: '2026-10-05' });
+	addJobUpdate({ job_id: accepted.id, stage_id: stageId('Accepted'), event_date: '2026-10-05' });
 	return job;
 }
 test('populated round-trip preserves records, status, counts, insertion order and recovery', () => {
@@ -96,7 +95,7 @@ test('populated round-trip preserves records, status, counts, insertion order an
 	const db = raw();
 	assert.deepEqual(db.prepare('SELECT * FROM schema_migrations').all(), migrations);
 	db.close();
-	addJobUpdate({ job_id: job.id, event_type: 'offer', event_date: '2026-10-08' });
+	addJobUpdate({ job_id: job.id, stage_id: stageId('Offer'), event_date: '2026-10-08' });
 	assert.ok(rows().updates.at(-1).id > before.updates.at(-1).id);
 });
 test('empty backup restores a healthy installation', () => {
@@ -267,7 +266,9 @@ test('concurrent numeric allocations have distinct IDs and one dataset identity'
 	const results = (
 		await Promise.all(Array.from({ length: 4 }, () => completed(childScript(code))))
 	).map(JSON.parse);
-	for (const key of ['job', 'update', 'person', 'interaction'])
+	assert.equal(new Set(results.map((row) => row.update)).size, 4);
+	assert.equal(rows().updates.length, 8);
+	for (const key of ['job', 'person', 'interaction'])
 		assert.deepEqual(
 			results.map((row) => row[key]).sort((a, b) => a - b),
 			[1, 2, 3, 4]
@@ -299,7 +300,7 @@ test('restore preserves deleted allocation counters, dataset identity and stale 
 	assert.equal(createJob({ job_title: 'After restore', company_name: 'Example' }).id, 31);
 	assert.equal(
 		addJobUpdate({ job_id: first.id, event_date: '2000-01-01', note: 'Next update' }).id,
-		41
+		42
 	);
 	const check = raw();
 	assert.equal(check.prepare('SELECT dataset_id FROM app_metadata').get().dataset_id, identity);
@@ -315,9 +316,9 @@ test('two processes coordinate concurrent migrations', async () => {
 });
 test('live snapshots remain consistent while a separate process writes', async () => {
 	const writer =
-		childScript(`import {createJob,addJobUpdate,dismissJob,reopenJob} from './src/lib/server/services.js';
+		childScript(`import {createJob,addJobUpdate,moveJobStage} from './src/lib/server/services.js';
  for(let i=0;i<20;i++){const job=createJob({job_title:'Concurrent '+i,company_name:'Writer'});
- addJobUpdate({job_id:job.id,event_type:'applied',event_date:'2026-10-05'});dismissJob(job.id,'2026-10-05');reopenJob(job.id,'2026-10-05');
+ moveJobStage(job.id,{stage_id:2,event_date:'2020-01-01'});moveJobStage(job.id,{stage_id:8,event_date:'2020-01-01'});moveJobStage(job.id,{stage_id:1,event_date:'2020-01-01'});
  await new Promise(r=>setTimeout(r,3));}`);
 	const done = completed(writer);
 	for (let i = 0; i < 5; i++) {
@@ -537,7 +538,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			score_comment: 'Initial fit'
 		});
 		assert.equal(job.id, 1);
-		assert.equal(listing.tools.length, 43);
+		assert.equal(listing.tools.length, 47);
 		for (const name of [
 			'list_networks',
 			'get_network',
@@ -702,7 +703,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 		assert.equal(assessed.follow_up_comment, 'Check progress');
 		assert.equal(assessed.score_comment, 'Relevant experience');
 		assert.equal(assessed.score, 8.25);
-		assert.equal(assessed.updates.length, 0);
+		assert.equal(assessed.updates.length, 1);
 
 		const legacyList = await call('list_jobs', { query: 'Example' });
 		assert.equal(legacyList.jobs[0].id, job.id);
@@ -733,14 +734,31 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 		assert.equal((await call('get_job', { job_id: job.id })).follow_up_date, '2026-11-01');
 		await call('set_job_follow_up', { job_id: job.id, follow_up_date: null });
 		assert.equal((await call('get_job', { job_id: job.id })).follow_up_comment, null);
-		await call('add_job_update', {
+		await call('change_job_stage', {
 			job_id: job.id,
-			event_type: 'accepted',
+			stage_id: stageId('Accepted'),
 			event_date: '2026-10-01'
 		});
 		assert.equal((await call('list_jobs', { query: 'Example' })).total, 1);
 		assert.equal((await call('list_jobs', { query: 'Example', view: 'active' })).total, 0);
-		assert.equal((await call('list_jobs', { step: ['accepted'], view: 'active' })).total, 1);
+		assert.equal(
+			(await call('list_jobs', { milestone_stage: [stageId('Accepted')], view: 'active' })).total,
+			1
+		);
+		const stages = (await call('list_workflow_stages')).stages;
+		assert(stages.some((stage) => stage.name === 'Accepted' && stage.is_closed));
+		const historical = await call('add_job_update', {
+			job_id: job.id,
+			stage_id: stageId('Interview'),
+			event_date: '2099-01-01'
+		});
+		assert.equal((await call('get_job', { job_id: job.id })).current_stage_id, stageId('Accepted'));
+		await call('edit_job_update', {
+			job_id: job.id,
+			update_id: historical.id,
+			note: 'Scheduled conversation'
+		});
+		await call('delete_job_update', { job_id: job.id, update_id: historical.id, confirm: true });
 		const b = await call('create_backup');
 		assert.ok(b.backup_id);
 		const p = await call('prepare_restore', { backup_id: b.backup_id });

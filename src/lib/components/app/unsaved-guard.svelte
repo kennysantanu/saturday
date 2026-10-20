@@ -5,7 +5,7 @@
 	import type { UnsavedChanges } from '$lib/unsaved.svelte';
 
 	/** Asks before leaving a page with unsaved edits. Place once on the page. */
-	let { guard }: { guard: UnsavedChanges } = $props();
+	let { guard }: { guard: Pick<UnsavedChanges, 'dirty' | 'saving'> } = $props();
 	let open = $state(false);
 	let target = $state('');
 

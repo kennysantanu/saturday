@@ -36,7 +36,7 @@
 
 <PageShell title={`Edit ${job.title}`} width="form">
 	<PageHeader
-		back={{ href: `/jobs/${job.id}`, label: 'job' }}
+		back={{ href: `/jobs/${job.id}?return_to=${encodeURIComponent(data.returnTo)}`, label: 'job' }}
 		title="Edit job"
 		description="Update the details Saturday keeps for this job."
 	/>
@@ -46,7 +46,11 @@
 	<form method="POST" use:enhance={guard.enhance} oninput={guard.markDirty} class="space-y-6">
 		<JobFields value={current} {starred} {errors} mode="edit" detailsOpen />
 		<div class="form-actions justify-end">
-			<Button href="/jobs/{job.id}" variant="ghost" size="lg">Cancel</Button>
+			<Button
+				href={'/jobs/' + job.id + '?return_to=' + encodeURIComponent(data.returnTo)}
+				variant="ghost"
+				size="lg">Cancel</Button
+			>
 			<Button type="submit" size="lg">Save changes</Button>
 		</div>
 	</form>

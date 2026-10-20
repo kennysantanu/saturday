@@ -198,13 +198,17 @@ export function listJobs({ includeInactive = false, query = '', limit = 100 } = 
 }
 
 /** Paginated, read-only search. Status rules are shared with job detail and legacy lists. */
-export function searchJobs(input = {}) {
+export function searchJobs(input = {}, { jobId } = {}) {
 	const filters = parseSchema(jobSearchSchema, input);
 	return withDatabase((db) => {
 		// Keep history, records, and counts on one read snapshot while MCP may write.
 		db.exec('BEGIN');
 		const clauses = [];
 		const args = [];
+		if (jobId !== undefined) {
+			clauses.push('j.id=?');
+			args.push(parseRecordId(jobId, 'job_id'));
+		}
 		if (filters.view !== 'all') {
 			clauses.push('s.is_closed = ?');
 			args.push(filters.view === 'active' ? 0 : 1);

@@ -1,3 +1,4 @@
+import { createServer } from 'node:net';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -130,6 +131,14 @@ test('removal targets retain data by default and refuse uncertain custom ownersh
 });
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+async function freePort() {
+	const server = createServer();
+	await new Promise((r) => server.listen(0, '127.0.0.1', r));
+	const port = server.address().port;
+	await new Promise((r) => server.close(r));
+	return port;
+}
+
 test('fresh managed installation uses its descriptor for runtime preparation and starts the UI', async () => {
 	const temporary = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'saturday-fresh-install-')));
 	const root = join(temporary, 'Saturday ü');
@@ -140,6 +149,7 @@ test('fresh managed installation uses its descriptor for runtime preparation and
 	let runtimePrepared = false;
 	let setups = 0;
 	try {
+		process.env.PORT = String(await freePort());
 		await copySource(resolve('.'), source);
 		await fs.mkdir(root);
 		await fs.mkdir(desktop);
@@ -208,6 +218,7 @@ async function fixture() {
 	const env = {
 		...process.env,
 		SATURDAY_PROJECT_ROOT: app,
+		PORT: String(await freePort()),
 		SATURDAY_INSTALLATION_PATH: '',
 		SATURDAY_DB_PATH: '',
 		SATURDAY_FILES_PATH: '',
@@ -230,6 +241,7 @@ async function fixture() {
 	);
 	const descriptor = JSON.parse(setup.stdout).descriptor_path,
 		config = JSON.parse(await fs.readFile(descriptor));
+	config.port = Number(env.PORT);
 	config.build = readBuildInfo(resolve('.'));
 	config.code_owned = true;
 	config.code_fingerprint = await codeFingerprint(app);
