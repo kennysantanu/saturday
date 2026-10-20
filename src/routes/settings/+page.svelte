@@ -1,4 +1,5 @@
 <script lang="ts">
+	import WorkflowSettings from '$lib/components/app/workflow-settings.svelte';
 	import { checkAuthResponse } from '$lib/auth-notice.svelte';
 	import { tick } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
@@ -61,6 +62,7 @@
 		{ id: 'server', label: 'Server' },
 		{ id: 'password', label: 'Password' },
 		{ id: 'lan', label: 'LAN access' },
+		{ id: 'workflow', label: 'Workflow' },
 		{ id: 'backups', label: 'Backups' },
 		{ id: 'storage', label: 'Storage' },
 		{ id: 'assistant', label: 'Assistant' },
@@ -576,6 +578,12 @@
 				error={form?.lanError}
 				saved={form?.lanSaved}
 				lifecycle={serverState}
+			/>
+
+			<WorkflowSettings
+				stages={data.workflowStages}
+				unavailable={data.workflowError}
+				form={form ?? undefined}
 			/>
 
 			<SectionCard

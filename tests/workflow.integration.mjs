@@ -108,6 +108,80 @@ test('production stage/history actions, result round trips and read-only overvie
 			'/\\evil.test'
 		])
 			assert.equal(jobReturn(input), '/jobs');
+		const settingsPost = (values) =>
+			fetch(base + '/settings?/workflow', {
+				method: 'POST',
+				headers: {
+					origin: base,
+					accept: 'text/html',
+					'content-type': 'application/x-www-form-urlencoded'
+				},
+				body: new URLSearchParams(values)
+			});
+		const settingHtml = await (await fetch(base + '/settings#workflow')).text();
+		assert.equal((settingHtml.match(/id="workflow"/g) || []).length, 1);
+		assert.equal((await settingsPost({ kind: 'add', name: 'Conversation' })).status, 200);
+		const custom = listWorkflowStages().find((s) => s.name === 'Conversation');
+		assert.equal(
+			(await settingsPost({ kind: 'rename', stage_id: custom.id, name: 'Referral' })).status,
+			200
+		);
+		assert.equal(
+			(await settingsPost({ kind: 'closure', stage_id: custom.id, is_closed: '1' })).status,
+			200
+		);
+		assert.equal(listWorkflowStages().find((s) => s.id === custom.id).is_closed, true);
+		assert.equal((await settingsPost({ kind: 'archive', stage_id: custom.id })).status, 200);
+		assert.equal((await settingsPost({ kind: 'restore', stage_id: custom.id })).status, 200);
+		const applied = listWorkflowStages().find((s) => s.name === 'Applied');
+		const needsConfirm = await settingsPost({
+			kind: 'reorder',
+			stage_id: applied.id,
+			direction: 'up'
+		});
+		assert.equal(needsConfirm.status, 400);
+		assert((await needsConfirm.text()).includes('workflow-confirm'));
+		assert.equal(listWorkflowStages().find((s) => s.is_starting).id, job.currentStageId);
+		assert.equal(
+			(
+				await settingsPost({
+					kind: 'reorder',
+					stage_id: applied.id,
+					direction: 'up',
+					confirm_starting_stage: '1'
+				})
+			).status,
+			200
+		);
+		assert.equal(
+			createJob({ job_title: 'New starting stage', company_name: 'Test' }).currentStageId,
+			applied.id
+		);
+		assert.equal(getJob(job.id).currentStageId, closed.id);
+		assert.equal(
+			(await settingsPost({ kind: 'closure', stage_id: job.currentStageId, is_closed: '1' }))
+				.status,
+			400
+		);
+		assert.equal((await settingsPost({ kind: 'archive', stage_id: closed.id })).status, 400);
+		assert.equal(
+			(await settingsPost({ kind: 'archive', stage_id: job.currentStageId })).status,
+			200
+		);
+		assert.equal((await settingsPost({ kind: 'add', name: 'New' })).status, 200);
+		assert.equal(
+			(await settingsPost({ kind: 'restore', stage_id: job.currentStageId })).status,
+			400
+		);
+		assert.equal(
+			(await settingsPost({ kind: 'rename', stage_id: job.currentStageId, name: 'Old new' }))
+				.status,
+			200
+		);
+		assert.equal(
+			(await settingsPost({ kind: 'restore', stage_id: job.currentStageId })).status,
+			200
+		);
 		if (!existsSync(await puppeteer.executablePath())) {
 			t.diagnostic('Managed Chrome unavailable; native HTTP checks passed.');
 			return;
@@ -138,6 +212,47 @@ test('production stage/history actions, result round trips and read-only overvie
 		await page.goto(base + '/jobs', { waitUntil: 'networkidle0' });
 		assert(await page.$eval('html', (el) => el.scrollWidth <= innerWidth + 1));
 		await page.screenshot({ path: '/tmp/saturday-workflow-jobs-phone.png', fullPage: true });
+		await page.setViewport({ width: 1280, height: 960 });
+		await page.goto(base + '/settings#workflow', { waitUntil: 'networkidle0' });
+		await page.click(`#workflow-stage-${custom.id} summary`);
+		await page.locator(`#workflow-name-${custom.id}`).fill('Conversation again');
+		await page.click(
+			`#workflow-stage-${custom.id} form:has(input[value="rename"]) button[type="submit"]`
+		);
+		await page.waitForFunction(() =>
+			document.querySelector('#workflow')?.textContent.includes('Workflow saved')
+		);
+		assert.equal(listWorkflowStages().find((s) => s.id === custom.id).name, 'Conversation again');
+		const screening = listWorkflowStages().find((s) => s.name === 'Screening');
+		await page.click(`#workflow-stage-${screening.id} form:has(input[value="up"]) button`);
+		await page.waitForSelector('button[form="workflow-confirm"]');
+		await page.click('button[form="workflow-confirm"]');
+		await page.waitForFunction(
+			(id) =>
+				document.querySelector('#workflow-stage-' + id)?.textContent.includes('Starting stage'),
+			{},
+			screening.id
+		);
+		assert.equal(listWorkflowStages().find((s) => s.is_starting).id, screening.id);
+		await page.$eval('#workflow-new-name', (el) => (el.closest('details').open = true));
+		await page.type('#workflow-new-name', 'Applied');
+		await page.click('#workflow form:has(input[value="add"]) button[type="submit"]');
+		await page.waitForSelector('#workflow-new-name[aria-invalid="true"]');
+		assert.equal(await page.$eval('#workflow-new-name', (el) => el.value), 'Applied');
+		await page.locator('#workflow-new-name').fill('Phone screen');
+		await page.click('#workflow form:has(input[value="add"]) button[type="submit"]');
+		await page.waitForFunction(() =>
+			Array.from(document.querySelectorAll('#workflow li')).some((li) =>
+				li.textContent.includes('Phone screen')
+			)
+		);
+		await page.evaluate(() => document.querySelector('#workflow').scrollIntoView());
+		await new Promise((r) => setTimeout(r, 300));
+		await page.screenshot({ path: '/tmp/saturday-workflow-settings-desktop.png' });
+		await page.setViewport({ width: 320, height: 900 });
+		await page.goto(base + '/settings#workflow', { waitUntil: 'networkidle0' });
+		assert(await page.$eval('html', (el) => el.scrollWidth <= innerWidth + 1));
+		await page.screenshot({ path: '/tmp/saturday-workflow-settings-phone.png' });
 		assert.deepEqual(errors, []);
 	} finally {
 		await browser?.close();

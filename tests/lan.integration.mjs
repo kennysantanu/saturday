@@ -169,6 +169,13 @@ test('LAN opt-in, pending restart, all password modes, actual network origins, a
 			).status,
 			403
 		);
+		const workflowChange = await http(lan, '/settings?/workflow', {
+			method: 'POST',
+			fields: { kind: 'add', name: 'LAN workflow stage' },
+			headers: { origin: lan, accept: 'text/html' }
+		});
+		assert.equal(workflowChange.status, 200, 'workflow data controls remain available on LAN');
+		assert(workflowChange.text.includes('LAN workflow stage'));
 		const phoneSettings = await http(lan, '/settings');
 		assert.equal(phoneSettings.status, 200);
 		assert.ok(

@@ -243,3 +243,43 @@ test('workflow configuration changes invalidate an existing restore preview', ()
 	);
 	assert(stage('Phone screen'));
 });
+
+test('archive races with stage moves and job creation preserve available current placement', async () => {
+	const serviceUrl = new URL('../src/lib/server/services.js', import.meta.url).href;
+	const workflowUrl = new URL('../src/lib/server/workflow.js', import.meta.url).href;
+	const run = (body) =>
+		new Promise((resolve, reject) => {
+			const code = `import * as jobs from ${JSON.stringify(serviceUrl)};import * as workflow from ${JSON.stringify(workflowUrl)};try{console.log(JSON.stringify({ok:true,result:(${body})}));}catch(e){console.log(JSON.stringify({ok:false,error:e.message}));}`;
+			const child = spawn(process.execPath, ['--input-type=module', '-e', code], {
+				env: process.env,
+				stdio: ['ignore', 'pipe', 'pipe']
+			});
+			let output = '',
+				errors = '';
+			child.stdout.on('data', (data) => (output += data));
+			child.stderr.on('data', (data) => (errors += data));
+			child.on('error', reject);
+			child.on('exit', (exit) =>
+				exit === 0 ? resolve(JSON.parse(output)) : reject(new Error(errors))
+			);
+		});
+	const screening = stage('Screening').id,
+		j = job();
+	const results = await Promise.all([
+		run(`jobs.moveJobStage(${j.id},{stage_id:${screening},event_date:'2020-01-01'})`),
+		run(`workflow.archiveWorkflowStage(${screening})`)
+	]);
+	assert.equal(results.filter((result) => result.ok).length, 1);
+	const saved = getJob(j.id);
+	assert.equal(saved.currentStage.is_archived, false);
+	assert(saved.updates.some((entry) => entry.stageId === saved.currentStageId));
+	// Retire the unused first stage while a separate process creates a job.
+	move(j.id, 'Offer');
+	const initial = stage('New').id;
+	const creation = await Promise.all([
+		run(`jobs.createJob({job_title:'Race',company_name:'Test'})`),
+		run(`workflow.archiveWorkflowStage(${initial},{confirm_starting_stage:true})`)
+	]);
+	assert.equal(creation[0].ok, true);
+	assert.equal(getJob(creation[0].result.id).currentStage.is_archived, false);
+});
