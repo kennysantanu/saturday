@@ -1,5 +1,5 @@
 // All stored job fields. Forms stay inline; immutable migrations remain the schema source.
-// All current fields belong to the numeric baseline (schema 1). `edit` controls input access.
+// All current fields belong to the workflow baseline (schema 1). `edit` controls input access.
 export const jobFields = [
 	{ name: 'id', key: 'id', type: 'id', label: 'Job ID', edit: 'system', since: 1, list: true },
 	{
@@ -56,11 +56,10 @@ export const jobFields = [
 		since: 1
 	},
 	{
-		name: 'is_active',
-		key: 'isActive',
-		type: 'boolean',
-		label: 'Active',
-		default: true,
+		name: 'current_stage_id',
+		key: 'currentStageId',
+		type: 'id',
+		label: 'Current stage',
 		edit: 'system',
 		since: 1,
 		list: true
@@ -230,9 +229,13 @@ export function jobToStorage(values, fields = jobFields) {
 	);
 }
 export function jobForMcp(job, { list = false } = {}) {
-	return Object.fromEntries(
-		jobFields
-			.filter((field) => !list || field.list)
-			.map((field) => [field.mcpKey ?? field.name, job[field.key]])
-	);
+	return {
+		is_active: job.isActive,
+		current_stage: job.currentStage,
+		...Object.fromEntries(
+			jobFields
+				.filter((field) => !list || field.list)
+				.map((field) => [field.mcpKey ?? field.name, job[field.key]])
+		)
+	};
 }

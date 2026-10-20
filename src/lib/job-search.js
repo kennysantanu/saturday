@@ -1,26 +1,4 @@
 import { jobFields } from './job-fields.js';
-import { EVENT_LABELS } from './event-labels.js';
-
-export const statusOptions = [
-	{ value: 'new', label: 'New' },
-	...[
-		'applied',
-		'prescreened',
-		'interview_1',
-		'interview_2',
-		'offer',
-		'accepted',
-		'rejected',
-		'dismissed'
-	].map((value) => ({
-		value,
-		label:
-			{ offer: 'Offer', accepted: 'Accepted', rejected: 'Rejected' }[value] ?? EVENT_LABELS[value]
-	}))
-];
-export const stepOptions = statusOptions
-	.filter((option) => option.value !== 'new')
-	.map((option) => ({ ...option, label: EVENT_LABELS[option.value] }));
 export const workOptions =
 	jobFields.find((field) => field.name === 'work_arrangement').options ?? [];
 export const employmentOptions =
@@ -40,8 +18,8 @@ export const defaultJobFilters = {
 	location: '',
 	source: '',
 	view: 'active',
-	status: [],
-	step: [],
+	current_stage: [],
+	milestone_stage: [],
 	starred: 'all',
 	work_arrangement: [],
 	employment_type: [],
@@ -70,7 +48,13 @@ export function searchFromUrl(params) {
 			.filter((key) => params.has(key))
 			.map((key) => [
 				key,
-				['status', 'step', 'work_arrangement', 'employment_type', 'created_via'].includes(key)
+				[
+					'current_stage',
+					'milestone_stage',
+					'work_arrangement',
+					'employment_type',
+					'created_via'
+				].includes(key)
 					? params.getAll(key)
 					: params.get(key)
 			])
@@ -91,17 +75,17 @@ export function searchUrl(values, page = 1) {
 	return `/jobs${params.size ? `?${params}` : ''}`;
 }
 
-export function filterChips(values) {
+export function filterChips(values, stages = []) {
 	const defaults = defaultJobFilters;
 	const labels = {
-		query: 'Title or company',
+		query: 'Search jobs',
 		title: 'Title contains',
 		company: 'Company contains',
 		location: 'Location contains',
 		source: 'Source contains',
 		view: 'Activity',
-		status: 'Current status',
-		step: 'Ever reached',
+		current_stage: 'Current stage',
+		milestone_stage: 'Milestone history',
 		starred: 'Starred',
 		work_arrangement: 'Work arrangement',
 		employment_type: 'Employment type',
@@ -126,7 +110,7 @@ export function filterChips(values) {
 			value === undefined ||
 			value === '' ||
 			value === defaults[key] ||
-			(key === 'view' && values.step.length)
+			(key === 'view' && (values.current_stage.length || values.milestone_stage.length))
 		)
 			return [];
 		const selections = Array.isArray(value) ? value : [value];
@@ -135,17 +119,19 @@ export function filterChips(values) {
 				...values,
 				[key]: Array.isArray(value) ? value.filter((item) => item !== selection) : defaults[key]
 			};
-			if (key === 'step' && !next.step.length) next.view = 'active';
+			if (
+				['current_stage', 'milestone_stage'].includes(key) &&
+				!next.current_stage.length &&
+				!next.milestone_stage.length
+			)
+				next.view = 'active';
 			if (key === 'follow_up' || key === 'deadline') {
 				next[`${key}_from`] = '';
 				next[`${key}_to`] = '';
 			}
 			let name = selection;
-			if (key === 'status' || key === 'step')
-				name =
-					(key === 'step' ? stepOptions : statusOptions).find(
-						(option) => option.value === selection
-					)?.label ?? selection;
+			if (key === 'current_stage' || key === 'milestone_stage')
+				name = stages.find((stage) => String(stage.id) === String(selection))?.name ?? selection;
 			else if (selection === 'unset')
 				name = key === 'follow_up' ? 'Not scheduled' : 'Not specified';
 			else if (selection === 'not_starred') name = 'Not starred';

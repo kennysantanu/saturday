@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-export const databaseFormat = 'saturday.database.numeric';
+export const databaseFormat = 'saturday.database.workflow';
 
 export const migrations = [
 	{
 		version: 1,
-		name: 'create_numeric_id_baseline',
+		name: 'create_workflow_baseline',
 		sql: `
 CREATE TABLE app_metadata (
  id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -14,14 +14,41 @@ CREATE TABLE app_metadata (
  dataset_id TEXT NOT NULL
 );
 
+CREATE TABLE workflow_stages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT
+    CHECK (id BETWEEN 1 AND 9007199254740991),
+  name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 80),
+  sort_order INTEGER NOT NULL CHECK (sort_order >= 0),
+  is_closed INTEGER NOT NULL DEFAULT 0 CHECK (is_closed IN (0, 1)),
+  is_archived INTEGER NOT NULL DEFAULT 0 CHECK (is_archived IN (0, 1)),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX workflow_stages_order
+  ON workflow_stages(is_archived, is_closed, sort_order, id);
+
+INSERT INTO workflow_stages(name, sort_order, is_closed, created_at, updated_at) VALUES
+  ('New', 0, 0, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  ('Applied', 1, 0, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  ('Screening', 2, 0, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  ('Interview', 3, 0, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  ('Offer', 4, 0, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  ('Accepted', 5, 1, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  ('Rejected', 6, 1, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  ('Dismissed', 7, 1, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+
 CREATE TABLE jobs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT CHECK (id BETWEEN 1 AND 9007199254740991),
+  id INTEGER PRIMARY KEY AUTOINCREMENT
+    CHECK (id BETWEEN 1 AND 9007199254740991),
   job_title TEXT NOT NULL,
   company_name TEXT NOT NULL,
   posting_url TEXT,
   job_description TEXT,
   notes TEXT,
-  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+
+  current_stage_id INTEGER NOT NULL REFERENCES workflow_stages(id) ON DELETE RESTRICT,
+
   created_via TEXT NOT NULL CHECK (created_via IN ('manual', 'mcp')),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -38,29 +65,29 @@ CREATE TABLE jobs (
   score_comment TEXT
 );
 
+CREATE INDEX jobs_current_stage ON jobs(current_stage_id, id);
+CREATE INDEX jobs_follow_up ON jobs(follow_up_date)
+  WHERE follow_up_date IS NOT NULL;
+CREATE INDEX jobs_application_deadline ON jobs(application_deadline)
+  WHERE application_deadline IS NOT NULL;
+
 CREATE TABLE job_updates (
-  id INTEGER PRIMARY KEY AUTOINCREMENT CHECK (id BETWEEN 1 AND 9007199254740991),
+  id INTEGER PRIMARY KEY AUTOINCREMENT
+    CHECK (id BETWEEN 1 AND 9007199254740991),
   job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE RESTRICT,
-  event_type TEXT CHECK (event_type IN
-    ('applied', 'prescreened', 'interview_1', 'interview_2',
-      'offer', 'accepted', 'rejected', 'dismissed', 'reopened')),
+  stage_id INTEGER REFERENCES workflow_stages(id) ON DELETE RESTRICT,
   event_date TEXT NOT NULL,
   note TEXT,
   created_via TEXT NOT NULL CHECK (created_via IN ('manual', 'mcp')),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  CHECK (event_type IS NOT NULL OR (note IS NOT NULL AND length(trim(note)) > 0))
+  CHECK (stage_id IS NOT NULL OR length(trim(COALESCE(note, ''))) > 0)
 );
 
 CREATE INDEX job_updates_timeline
   ON job_updates(job_id, event_date DESC, id DESC);
-
-CREATE INDEX job_updates_by_type
-  ON job_updates(event_type, job_id);
-
-
-CREATE INDEX jobs_follow_up ON jobs(follow_up_date) WHERE is_active = 1 AND follow_up_date IS NOT NULL;
-CREATE INDEX jobs_application_deadline ON jobs(application_deadline) WHERE is_active = 1 AND application_deadline IS NOT NULL;
+CREATE INDEX job_updates_by_stage
+  ON job_updates(stage_id, job_id) WHERE stage_id IS NOT NULL;
 
 CREATE TABLE networks (
  id INTEGER PRIMARY KEY AUTOINCREMENT CHECK (id BETWEEN 1 AND 9007199254740991),
@@ -100,7 +127,7 @@ const migrationTable = `CREATE TABLE IF NOT EXISTS schema_migrations (
 );`;
 const unsupported = () => {
 	throw new Error(
-		'Unsupported database schema. This development build requires the numeric-ID baseline. Use a compatible build or explicitly reset development data; startup never resets it.'
+		'Unsupported database schema. This development build requires the workflow baseline. Use a compatible build or explicitly reset development data; startup never resets it.'
 	);
 };
 const signature = (db) =>
