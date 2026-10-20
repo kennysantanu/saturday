@@ -145,7 +145,7 @@ export function validateDistribution(metadata) {
 	if (
 		metadata?.installation_api !== 1 ||
 		!/^\d+\.\d+\.\d+$/.test(metadata.node_minimum || '') ||
-		metadata.storage?.database?.format !== 'saturday.database.numeric' ||
+		metadata.storage?.database?.format !== 'saturday.database.workflow' ||
 		metadata.storage?.manifest?.format !== 'saturday.files.numeric'
 	)
 		throw new Error(

@@ -82,7 +82,7 @@
 		"node_minimum": "22.13.0",
 		"storage": {
 			"database": {
-				"format": "saturday.database.numeric",
+				"format": "saturday.database.workflow",
 				"minimumVersion": 1,
 				"currentVersion": 1
 			},

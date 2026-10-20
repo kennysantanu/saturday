@@ -1,12 +1,5 @@
 import { z } from 'zod';
-import {
-	statusOptions,
-	stepOptions,
-	workOptions,
-	employmentOptions,
-	sortOptions,
-	dateModes
-} from '../job-search.js';
+import { workOptions, employmentOptions, sortOptions, dateModes } from '../job-search.js';
 import { editableJobFields, assessmentJobFields } from '../job-fields.js';
 
 export class ValidationError extends Error {
@@ -136,29 +129,18 @@ export const followUpMcpSchema = z.object({
 	follow_up_comment: jobMcpInputShape().follow_up_comment
 });
 
-const ordinaryEventTypes = [
-	'applied',
-	'prescreened',
-	'interview_1',
-	'interview_2',
-	'offer',
-	'accepted',
-	'rejected'
-];
-
 const updateSchema = z
 	.object({
 		job_id: recordIdInputSchema,
-		event_type: z
-			.enum(ordinaryEventTypes)
-			.nullable()
-			.optional()
-			.transform((value) => value ?? null),
+		stage_id: z.preprocess(
+			(value) => (value === '' || value == null ? null : value),
+			recordIdInputSchema.nullable()
+		),
 		event_date: z.string().trim().refine(validDate, 'Enter a real date in YYYY-MM-DD format.'),
 		note: optionalText(10000, 'Note')
 	})
 	.superRefine((value, ctx) => {
-		if (!value.event_type && !value.note) {
+		if (!value.stage_id && !value.note) {
 			ctx.addIssue({ code: 'custom', path: ['note'], message: 'Enter a note.' });
 		}
 	});
@@ -194,7 +176,7 @@ export function parseEventDate(input) {
 	});
 }
 
-export { ordinaryEventTypes, validDate };
+export { validDate };
 
 const multiple = (options) =>
 	z
@@ -226,9 +208,15 @@ export const jobSearchShape = {
 	company: text,
 	location: text,
 	source: text,
-	view: z.enum(['active', 'inactive', 'all']).default('active'),
-	status: multiple(statusOptions.map((option) => option.value)),
-	step: multiple(stepOptions.map((option) => option.value)),
+	view: z.enum(['active', 'closed', 'all']).default('active'),
+	current_stage: z
+		.array(recordIdInputSchema)
+		.default([])
+		.transform((values) => [...new Set(values)]),
+	milestone_stage: z
+		.array(recordIdInputSchema)
+		.default([])
+		.transform((values) => [...new Set(values)]),
 	starred: z.enum(['all', 'starred', 'not_starred']).default('all'),
 	work_arrangement: multiple([...workOptions, 'unset']),
 	employment_type: multiple([...employmentOptions, 'unset']),
@@ -280,7 +268,7 @@ export const jobSearchSchema = z
 	})
 	.transform((values) => ({
 		...values,
-		view: values.step.length ? 'all' : values.view,
+		view: values.current_stage.length || values.milestone_stage.length ? 'all' : values.view,
 		follow_up_from: values.follow_up === 'range' ? values.follow_up_from : '',
 		follow_up_to: values.follow_up === 'range' ? values.follow_up_to : '',
 		deadline_from: values.deadline === 'range' ? values.deadline_from : '',
