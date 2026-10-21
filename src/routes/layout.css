@@ -1,6 +1,18 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
+/* One dark variant for palettes and primitives, including the no-JavaScript system fallback. */
+@custom-variant dark {
+	&:where([data-theme='dark'], [data-theme='dark'] *) {
+		@slot;
+	}
+	@media (prefers-color-scheme: dark) {
+		&:where(:root:not([data-theme]), :root:not([data-theme]) *) {
+			@slot;
+		}
+	}
+}
+
 /* Apple-inspired web materials. Glass belongs to the functional layer (top bar, tab bar,
    toast, dialog); job content uses opaque surfaces. See docs/design-guide.md for sources. */
 :root {
@@ -44,8 +56,8 @@
 	--tabbar-h: 64px;
 }
 
-@media (prefers-color-scheme: dark) {
-	:root {
+:root {
+	@variant dark {
 		color-scheme: dark;
 		--background: #14171d;
 		--foreground: #f0f2f7;
@@ -1251,11 +1263,13 @@ form[aria-busy='true'] [data-slot='button'][type='submit']::after {
 		outline-offset: -2px;
 	}
 }
-@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+@media (prefers-contrast: more) {
 	:root {
-		--muted-foreground: #e0e7f2;
-		--border: #97a4b9;
-		--glass-edge: #97a4b9;
+		@variant dark {
+			--muted-foreground: #e0e7f2;
+			--border: #97a4b9;
+			--glass-edge: #97a4b9;
+		}
 	}
 }
 @media (prefers-reduced-motion: reduce) {

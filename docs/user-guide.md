@@ -94,6 +94,10 @@ On a job, choose **Manage documents** to upload/create attachments or **Copy to 
 
 To export a resume, save self-contained HTML and choose **Generate PDF** from its preview. Saturday saves a new PDF beside the HTML; existing PDFs are preserved with numbered filenames. Later HTML edits do not update previous PDFs. Scripts and external resources are blocked, so use self-contained print CSS and installed fonts. PDF generation requires Chrome prepared during setup.
 
+## Appearance
+
+Open **Settings → Appearance → Theme** and choose **System**, **Light**, or **Dark**. Changes apply immediately and are remembered in this browser for this Saturday address; other devices can use different choices. System is the default and follows your device’s appearance as it changes. Tabs at the same address stay in sync. No restart is needed. If JavaScript or browser storage is unavailable, Saturday follows the system theme.
+
 ## Data and assistant connection
 
 **Settings → Local database** shows the actual data path and **Open folder** action. Expand **Diagnostics** for build, storage versions, descriptor, backup/recovery, and log paths. Source setup normally uses the repository's `data/`; managed installs use a separate [per-user installation root](installation-guide.md#data-locations-and-installation-descriptor). Repeating setup preserves data. Missing initialized storage requires repair/recovery, not a reset.

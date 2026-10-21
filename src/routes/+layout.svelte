@@ -1,5 +1,7 @@
 <script lang="ts">
 	import './layout.css';
+	import { onMount } from 'svelte';
+	import { initializeTheme } from '$lib/theme.svelte';
 	import favicon from '$lib/assets/favicon.svg';
 	import { afterNavigate, onNavigate, replaceState } from '$app/navigation';
 	import { page } from '$app/state';
@@ -17,6 +19,7 @@
 	import Settings from '@lucide/svelte/icons/settings';
 
 	let { children, data } = $props();
+	onMount(initializeTheme);
 
 	// Explicit imports keep the bundle limited to the icons this app uses.
 	setLucideProps({ size: 20, strokeWidth: 2, color: 'currentColor' });
