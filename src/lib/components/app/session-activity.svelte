@@ -81,7 +81,8 @@
 		const focus = () => {
 			void check();
 		};
-		const events = ['pointerdown', 'pointermove', 'keydown', 'input', 'scroll'];
+		// Local carousels handle wheel gestures without native scrolling or navigation.
+		const events = ['pointerdown', 'pointermove', 'keydown', 'input', 'scroll', 'wheel'];
 		for (const name of events)
 			document.addEventListener(name, activity, { passive: true, capture: true });
 		window.addEventListener('pageshow', restore);

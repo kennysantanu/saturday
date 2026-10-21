@@ -60,6 +60,63 @@ test('browser password controls, responsive sign-in and expired-write draft pres
 			errors = [];
 		page.on('pageerror', (error) => errors.push(error.message));
 		await page.setViewport({ width: 1280, height: 960 });
+		await page.goto(base + '/jobs/new', { waitUntil: 'networkidle0' });
+		await page.type('input[name="job_title"]', 'Trackpad activity check');
+		await page.type('input[name="company_name"]', 'Browser fixture');
+		await page.click('button[type="submit"]');
+		await page.waitForFunction(() => /^\/jobs\/\d+$/.test(location.pathname));
+
+		async function checkWheelActivity(expectedHeartbeats) {
+			const dashboard = await browser.newPage();
+			let input;
+			try {
+				await dashboard.setViewport({ width: 1280, height: 960 });
+				await dashboard.bringToFront();
+				await dashboard.goto(base + '/#job-pipeline', { waitUntil: 'networkidle0' });
+				const before = await dashboard.evaluate(() => ({
+					url: location.href,
+					history: history.length,
+					stage: document.querySelector('.pipeline-heading').id
+				}));
+				const heartbeats = [];
+				dashboard.on('request', (request) => {
+					if (new URL(request.url()).pathname === '/auth/activity') heartbeats.push(request);
+				});
+				// Scripted events cannot renew a session, even on the carousel.
+				await dashboard.$eval('.pipeline-board', (el) =>
+					el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaX: 1 }))
+				);
+				await dashboard.waitForNetworkIdle({ idleTime: 300 });
+				assert.equal(heartbeats.length, 0);
+				const point = await dashboard.$eval('.pipeline-column', (el) => {
+					const r = el.getBoundingClientRect();
+					return { x: r.left + r.width / 2, y: r.top + 30 };
+				});
+				// A real wheel event without moving the pointer or pressing a key first.
+				input = await dashboard.createCDPSession();
+				for (let i = 0; i < 4; i++)
+					await input.send('Input.dispatchMouseEvent', {
+						type: 'mouseWheel',
+						...point,
+						deltaX: 80,
+						deltaY: 0
+					});
+				await dashboard.waitForNetworkIdle({ idleTime: 300 });
+				assert.notEqual(await dashboard.$eval('.pipeline-heading', (el) => el.id), before.stage);
+				assert.equal(dashboard.url(), before.url);
+				assert.equal(await dashboard.evaluate(() => history.length), before.history);
+				assert.equal(
+					heartbeats.length,
+					expectedHeartbeats,
+					'finite sessions renew once per burst; No expiration sends no activity heartbeat'
+				);
+				assert(heartbeats.every((request) => request.method() === 'POST'));
+			} finally {
+				await input?.detach();
+				await dashboard.close();
+				await page.bringToFront();
+			}
+		}
 		await page.goto(base + '/settings#password', { waitUntil: 'networkidle0' });
 		await page.type('#enable-password', password);
 		await page.type('#enable-confirm', password);
@@ -84,6 +141,8 @@ test('browser password controls, responsive sign-in and expired-write draft pres
 		await page.click('form[action="?/password"] button[type="submit"]');
 		await page.waitForSelector('#logout-all');
 		await page.waitForNetworkIdle();
+		step = 'finite-timeout trackpad activity';
+		await checkWheelActivity(1);
 		await page.click('input[name="no_expiration"]');
 		assert.equal(await page.$eval('input[name="no_expiration"]', (element) => element.value), 'on');
 		await page.click('form[action="?/password"] button[type="submit"]');
@@ -93,6 +152,8 @@ test('browser password controls, responsive sign-in and expired-write draft pres
 		);
 		await page.waitForNetworkIdle();
 		assert.equal(await page.$eval('input[name="hours"]', (element) => element.disabled), true);
+		step = 'no-expiration trackpad activity';
+		await checkWheelActivity(0);
 		await Promise.all([
 			page.waitForNavigation({ waitUntil: 'networkidle0' }),
 			page.click('form[action="?/logout"] button[type="submit"]')
