@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ThemeSettings from '$lib/components/app/theme-settings.svelte';
 	import WorkflowSettings from '$lib/components/app/workflow-settings.svelte';
 	import { checkAuthResponse } from '$lib/auth-notice.svelte';
 	import { tick } from 'svelte';
@@ -58,6 +59,7 @@
 
 	// Order matches the page order below.
 	const sections = [
+		{ id: 'appearance', label: 'Appearance' },
 		{ id: 'updates', label: 'Updates' },
 		{ id: 'server', label: 'Server' },
 		{ id: 'password', label: 'Password' },
@@ -68,7 +70,7 @@
 		{ id: 'assistant', label: 'Assistant' },
 		{ id: 'extensions', label: 'Extensions' }
 	];
-	let activeSection = $state('lan');
+	let activeSection = $state('appearance');
 	let sectionNav = $state<HTMLElement>();
 
 	function updateActiveSection() {
@@ -257,7 +259,7 @@
 <PageShell title="Settings">
 	<PageHeader
 		title="Settings"
-		description="Your assistant connection, backups, and local storage."
+		description="Appearance, your assistant connection, backups, and local storage."
 	/>
 
 	<div class="settings-layout">
@@ -271,6 +273,7 @@
 		</nav>
 
 		<div class="settings-sections space-y-8">
+			<ThemeSettings />
 			<SectionCard
 				id="updates"
 				title="Updates and installation"

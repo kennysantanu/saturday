@@ -4,6 +4,24 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 		<meta name="text-scale" content="scale" />
+		<script nonce="%sveltekit.nonce%">
+			// Apply before styles/body render; keep the storage key and choices in sync with theme.svelte.ts.
+			(() => {
+				let theme = 'system';
+				try {
+					const saved = localStorage.getItem('saturday-theme');
+					if (saved === 'light' || saved === 'dark') theme = saved;
+				} catch {
+					// System remains usable when browser storage is blocked.
+				}
+				document.documentElement.dataset.theme =
+					theme === 'system'
+						? matchMedia('(prefers-color-scheme: dark)').matches
+							? 'dark'
+							: 'light'
+						: theme;
+			})();
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">
