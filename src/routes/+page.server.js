@@ -9,10 +9,5 @@ export function load({ url }) {
 			.map(([key, value]) => [key.slice('pipeline_page_'.length), value])
 	);
 	const dashboard = getDashboardStats({ today, pipelinePages });
-	const requestedStage = Number(url.searchParams.get('pipeline_stage'));
-	const pipelineStageId =
-		dashboard.pipeline.find((column) => column.id === requestedStage)?.id ??
-		dashboard.pipeline[0]?.id ??
-		null;
-	return { ...dashboard, pipelineStageId, today };
+	return { ...dashboard, today };
 }

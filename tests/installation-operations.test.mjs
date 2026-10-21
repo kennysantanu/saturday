@@ -24,6 +24,7 @@ import {
 import { copySource, install, run as installerRun } from '../scripts/install.mjs';
 import { getInstallation, createDesktopShortcut } from '../src/lib/server/installation.js';
 import { readBuildInfo } from '../scripts/build-info.mjs';
+import { serverSummary } from '../src/lib/server/server-lifecycle.js';
 const run = promisify(execFile);
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
 const sha = 'a'.repeat(40),
@@ -201,6 +202,16 @@ test('fresh managed installation uses its descriptor for runtime preparation and
 				]).catch((error) => {
 					if (!error.stdout?.includes('No owned Saturday supervisor is running.')) throw error;
 				});
+			// Stop acknowledges shutdown before the supervisor has exited and finished writing state.
+			if (existsSync(descriptor)) {
+				const deadline = Date.now() + 15000;
+				while (serverSummary().managed && Date.now() < deadline) await wait(50);
+				assert.equal(
+					serverSummary().managed,
+					false,
+					'The disposable supervisor must exit before cleanup.'
+				);
+			}
 		} finally {
 			for (const key of Object.keys(process.env)) if (!(key in prior)) delete process.env[key];
 			Object.assign(process.env, prior);

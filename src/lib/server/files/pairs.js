@@ -125,8 +125,10 @@ export async function prepareBackupPairRestore({ file_backup_id }) {
 			'INTEGRITY',
 			'Coordinated backup identities or hashes do not match. Restore the artifacts independently after review.'
 		);
-	const db = prepareRestore(metadata.database_backup_id);
+	// Preparing files initializes an empty target's manifest. Capture the database
+	// preview afterward so its file-dataset guard includes that initialization.
 	const files = await prepareFileRestore({ backup_id: file_backup_id, mode: 'replace' });
+	const db = prepareRestore(metadata.database_backup_id);
 	if (db.incoming.dataset_id !== pair.dataset_id || files.incoming_dataset_id !== pair.dataset_id)
 		reject('DATASET_MISMATCH', 'Coordinated artifacts belong to different datasets.');
 	const id = randomUUID();

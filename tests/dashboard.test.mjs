@@ -74,12 +74,7 @@ test('pipeline independently pages more than 100 jobs, retains full counts and u
 	const href = pipelineHref(data.pipeline, acceptedId, 1);
 	assert.equal(href, `/?pipeline_page_${newId}=3#pipeline-stage-${acceptedId}`);
 	assert.equal(jobReturn(href), href);
-	const windowHref = pipelineHref(data.pipeline, acceptedId, 1, acceptedId);
-	assert.equal(
-		new URL(windowHref, 'http://localhost').searchParams.get('pipeline_stage'),
-		String(acceptedId)
-	);
-	assert.equal(jobReturn(windowHref), windowHref);
+	assert(!new URL(href, 'http://localhost').searchParams.has('pipeline_stage'));
 });
 
 test('empty, closed-only, renamed, reordered and archived stages have accurate current/history counts', () => {

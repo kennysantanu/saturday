@@ -81,7 +81,7 @@
 			{#if data.errors.pipeline}
 				<Notice tone="error" title="Job pipeline unavailable">{data.errors.pipeline}</Notice>
 			{:else}
-				<JobPipeline columns={data.pipeline} startStageId={data.pipelineStageId} />
+				<JobPipeline columns={data.pipeline} />
 			{/if}
 		</section>
 		<div class="dashboard-overview">

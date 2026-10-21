@@ -16,7 +16,7 @@ Job-file access requires matching database/manifest dataset identities. A folder
 
 Backup results include format/dataset/creator-build metadata. Same-dataset database restores retain higher allocation counters; matching file-folder IDs are also reserved to avoid reuse after independently timed restores. Coordinated artifacts must have matching identities and hashes. Unsupported old artifacts require the corresponding development build or an explicit reset; rebuild/restart every process together after an update.
 
-Jobs and people have separate ID sequences; clarify ambiguous references before writes. Settings → Local database → Diagnostics shows build, storage versions, and resolved paths. Share only the support details needed.
+Jobs and people have separate ID sequences; clarify ambiguous references before writes. Settings → Storage → Diagnostics shows build, storage versions, and resolved paths. Share only the support details needed.
 
 ## Jobs and identity tools
 
@@ -35,7 +35,7 @@ Jobs and people have separate ID sequences; clarify ambiguous references before 
 | `set_job_follow_up`    | Required nullable `follow_up_date`, optional comment; no history or placement change                                |
 | `set_job_score`        | Required finite numeric or null score, optional comment; assistant-only assessment                                  |
 
-Discover stage IDs before writes; do not infer behavior from names or assume default IDs. A stage's `is_closed` decides whether its current jobs are active. Archived stages are invalid movement destinations but can be used for historical milestones. No reserved Accepted/Rejected/Dismissed actions or fixed event enums exist. UI **Change stage** maps to `change_job_stage`; **Add history** maps to `add_job_update`.
+Discover stage IDs before writes; do not infer behavior from names or assume default IDs. A stage's `is_closed` decides whether its current jobs are active. Archived stages are invalid movement destinations but can be used for historical milestones. No reserved Accepted/Rejected/Dismissed actions or fixed event enums exist. UI **Change stage** maps to `change_job_stage`; **Add history** maps to `add_job_update`. Dashboard is a read-only view of current placement; milestone totals count distinct jobs with recorded history, including scheduled and archived milestones, rather than current-stage occupancy. Workflow configuration remains in Settings.
 
 Change stage requires a real non-future calendar date and takes effect immediately. Same-stage requests do nothing. Last committed move wins without revision tokens. Both actual moves retain history. After an uncertain response, read placement/history before manually retrying. Historical additions can use confirmed future dates; scheduled milestones count in history and never move placement. Removing/retargeting sole evidence of current placement is blocked: change stage first. General notes require text, and history notes allow 10,000 characters.
 

@@ -31,6 +31,6 @@
 
 	<span class="flex flex-col leading-none">
 		<span class="text-xl font-semibold tracking-tight text-foreground">Saturday</span>
-		<span class="meta-text mt-1.5 font-medium text-muted-foreground">Career Dashboard</span>
+		<span class="meta-text font-medium text-muted-foreground">Career Dashboard</span>
 	</span>
 </a>

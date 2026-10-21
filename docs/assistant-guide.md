@@ -75,10 +75,10 @@ Discover stages with `list_workflow_stages` before changing placement. Use `chan
 Ask your assistant to find a job, record progress, manage a follow-up, link a person, or tailor a document from your Profile selections. For example:
 
 - “List my active jobs in Saturday.”
-- “Record that I had a prescreen for job #123 yesterday.”
+- “Record a Screening milestone for job #123 yesterday without changing its current stage.”
 - “Read my Master CV and resume template, then draft a resume for job #123.”
 
-Include whether a number refers to a job or person. Refresh the browser after assistant writes. Job history corrections/removals, dismissal, and reopening stay in the web app; assistant scores are read-only there. Backups and restores are also available, with preview and authorization before replacement.
+Include whether a number refers to a job or person. Refresh the browser after assistant writes. MCP can correct history and change stages using the same safeguards as the UI. Closing or reopening uses a discovered closed or open destination; stage names have no reserved behavior. Permanent history deletion requires explicit authorization and confirmation. Assistant scores are read-only in the web app. Backups and restores are also available, with preview and authorization before replacement.
 
 The [MCP reference](mcp-reference.md) documents all core tools, inputs, filters, Profile designations, IDs, and recovery safeguards. The [user guide](user-guide.md) explains the matching UI workflows.
 

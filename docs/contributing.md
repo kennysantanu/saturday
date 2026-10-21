@@ -92,18 +92,28 @@ For the optional large-archive case, run `node --max-old-space-size=128 --test t
 | `examples/extensions/interview-practice/`                         | Portable extension example                                                        |
 | `docs/`                                                           | User, assistant, and contributor guides                                           |
 
+## Local workflow verification — 2026-10-21
+
+The development candidate based on `4f3a26c` plus local changes passed `npm run verify` on macOS 26.4.1 arm64, Node 25.9.0, npm 11.12.1 and managed Chrome 154.0.8037.57: 160 regression tests, eight production HTTP/browser checks, and the document/extension browser review. The package remains an unreleased development version.
+
+Coverage includes more than 100 jobs, independent board pages, empty/closed-only data, current-versus-recorded milestones, Back/reload, keyboard focus, stale destination choices, uncertain-response retries, expired drafts, last-write-wins races, and fresh/populated database/paired restores. Fresh paired restore initializes its target file manifest before capturing database preview guards. Workflow names/order/archive state, IDs/counters, Network, Profile and attachments survive recovery. Old database formats reject unchanged. Reduced-motion preferences shorten sheet/control animations.
+
+A separately created temporary installation built and initialized the workflow baseline, generated an isolated desktop shortcut and JSON/TOML client fixtures, matched web/MCP identities, reflected a stage change on Dashboard, and supported MCP reconnect/read with the UI stopped. It reused local dependencies/runtime and did not alter personal data, the real Desktop, login startup or actual assistant-client configuration.
+
+Desktop/light, 320px/dark, 640px reflow, exact 767/768px dialog boundaries, touch emulation and Chrome accessibility-tree heading/link checks were reviewed. Reflow emulation is not actual browser 200% zoom; touch emulation is not a physical phone; an accessibility tree is not a screen-reader test. Actual zoom, physical touch/assistive technology, other supported platforms/minimum runtimes and real assistant-client verification remain release gates. Native GET lists/board paging and ordinary job forms are covered; quick-edit dialogs require JavaScript.
+
 ## Storage contracts
 
 `compatibility.js` and `migrations.js` define supported formats. Package `saturday.storage` metadata must agree with them. Exact schema/manifest validation is required in addition to version checks.
 
 | Store              | Current contract                                                                                     |
 | ------------------ | ---------------------------------------------------------------------------------------------------- |
-| Database           | `saturday.database.numeric`, schema 1; `app_metadata` holds the dataset UUID                         |
+| Database           | `saturday.database.workflow`, schema 1; `app_metadata` holds the dataset UUID                        |
 | Files              | `saturday.files.numeric`, manifest 2; supported version 1 upgrades while retaining original metadata |
 | Coordinated backup | `saturday.backup-pair.numeric`, version 1; validates both actual artifacts and their shared dataset  |
 | Installation       | `saturday.installation`, version 1; installation ID is distinct from dataset ID                      |
 
-UUID-era database backups and unbound file formats/pairs are unsupported. Supported manifest version 1 is already dataset-bound; its upgrade to version 2 adds Profile designations and preserves the existing Master CV. Never alter migration records or dataset IDs to bypass compatibility checks.
+Earlier `saturday.database.numeric` and UUID-era databases/backups, plus unbound file formats/pairs, are unsupported and reject unchanged. Supported manifest version 1 is already dataset-bound; its upgrade to version 2 adds Profile designations and preserves the existing Master CV. Never alter migration records or dataset IDs to bypass compatibility checks.
 
 Jobs, people, and both histories use independent positive safe integer IDs. Same-dataset restores retain the higher current/incoming allocator counters. IDs represented by same-dataset job-file folders are also reserved, preventing attachment reassignment after an older database restore. Restoring another dataset uses its identity/counters.
 
@@ -111,7 +121,7 @@ Database and files remain independent. Normal `jobs/<id>` access requires matchi
 
 ### Jobs and Network
 
-The job registry owns stored field names, UI/MCP mappings, types, limits, access, dependencies, and introduction versions. Validation, write adapters, MCP inputs, and backup columns derive from it. User edits cannot write assistant assessment fields; partial edits preserve omitted fields. Status/history are computed service behavior, not extra job columns.
+The job registry owns stored field names, UI/MCP mappings, types, limits, access, dependencies, and introduction versions. Validation, write adapters, MCP inputs, and backup columns derive from it. User edits cannot write assistant assessment fields; partial edits preserve omitted fields. Current placement is stored as `jobs.current_stage_id`; activity is derived from the referenced workflow stage. History is independent and does not move placement. Workflow stages are included in backup registries, fingerprints and replacement ordering. Stage changes and their milestones commit atomically; corrections cannot remove the sole milestone supporting current placement.
 
 For a new stored field, update the registry, migration, relevant forms, backup validation/fingerprint, and tests together. Keep existing names and historical `since` values stable. Freeze the released baseline and append migrations afterward; never migrate original backup files in place.
 

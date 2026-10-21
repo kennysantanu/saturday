@@ -1,7 +1,7 @@
 import * as backups from '../src/lib/server/backups.js';
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, createReadStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -282,4 +282,113 @@ test('archive races with stage moves and job creation preserve available current
 	]);
 	assert.equal(creation[0].ok, true);
 	assert.equal(getJob(creation[0].result.id).currentStage.is_archived, false);
+});
+
+test('custom workflow restores into fresh and populated database/pair targets with identities, counters and unrelated data intact', async () => {
+	const documents = await import('../src/lib/server/files/documents.js');
+	const pairs = await import('../src/lib/server/files/pairs.js');
+	const { databaseIdentity } = await import('../src/lib/server/database.js');
+	const networks = await import('../src/lib/server/networks.js');
+	addWorkflowStage({ name: 'Technical review' });
+	const custom = stage('Technical review');
+	const original = job();
+	moveJobStage(original.id, { stage_id: custom.id, event_date: date });
+	archiveWorkflowStage(stage('New').id, { confirm_starting_stage: true });
+	reorderWorkflowStage(custom.id, 'up');
+	renameWorkflowStage(stage('Rejected').id, 'Closed by employer');
+	addJobUpdate({ job_id: original.id, stage_id: stage('New').id, event_date: '2099-01-01' });
+	const person = networks.createNetwork({ name: 'Preserved contact' });
+	networks.linkJobNetwork({ job_id: original.id, network_id: person.id, notes: 'Referral' });
+	const profile = await documents.createDocument({
+		filename: 'profile.md',
+		content: '# Preserved profile'
+	});
+	await documents.setMasterDocument({
+		id: profile.id,
+		token: profile.token,
+		catalog_token: (await documents.listDocuments()).catalog_token
+	});
+	const attachment = await documents.createDocument({
+		scope: original.id,
+		filename: 'resume.md',
+		content: '# Preserved resume'
+	});
+	withDatabase((db) =>
+		db.exec(
+			"UPDATE sqlite_sequence SET seq=40 WHERE name='jobs'; UPDATE sqlite_sequence SET seq=50 WHERE name='job_updates'; UPDATE sqlite_sequence SET seq=30 WHERE name='workflow_stages';"
+		)
+	);
+	const identity = databaseIdentity().dataset_id;
+	const expectedStages = listWorkflowStages();
+	const expectedJob = getJob(original.id);
+	const database = backups.createBackup();
+	const databaseFile = join(root, 'portable.sqlite');
+	backups.exportBackup(database.backup_id, databaseFile);
+	const pair = await pairs.createManualBackup({ contents: 'all' });
+	const pairFile = join(root, 'portable.zip');
+	await pairs.exportManualBackup({ backup_id: pair.database_backup_id, contents: 'all' }, pairFile);
+	for (const mode of ['database', 'pair']) {
+		for (const populated of [false, true]) {
+			const target = join(root, `${mode}-${populated ? 'populated' : 'fresh'}`);
+			process.env.SATURDAY_DB_PATH = join(target, 'db.sqlite');
+			process.env.SATURDAY_FILES_PATH = join(target, 'files');
+			migrateDatabase();
+			let unrelated;
+			if (populated) {
+				addWorkflowStage({ name: 'Target-only stage' });
+				job();
+				networks.createNetwork({ name: 'Target-only contact' });
+				unrelated = await documents.createDocument({
+					filename: 'unrelated.md',
+					content: '# Keep during database-only restore'
+				});
+			}
+			if (mode === 'database') {
+				const imported = backups.importBackup(databaseFile);
+				const preview = backups.prepareRestore(imported.backup_id);
+				backups.restoreBackup(preview.restore_id, true);
+				if (unrelated) {
+					const kept = await documents.getDocument({ id: unrelated.id, include_content: true });
+					assert.equal(kept.content, '# Keep during database-only restore');
+					assert.equal(kept.token, unrelated.token);
+				}
+			} else {
+				const imported = await pairs.importBackupBundle(createReadStream(pairFile));
+				const preview = await pairs.prepareBackupPairRestore({
+					file_backup_id: imported.file_backup_id
+				});
+				await pairs.restoreBackupPair({ restore_id: preview.restore_id, confirm: true });
+				assert.equal(
+					(await documents.getDocument({ designation: 'master_cv', include_content: true }))
+						.content,
+					'# Preserved profile'
+				);
+				assert.equal(
+					(
+						await documents.getDocument({
+							id: attachment.id,
+							scope: original.id,
+							include_content: true
+						})
+					).content,
+					'# Preserved resume'
+				);
+			}
+			assert.equal(databaseIdentity().dataset_id, identity);
+			assert.deepEqual(listWorkflowStages(), expectedStages);
+			assert.deepEqual(getJob(original.id), expectedJob);
+			assert.equal(networks.getNetwork(person.id).name, 'Preserved contact');
+			assert.equal(
+				networks.listNetworks({ job_id: original.id }).networks[0].job_link.notes,
+				'Referral'
+			);
+			migrateDatabase();
+			assert.deepEqual(listWorkflowStages(), expectedStages);
+			const after = job();
+			assert.equal(after.id, 41);
+			assert(after.updates[0].id > 50);
+			addWorkflowStage({ name: 'After recovery' });
+			assert.equal(stage('After recovery').id, 31);
+		}
+	}
 });

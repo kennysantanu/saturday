@@ -9,7 +9,11 @@ import { createServer } from 'node:net';
 import puppeteer from 'puppeteer';
 import { migrateDatabase } from '../src/lib/server/database.js';
 import { createJob, getJob } from '../src/lib/server/services.js';
-import { listWorkflowStages } from '../src/lib/server/workflow.js';
+import {
+	listWorkflowStages,
+	addWorkflowStage,
+	archiveWorkflowStage
+} from '../src/lib/server/workflow.js';
 import { jobReturn } from '../src/lib/job-navigation.js';
 import {
 	createNetwork,
@@ -355,6 +359,13 @@ test('production stage/history actions, result round trips and read-only overvie
 					)
 				);
 			});
+		await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+		assert(
+			await page.$eval(
+				'[data-slot="dialog-content"]',
+				(el) => parseFloat(getComputedStyle(el).animationDuration) <= 0.001
+			)
+		);
 		assert(await stackedActions());
 		for (const width of [640, 767]) {
 			await page.setViewport({ width, height: 960 });
@@ -488,7 +499,7 @@ test('production stage/history actions, result round trips and read-only overvie
 		await saveDialog();
 		assert(getJob(job.id).updates.some((entry) => entry.note === 'Keep my short note'));
 		// Star keeps both filtered-list and Dashboard return context, including native forms.
-		const dashboardReturn = `/?pipeline_stage=${interview.id}#pipeline-stage-${interview.id}`;
+		const dashboardReturn = `/#pipeline-stage-${interview.id}`;
 		for (const origin of [returnTo, dashboardReturn]) {
 			await page.goto(base + `/jobs/${job.id}?return_to=${encodeURIComponent(origin)}`, {
 				waitUntil: 'networkidle0'
@@ -594,6 +605,41 @@ test('production stage/history actions, result round trips and read-only overvie
 			listNetworks({ job_id: job.id }).networks[0].job_link.notes,
 			'Unsaved Job link note'
 		);
+		// A destination retired by another client while editing must preserve the draft.
+		addWorkflowStage({ name: 'Retired while editing' });
+		const retiring = listWorkflowStages().find((stage) => stage.name === 'Retired while editing');
+		await button('Change stage');
+		await page.waitForSelector('#move-stage');
+		await page.select('#move-stage', String(retiring.id));
+		await page.type('#move-note', 'Keep this stage-change draft');
+		const previousPlacement = getJob(job.id).currentStageId;
+		archiveWorkflowStage(retiring.id);
+		await page.click('#job-update-form button[type="submit"]:not([formaction])');
+		await page.waitForSelector('#move-stage[aria-invalid="true"]');
+		await settle();
+		assert.equal(await page.$eval('#move-note', (el) => el.value), 'Keep this stage-change draft');
+		assert.equal(await page.$(`#move-stage option[value="${retiring.id}"]`), null);
+		assert.equal(getJob(job.id).currentStageId, previousPlacement);
+		await discardDraft('job-update-form');
+		// Treat a response as uncertain: read authoritative state before retrying the same move.
+		const beforeRetry = getJob(job.id).updates.length;
+		await post('changeStage', {
+			stage_id: closed.id,
+			event_date: '2020-01-01',
+			note: 'Uncertain response'
+		});
+		assert.equal(getJob(job.id).currentStageId, closed.id);
+		assert.equal(
+			(
+				await post('changeStage', {
+					stage_id: closed.id,
+					event_date: '2020-01-01',
+					note: 'Uncertain response'
+				})
+			).status,
+			303
+		);
+		assert.equal(getJob(job.id).updates.length, beforeRetry + 1);
 		await page.goto(base + '/settings#workflow', { waitUntil: 'networkidle0' });
 		await page.click(`#workflow-stage-${custom.id} summary`);
 		await page.locator(`#workflow-name-${custom.id}`).fill('Conversation again');

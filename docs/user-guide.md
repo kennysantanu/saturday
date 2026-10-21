@@ -40,9 +40,9 @@ Configuration takes effect immediately without restarting. Other open browsers o
 
 ## Read the Dashboard
 
-**Job pipeline** appears first and shows current placement across all jobs, with open stages first and closed destinations afterward. Each column shows its full count and up to 20 cards, most recently updated first. Use the arrows beside the board to browse stages. Saturday shows only the stages that fit, with one stage at a time on phones and no horizontal scrollbar. Select a stage name to see all jobs in that stage; small page arrows within a stage browse its jobs. Cards show the role and company on two lines.
+**Job pipeline** appears first and shows current placement across all jobs, with open stages first and closed destinations afterward. Each column shows its full count and up to 20 cards, most recently updated first. Use the arrows below the board, swipe horizontally on a phone, or scroll horizontally with a trackpad to browse stages. Each gesture advances one stage without navigating or changing browser history; vertical gestures still scroll the job list or page. Returning to Dashboard may reset the visible stage. Neighboring stage previews fade at the outer edges, and the first and last stages align with the board edges without empty gaps. When a stage name has keyboard focus, use Left/Right to browse adjacent stages. The cards slide horizontally when browsing; reduced-motion preferences make the change instant. On phones, the arrows sit beside the stage-position text below the card. Saturday shows only the stages that fit, with one stage at a time on phones and no horizontal scrollbar. Select a stage name to see all jobs in that stage; small page arrows within a stage browse its jobs. Cards show the role and company on two lines.
 
-Open a card to view details and use **Change stage** there. The Dashboard return link preserves the visible stages and job pages, and focuses the source stage; pages adjust if jobs have moved away. The board has no dragging or inline stage controls.
+Open a card to view details and use **Change stage** there. The Dashboard return link preserves job pages, but may reset the visible stage window; pages adjust if jobs have moved away. The board has no dragging or inline stage controls.
 
 Below the board, **Notifications** appears on the left and **Milestone history** on the right; they stack in that order on smaller screens. **View all jobs** beside the board heading opens the full Jobs list.
 
@@ -52,7 +52,7 @@ Under **Notifications**, **Needs attention** lists open-job follow-ups and appli
 
 ## Follow-ups, starred jobs, and assessments
 
-Use **Star** on a job to mark it for attention; starred jobs show a star in lists. In the **Follow-up** card, Schedule follow-up or Reschedule or edit opens a dialog for one date and an optional comment. In that dialog, **Clear follow-up** removes the reminder. This does not add history or change the job status. Dashboard shows active-job follow-ups, earliest first, including overdue dates, alongside upcoming application deadlines. Closed jobs keep their follow-up but hide it from Dashboard until reopened. Dates use your local calendar.
+Use **Star** on a job to mark it for attention; starred jobs show a star in lists. In the **Follow-up** card, Schedule follow-up or Reschedule or edit opens a dialog for one date and an optional comment. In that dialog, **Clear follow-up** removes the reminder. This does not add history or change the job status. Dashboard shows active-job follow-ups, earliest first, including overdue dates, alongside upcoming application deadlines. Closed jobs keep their follow-up but hide it from Dashboard until reopened. Dates use the server computer's local calendar.
 
 **Assistant assessment** displays a numeric score and plain-text explanation managed through MCP. You can read both in the UI but cannot edit them there. There is no fixed scoring scale; ask your assistant to use a consistent scale and explain its criteria. An empty score means unscored; zero is a valid score.
 
@@ -100,7 +100,7 @@ To export a resume, save self-contained HTML and choose **Generate PDF** from it
 
 **Settings → Connect an assistant** generates configuration for a supported local MCP client. Reconnect the client, call `get_saturday_info`, and compare installation, dataset, and build identities with Settings. Read a known job when available. Copying configuration alone does not verify access. See the [assistant guide](assistant-guide.md) for connection steps and the [MCP reference](mcp-reference.md) for tools.
 
-Jobs and people show numbers such as **#123** in lists, headings, and relationship pickers. Their sequences are separate; say “job #123” or “person #123” when asking your assistant to change a record. Refresh the browser after assistant writes. Job history corrections/removals, dismissal, and reopening remain browser actions; assistant scores are read-only in the UI.
+Jobs and people show numbers such as **#123** in lists, headings, and relationship pickers. Their sequences are separate; say “job #123” or “person #123” when asking your assistant to change a record. Refresh the browser after assistant writes. The assistant can correct history and change stages using the same safeguards as the browser. Closing/reopening uses an ordinary closed/open stage; permanent history deletion requires explicit authorization and confirmation. Assistant scores are read-only in the UI.
 
 ## Backup and restore
 
