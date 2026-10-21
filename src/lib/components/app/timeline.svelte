@@ -1,7 +1,8 @@
 <script lang="ts">
 	import Bot from '@lucide/svelte/icons/bot';
 	import Calendar from '@lucide/svelte/icons/calendar';
-	import UpdateCorrection from './update-correction.svelte';
+	import Pencil from '@lucide/svelte/icons/pencil';
+	import { Button } from '$lib/components/ui/button/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { formatDate } from '$lib/format';
 	import { cn } from '$lib/utils.js';
@@ -17,21 +18,13 @@
 	};
 	let {
 		entries,
-		stages,
-		jobId,
-		historyGuard,
-		scheduled = false,
-		errors = {},
-		values = {}
+		onedit,
+		scheduled = false
 	}: {
 		entries: Entry[];
-		stages: { id: number; name: string; is_closed: boolean; is_archived: boolean }[];
-		jobId: number;
-		historyGuard: import('$lib/unsaved.svelte').UnsavedChanges;
+		onedit: (entry: Entry) => void;
 		/** True for future-dated entries: hollow marker and a Scheduled badge. */
 		scheduled?: boolean;
-		errors?: Record<string, string | undefined>;
-		values?: Record<string, string | undefined>;
 	} = $props();
 </script>
 
@@ -70,7 +63,16 @@
 					{entry.note}
 				</p>
 			{/if}
-			<UpdateCorrection {entry} {stages} {jobId} {historyGuard} {errors} {values} />
+			<div class="mt-2 flex flex-wrap gap-2">
+				<Button
+					variant="ghost"
+					size="sm"
+					onclick={() => onedit(entry)}
+					aria-label={`Edit history: ${entry.label} · ${formatDate(entry.date)}`}
+				>
+					<Pencil data-icon="inline-start" aria-hidden="true" />Edit history
+				</Button>
+			</div>
 		</li>
 	{/each}
 </ol>

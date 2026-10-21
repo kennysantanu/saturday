@@ -18,11 +18,13 @@ Sort by recently updated/created, highest score, earliest follow-up or deadline.
 
 ## Record progress and notes
 
-On job detail, **Change stage** is the primary action. Choose an available destination, today's or a past date, and an optional note. Saving changes the current stage immediately and records a milestone together. Moving backward or skipping stages is allowed. A stage marked closed closes the job; selecting an open stage reopens it. There are no dedicated Dismiss/Reopen buttons and no automatic movement from dates or history.
+On job detail, **Change stage** is the primary action and opens a dialog. Choose an available destination, today's or a past date, and an optional note. Saving changes the current stage immediately and records a milestone together. Moving backward or skipping stages is allowed. A stage marked closed closes the job; selecting an open stage reopens it. There are no dedicated Dismiss/Reopen buttons and no automatic movement from dates or history.
 
-**Add history** is a separate secondary action. Record a general note (text required), a past milestone, or a confirmed future milestone. It never changes current placement. For example, adding a missing Screening milestone while at Offer leaves the job at Offer. Future entries display **Scheduled** and count in milestone history; they are not completed-interview statistics.
+**Add history** opens a dialog on job detail. Record a general note (text required), a past milestone, or a confirmed future milestone. It never changes current placement. For example, adding a missing Screening milestone while at Offer leaves the job at Offer. Future entries display **Scheduled** and count in milestone history; they are not completed-interview statistics.
 
-History entries offer **Edit history** and confirmed **Delete history**. Deletion is permanent. Editing/removing the only milestone supporting the current stage is blocked: change to another stage first, then correct it. Date/note-only corrections remain possible. Other history corrections change historical counts without moving the job.
+Each history entry has an **Edit history** button that opens a prefilled dialog. Use **Save history** to save corrections or **Delete history** there to permanently remove the entry after confirmation. Editing/removing the only milestone supporting the current stage is blocked: change to another stage first, then correct it. Date/note-only corrections remain possible. Other history corrections change historical counts without moving the job.
+
+These short forms use the same dialogs as Network, becoming bottom sheets on phones. Cancel closes the dialog; Saturday asks before discarding unsaved edits. Saving closes it and refreshes job detail while retaining the original Dashboard or Jobs return link. Add/Edit job remain separate pages.
 
 Updates from an assistant use the same rules. Refresh to see other-client changes. If two clients change stage, the last successfully committed move determines placement and both actual moves retain their milestones. After an uncertain save response, inspect placement/history before retrying.
 
@@ -38,13 +40,19 @@ Configuration takes effect immediately without restarting. Other open browsers o
 
 ## Read the Dashboard
 
-**Active now** counts jobs in open stages. **Milestone history** counts distinct jobs with each milestone across active and closed jobs, including scheduled milestones. Counts overlap; repeat milestones count a job once. Count links open the matching Jobs history filter, separately from current-stage filters.
+**Job pipeline** appears first and shows current placement across all jobs, with open stages first and closed destinations afterward. Each column shows its full count and up to 20 cards, most recently updated first. Use the arrows beside the board to browse stages. Saturday shows only the stages that fit, with one stage at a time on phones and no horizontal scrollbar. Select a stage name to see all jobs in that stage; small page arrows within a stage browse its jobs. Cards show the role and company on two lines.
 
-**Needs attention** lists open-job follow-ups and application deadlines. **Coming up** shows future history on open jobs. Closing a job retains its follow-up but hides it from these queues; moving back to an open stage makes it eligible again. **Recently updated** opens detail with a return link. Dashboard summaries use saved stage names and ordering; Kanban is not included in this version yet.
+Open a card to view details and use **Change stage** there. The Dashboard return link preserves the visible stages and job pages, and focuses the source stage; pages adjust if jobs have moved away. The board has no dragging or inline stage controls.
+
+Below the board, **Notifications** appears on the left and **Milestone history** on the right; they stack in that order on smaller screens. **View all jobs** beside the board heading opens the full Jobs list.
+
+**Milestone history** counts distinct jobs with each milestone across active and closed jobs, including scheduled milestones. Counts overlap; repeat milestones count a job once. Count links open the matching Jobs history filter, separately from current-stage filters.
+
+Under **Notifications**, **Needs attention** lists open-job follow-ups and application deadlines. **Coming up** shows future history on open jobs. Closing a job retains its follow-up but hides it from these queues; moving back to an open stage makes it eligible again. Dashboard uses saved stage names and ordering. Archived milestone counts remain available under **Archived milestones**; archived stages have no board columns.
 
 ## Follow-ups, starred jobs, and assessments
 
-Use **Star** on a job to mark it for attention; starred jobs show a star in lists. In the **Follow-up** card, schedule one date with an optional comment, reschedule it, or clear it. This does not add history or change the job status. Dashboard shows active-job follow-ups, earliest first, including overdue dates, alongside upcoming application deadlines. Closed jobs keep their follow-up but hide it from Dashboard until reopened. Dates use your local calendar.
+Use **Star** on a job to mark it for attention; starred jobs show a star in lists. In the **Follow-up** card, Schedule follow-up or Reschedule or edit opens a dialog for one date and an optional comment. In that dialog, **Clear follow-up** removes the reminder. This does not add history or change the job status. Dashboard shows active-job follow-ups, earliest first, including overdue dates, alongside upcoming application deadlines. Closed jobs keep their follow-up but hide it from Dashboard until reopened. Dates use your local calendar.
 
 **Assistant assessment** displays a numeric score and plain-text explanation managed through MCP. You can read both in the UI but cannot edit them there. There is no fixed scoring scale; ask your assistant to use a consistent scale and explain its criteria. An empty score means unscored; zero is a valid score.
 
@@ -61,6 +69,8 @@ From the job chooser, **Add person** opens the normal form and returns to the ch
 **Schedule follow-up**, **Reschedule**, and **Clear follow-up** manage one date/comment for that person. Overdue means before today; Upcoming means after today, using the host computer's local calendar. These reminders appear in Network, independently of job reminders. There are no notifications or recurring reminders.
 
 **Interactions** is optional. Add a completed interaction with its date and **Interaction note**; backdated entries are supported, future dates belong in Follow-up. Edit a mistaken date/note or Delete and confirm to permanently remove one entry. Recording an interaction never clears a reminder. History sorts by date, then recording order; paginated history and linked jobs have independent pages. “Last recorded interaction” summarizes notes on file, including unanswered outreach; “None recorded” does not prove you have never contacted someone. Permanent person deletion is outside this version.
+
+Network follow-up and interaction dialogs, plus **Edit link note** on either side of a relationship, ask before discarding unsaved edits through Cancel, Close, Escape, or the backdrop. Failed saves keep the draft for correction or sign-in and retry.
 
 ## Documents and Profile
 

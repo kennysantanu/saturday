@@ -1,18 +1,15 @@
 <script lang="ts">
 	import Plus from '@lucide/svelte/icons/plus';
-	import ArrowUpRight from '@lucide/svelte/icons/arrow-up-right';
 	import Briefcase from '@lucide/svelte/icons/briefcase';
 	import Bell from '@lucide/svelte/icons/bell';
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
-	import Clock from '@lucide/svelte/icons/clock';
 	import TrendingUp from '@lucide/svelte/icons/trending-up';
-	import CircleX from '@lucide/svelte/icons/circle-x';
-	import EyeOff from '@lucide/svelte/icons/eye-off';
 	import DateRow from '$lib/components/app/date-row.svelte';
 	import PageHeader from '$lib/components/app/page-header.svelte';
 	import PageShell from '$lib/components/app/page-shell.svelte';
 	import EmptyState from '$lib/components/app/empty-state.svelte';
-	import JobRow from '$lib/components/app/job-row.svelte';
+	import JobPipeline from '$lib/components/app/job-pipeline.svelte';
+	import Notice from '$lib/components/app/notice.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { jobDetailUrl } from '$lib/job-navigation.js';
@@ -23,17 +20,9 @@
 	const history = $derived(
 		data.stages.filter((stage: { is_archived: boolean; is_closed: boolean }) => !stage.is_archived)
 	);
-	// Steps in the order a job moves through them; the two endings are shown separately.
-	const steps = $derived(
-		history.filter((stage: { is_archived: boolean; is_closed: boolean }) => !stage.is_closed)
+	const archivedHistory = $derived(
+		data.stages.filter((stage: { is_archived: boolean }) => stage.is_archived)
 	);
-	const endings = $derived(
-		history.filter((stage: { is_archived: boolean; is_closed: boolean }) => stage.is_closed)
-	);
-	const widest = $derived(
-		Math.max(1, ...steps.map((card: { history_count: number }) => card.history_count))
-	);
-	const barWidth = (count: number) => (count === 0 ? 0 : Math.max(3, (count / widest) * 100));
 
 	const attentionGroups = $derived(
 		[
@@ -79,30 +68,43 @@
 			{/snippet}
 		</EmptyState>
 	{:else}
-		<div class="activity-summary">
-			<a href="/jobs" class="activity-main">
-				<p class="activity-count">{data.stats.active}</p>
+		<section id="job-pipeline" aria-labelledby="pipeline-heading" class="min-w-0 space-y-4">
+			<div class="flex flex-wrap items-start justify-between gap-3">
 				<div class="space-y-1">
-					<h2 class="flex items-center gap-2 text-lg font-semibold">
-						Active now<ArrowUpRight class="size-5 shrink-0" aria-hidden="true" />
-					</h2>
-					<p class="text-sm">Jobs you’re still pursuing</p>
+					<h2 id="pipeline-heading" class="section-title">Job pipeline</h2>
+					<p class="text-sm text-muted-foreground">
+						Where each job is now, most recently updated first.
+					</p>
 				</div>
-			</a>
-			<div class="activity-chips">
-				<a href="/jobs?view=all" class="activity-chip">View all jobs</a>
+				<a href="/jobs?view=all" class="link text-sm">View all jobs</a>
 			</div>
-		</div>
-
-		<div class="dashboard-layout">
-			<div class="dashboard-main">
-				<section aria-labelledby="attention-heading" class="dash-attention space-y-3">
-					<h2 id="attention-heading" class="section-title flex items-center gap-2">
-						<Bell class="size-5 text-muted-foreground" aria-hidden="true" />
-						Needs attention
-						<span class="font-normal text-muted-foreground">({attentionCount})</span>
+			{#if data.errors.pipeline}
+				<Notice tone="error" title="Job pipeline unavailable">{data.errors.pipeline}</Notice>
+			{:else}
+				<JobPipeline columns={data.pipeline} startStageId={data.pipelineStageId} />
+			{/if}
+		</section>
+		<div class="dashboard-overview">
+			<section aria-labelledby="notifications-heading" class="min-w-0 space-y-6">
+				<div class="space-y-1">
+					<h2 id="notifications-heading" class="section-title flex items-center gap-2">
+						<Bell class="size-5 text-muted-foreground" aria-hidden="true" />Notifications
 					</h2>
-					{#if attentionCount === 0}
+					<p class="text-sm text-muted-foreground">
+						Follow-ups, deadlines and upcoming milestones for open jobs.
+					</p>
+				</div>
+				<section aria-labelledby="attention-heading" class="dash-attention space-y-3">
+					<h3 id="attention-heading" class="section-title flex items-center gap-2">
+						Needs attention
+						<span class="font-normal text-muted-foreground"
+							>({data.errors.attention ? 'Unavailable' : attentionCount})</span
+						>
+					</h3>
+					{#if data.errors.attention}
+						<Notice tone="error" title="Needs attention unavailable">{data.errors.attention}</Notice
+						>
+					{:else if attentionCount === 0}
 						<EmptyState
 							size="inline"
 							title="Nothing due"
@@ -111,15 +113,15 @@
 					{:else}
 						<Card.Root class="gap-0 divide-y divide-border p-0">
 							{#each attentionGroups as group (group.key)}
-								<h3 class="group-title">
+								<h4 class="group-title">
 									{group.label}
 									<span class="font-normal text-muted-foreground">({group.items.length})</span>
-								</h3>
+								</h4>
 								{#each group.items as item (item.jobId)}
 									<DateRow
 										href={jobDetailUrl(item.jobId, page.url.pathname + page.url.search)}
 										title={item.title}
-										subtitle={item.company}
+										subtitle={`${item.company} · ${item.stage}`}
 										comment={'comment' in item ? item.comment : null}
 										date={item.date}
 										today={data.today}
@@ -129,89 +131,71 @@
 						</Card.Root>
 					{/if}
 				</section>
-
-				<section aria-labelledby="recent-heading" class="dash-recent space-y-3">
-					<div class="flex flex-wrap items-baseline justify-between gap-3">
-						<h2 id="recent-heading" class="section-title flex items-center gap-2">
-							<Clock class="size-5 text-muted-foreground" aria-hidden="true" />
-							Recently updated
-						</h2>
-						<a href="/jobs?view=all" class="link text-sm">View all jobs</a>
-					</div>
-					<Card.Root class="gap-0 divide-y divide-border p-0">
-						{#each data.recentJobs as job (job.id)}
-							<JobRow
-								recordNumber={job.id}
-								href={jobDetailUrl(job.id, page.url.pathname + page.url.search)}
-								title={job.title}
-								company={job.company}
-								status={job.status}
-								latestUpdate={job.latestUpdate}
-								isStarred={job.isStarred}
-								score={job.score}
-							/>
-						{/each}
-					</Card.Root>
-				</section>
-			</div>
-
-			<div class="dashboard-side">
-				{#if data.upcoming.length > 0}
+				{#if data.errors.upcoming || data.upcoming.length > 0}
 					<section aria-labelledby="upcoming-heading" class="dash-upcoming space-y-3">
-						<h2 id="upcoming-heading" class="section-title flex items-center gap-2">
+						<h3 id="upcoming-heading" class="section-title flex items-center gap-2">
 							<CalendarClock class="size-5 text-muted-foreground" aria-hidden="true" />
 							Coming up
-						</h2>
-						<Card.Root class="gap-0 divide-y divide-border p-0">
-							{#each data.upcoming as item (item.id)}
-								<DateRow
-									href={jobDetailUrl(item.jobId, page.url.pathname + page.url.search)}
-									title={item.label}
-									subtitle="{item.title} · {item.company}"
-									date={item.date}
-									today={data.today}
-								/>
-							{/each}
-						</Card.Root>
+						</h3>
+						{#if data.errors.upcoming}
+							<Notice tone="error" title="Coming up unavailable">{data.errors.upcoming}</Notice>
+						{:else}
+							<Card.Root class="gap-0 divide-y divide-border p-0">
+								{#each data.upcoming as item (item.id)}
+									<DateRow
+										href={jobDetailUrl(item.jobId, page.url.pathname + page.url.search)}
+										title={item.label}
+										subtitle="{item.title} · {item.company} · {item.stage}"
+										date={item.date}
+										today={data.today}
+									/>
+								{/each}
+							</Card.Root>
+						{/if}
 					</section>
 				{/if}
-
-				<section aria-labelledby="history-heading" class="dash-progress space-y-3">
-					<div class="space-y-0.5">
-						<h2 id="history-heading" class="section-title flex items-center gap-2">
-							<TrendingUp class="size-5 text-muted-foreground" aria-hidden="true" />
-							Milestone history
-						</h2>
-						<p class="text-sm text-muted-foreground">
-							Jobs with each milestone, including closed jobs and scheduled milestones. Counts
-							overlap. Select a stage to see its history matches.
-						</p>
-					</div>
-					<div class="funnel">
-						{#each steps as card (card.key)}
-							<a href="/jobs?view=all&milestone_stage={card.id}" class="funnel-row">
-								<span class="funnel-label text-sm font-medium">{card.name}</span>
-								<span class="funnel-count">{card.history_count}</span>
-								<span class="funnel-track" aria-hidden="true">
-									<span class="funnel-bar" style="width: {barWidth(card.history_count)}%"></span>
-								</span>
-							</a>
+			</section>
+			<section aria-labelledby="history-heading" class="min-w-0 space-y-3">
+				<div class="space-y-1">
+					<h2 id="history-heading" class="section-title flex items-center gap-2">
+						<TrendingUp class="size-5 text-muted-foreground" aria-hidden="true" />Milestone history
+					</h2>
+					<p class="text-sm text-muted-foreground">
+						Jobs with each milestone, including closed jobs and scheduled milestones. Counts overlap
+						and are separate from current placement.
+					</p>
+				</div>
+				{#if data.errors.history}
+					<Notice tone="error" title="Milestone history unavailable">{data.errors.history}</Notice>
+				{:else}
+					<div class="milestone-counts">
+						{#each history as stage (stage.id)}
+							<a href="/jobs?view=all&milestone_stage={stage.id}" class="milestone-count"
+								><span
+									>{stage.name}{#if stage.is_closed}<span
+											class="meta-text ml-2 text-muted-foreground">Closed</span
+										>{/if}</span
+								><strong class="tabular-nums">{stage.history_count}</strong></a
+							>
 						{/each}
 					</div>
-					<div class="history-grid">
-						{#each endings as card (card.key)}
-							<a href="/jobs?view=all&milestone_stage={card.id}" class="history-stat">
-								<p class="flex items-center gap-2 text-sm text-muted-foreground">
-									{card.name}
-								</p>
-								<p class="mt-3 text-3xl font-semibold tracking-tight tabular-nums">
-									{card.history_count}
-								</p>
-							</a>
-						{/each}
-					</div>
-				</section>
-			</div>
+					{#if archivedHistory.length}
+						<details class="disclosure">
+							<summary>Archived milestones</summary>
+							<div class="disclosure-body milestone-counts">
+								{#each archivedHistory as stage (stage.id)}
+									<a href="/jobs?view=all&milestone_stage={stage.id}" class="milestone-count"
+										><span
+											>{stage.name}
+											<span class="meta-text text-muted-foreground">Archived</span></span
+										><strong class="tabular-nums">{stage.history_count}</strong></a
+									>
+								{/each}
+							</div>
+						</details>
+					{/if}
+				{/if}
+			</section>
 		</div>
 	{/if}
 </PageShell>

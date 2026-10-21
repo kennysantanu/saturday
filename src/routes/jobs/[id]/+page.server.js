@@ -1,4 +1,3 @@
-import { listWorkflowStages } from '$lib/server/workflow.js';
 import { searchFromUrl } from '$lib/job-search.js';
 import { jobReturn, jobDetailUrl } from '$lib/job-navigation.js';
 import * as networks from '$lib/server/networks.js';
@@ -6,15 +5,16 @@ import { listDocuments } from '$lib/server/files/documents.js';
 import { error, fail, redirect } from '@sveltejs/kit';
 import {
 	setJobFollowUp,
-	setJobStarred,
+	moveJobStage,
 	addJobUpdate,
 	correctJobUpdate,
-	moveJobStage,
+	setJobStarred,
 	getJob,
 	searchJobs,
 	ServiceError,
 	ValidationError
 } from '$lib/server/services.js';
+import { listWorkflowStages } from '$lib/server/workflow.js';
 import { todayIso } from '$lib/format.js';
 
 function formValues(formData) {
@@ -27,7 +27,12 @@ function actionError(error, values, action) {
 	if (error instanceof ValidationError)
 		return fail(400, { action, errors: error.fieldErrors, values });
 	if (error instanceof ServiceError)
-		return fail(400, { action, errors: { form: error.message }, values });
+		return fail(400, {
+			action,
+			errors: { form: error.message },
+			values,
+			moveFirst: error.code === 'current_stage_evidence'
+		});
 	console.error('Could not save job update:', error);
 	return fail(500, {
 		action,
@@ -97,11 +102,9 @@ export async function load({ params, url }) {
 	return {
 		job,
 		outsideResults,
-		stages: listWorkflowStages(),
 		returnTo: jobReturn(url.searchParams.get('return_to')),
-		changeStageOpen: url.searchParams.has('change_stage'),
-		addHistoryOpen: url.searchParams.has('add_history'),
 		today: todayIso(),
+		stages: listWorkflowStages(),
 		documents,
 		documentCount,
 		documentsError,
@@ -135,7 +138,42 @@ function networkAction(operation, saved) {
 		redirect(303, `${url.pathname}?${query}`);
 	};
 }
+function historyAction(mode) {
+	return async ({ params, request, url }) => {
+		const values = formValues(await request.formData());
+		let saved =
+			mode === 'changeStage' ? 'stage-changed' : mode === 'addHistory' ? 'update' : 'correction';
+		try {
+			if (mode === 'changeStage') {
+				const changed = moveJobStage(params.id, values, 'manual');
+				saved = changed.unchanged
+					? 'stage-unchanged'
+					: changed.isActive
+						? 'stage-changed'
+						: 'job-closed';
+			} else if (mode === 'addHistory') {
+				addJobUpdate({ ...values, job_id: params.id, stage_id: values.stage_id || null }, 'manual');
+			} else {
+				// The route owns the job; the service scopes the entry to that job.
+				correctJobUpdate(values.update_id, {
+					...values,
+					job_id: params.id,
+					stage_id: values.stage_id || null,
+					remove: mode === 'deleteHistory'
+				});
+				if (mode === 'deleteHistory') saved = 'removed';
+			}
+		} catch (e) {
+			return actionError(e, values, mode);
+		}
+		redirect(303, jobDetailUrl(params.id, url.searchParams.get('return_to'), saved));
+	};
+}
 export const actions = {
+	changeStage: historyAction('changeStage'),
+	addHistory: historyAction('addHistory'),
+	editHistory: historyAction('editHistory'),
+	deleteHistory: historyAction('deleteHistory'),
 	networkLink: networkAction((i) => networks.linkJobNetwork(i, 'manual'), 'network-linked'),
 	networkNote: networkAction(networks.editJobNetwork, 'network-note'),
 	networkUnlink: networkAction(networks.unlinkJobNetwork, 'network-unlinked'),
@@ -148,11 +186,12 @@ export const actions = {
 		}
 		redirect(303, jobDetailUrl(params.id, url.searchParams.get('return_to'), `follow-up`));
 	},
-	clearFollowUp: async ({ params, url }) => {
+	clearFollowUp: async ({ params, request, url }) => {
+		const values = formValues(await request.formData());
 		try {
 			setJobFollowUp(params.id, null);
 		} catch (error) {
-			return actionError(error, {}, 'followUp');
+			return actionError(error, values, 'followUp');
 		}
 		redirect(303, jobDetailUrl(params.id, url.searchParams.get('return_to'), `follow-up-cleared`));
 	},
@@ -164,60 +203,5 @@ export const actions = {
 			return actionError(error, values, 'star');
 		}
 		redirect(303, jobDetailUrl(params.id, url.searchParams.get('return_to'), `starred`));
-	},
-	addUpdate: async ({ params, request, url }) => {
-		const values = formValues(await request.formData());
-		try {
-			addJobUpdate(
-				{
-					...values,
-					job_id: params.id,
-					stage_id: values.stage_id || null
-				},
-				'manual'
-			);
-		} catch (error) {
-			return actionError(error, values, 'addUpdate');
-		}
-		redirect(303, jobDetailUrl(params.id, url.searchParams.get('return_to'), `update`));
-	},
-	correctUpdate: async ({ params, request, url }) => {
-		const values = formValues(await request.formData());
-		try {
-			correctJobUpdate(values.update_id, {
-				remove: values.remove,
-				stage_id: values.stage_id || null,
-				job_id: params.id,
-				event_date: values.event_date,
-				note: values.note
-			});
-		} catch (error) {
-			return actionError(error, values, 'correctUpdate');
-		}
-		redirect(
-			303,
-			jobDetailUrl(
-				params.id,
-				url.searchParams.get('return_to'),
-				`${values.remove ? 'removed' : 'correction'}`
-			)
-		);
-	},
-	changeStage: async ({ params, request, url }) => {
-		const values = formValues(await request.formData());
-		let job;
-		try {
-			job = moveJobStage(params.id, values, 'manual');
-		} catch (e) {
-			return actionError(e, values, 'changeStage');
-		}
-		redirect(
-			303,
-			jobDetailUrl(
-				params.id,
-				url.searchParams.get('return_to'),
-				job.unchanged ? 'stage-unchanged' : job.isActive ? 'stage-changed' : 'job-closed'
-			)
-		);
 	}
 };

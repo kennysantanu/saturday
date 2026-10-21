@@ -6,7 +6,6 @@
 	import { enhance } from '$app/forms';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Star from '@lucide/svelte/icons/star';
-	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import FileText from '@lucide/svelte/icons/file-text';
@@ -17,7 +16,6 @@
 	import EmptyState from '$lib/components/app/empty-state.svelte';
 	import Field from '$lib/components/app/field.svelte';
 	import LinkedItem from '$lib/components/app/linked-item.svelte';
-	import NativeSelect from '$lib/components/app/native-select.svelte';
 	import Notice from '$lib/components/app/notice.svelte';
 	import PageHeader from '$lib/components/app/page-header.svelte';
 	import PageShell from '$lib/components/app/page-shell.svelte';
@@ -28,14 +26,13 @@
 	import Timeline from '$lib/components/app/timeline.svelte';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import * as Card from '$lib/components/ui/card/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import { focusFirstError, enhanceWithFocus, withPending } from '$lib/forms';
 	import { hostOf, formatDate } from '$lib/format';
-	import JobHistoryFields from '$lib/components/app/job-history-fields.svelte';
-	import UnsavedGuard from '$lib/components/app/unsaved-guard.svelte';
+	import JobUpdateDialog from '$lib/components/app/job-update-dialog.svelte';
+	import UnsavedDialog from '$lib/components/app/unsaved-dialog.svelte';
 	import { UnsavedChanges } from '$lib/unsaved.svelte';
 
 	type JobUpdate = {
@@ -52,25 +49,42 @@
 	const updates = $derived(job.updates as JobUpdate[]);
 	const errors = $derived(form?.errors ?? {});
 	const values = $derived(form?.values ?? {});
-	// Each form shows its own errors: Add history and Edit update in their dialogs, the rest here.
-	const addErrors = $derived(form?.action === 'addUpdate' ? errors : {});
 	const pageError = $derived(form?.action === 'star' ? errors.form : undefined);
-	const moveErrors = $derived(form?.action === 'changeStage' ? errors : {});
-	const historyGuard = new UnsavedChanges();
-	const stageGuard = new UnsavedChanges();
-	const combinedGuard = {
-		get dirty() {
-			return stageGuard.dirty || historyGuard.dirty;
-		},
-		set dirty(value) {
-			stageGuard.dirty = value;
-			historyGuard.dirty = value;
-		},
-		get saving() {
-			return stageGuard.saving || historyGuard.saving;
-		}
-	};
 	let descriptionOpen = $state(false);
+	let editor = $state<{ mode: 'move' | 'add' | 'edit' | 'followUp'; entry?: JobUpdate } | null>(
+		null
+	);
+	let editorFailure = $state<{
+		action: string;
+		values: Record<string, string>;
+		errors: Record<string, string>;
+		moveFirst?: boolean;
+	} | null>(null);
+	function openEditor(mode: 'move' | 'add' | 'edit' | 'followUp', entry?: JobUpdate) {
+		editorFailure = null;
+		editor = { mode, entry };
+	}
+	$effect(() => {
+		if (
+			!form?.errors ||
+			!['changeStage', 'addHistory', 'editHistory', 'deleteHistory', 'followUp'].includes(
+				form.action
+			)
+		)
+			return;
+		editorFailure = form;
+		editor = {
+			mode:
+				form.action === 'changeStage'
+					? 'move'
+					: form.action === 'addHistory'
+						? 'add'
+						: form.action === 'followUp'
+							? 'followUp'
+							: 'edit',
+			entry: updates.find((entry) => String(entry.id) === form.values?.update_id)
+		};
+	});
 	const upcoming = $derived(
 		updates
 			.filter((entry) => entry.date > data.today)
@@ -82,6 +96,7 @@
 	);
 	let personPickerOpen = $state(false);
 	let networkNoteOpen = $state(false);
+	const noteGuard = new UnsavedChanges();
 	let notePersonId = $state('');
 	let notePersonName = $state('');
 	let networkNote = $state('');
@@ -110,19 +125,30 @@
 		}
 		return page.url.pathname + (query.size ? '?' + query : '');
 	}
-	function networkAction(name: string) {
+	function formAction(name: string) {
 		const query = new URLSearchParams(page.url.searchParams);
 		for (const key of [...query.keys()]) if (key.startsWith('/')) query.delete(key);
 		return '?/' + name + (query.size ? '&' + query : '');
 	}
-	const enhanceNetwork: SubmitFunction = withPending(() => async ({ result, update }) => {
-		if (result.type === 'redirect' || result.type === 'success') {
-			networkNoteOpen = false;
+	const enhanceNetwork: SubmitFunction = withPending(
+		({ formElement }) => {
+			const guarded = formElement.id === 'job-link-note';
+			if (guarded) noteGuard.saving = true;
+			return async ({ result, update }) => {
+				if (result.type === 'redirect' || result.type === 'success') {
+					if (guarded) noteGuard.dirty = false;
+					networkNoteOpen = false;
+				}
+				await update({ reset: false });
+				if (guarded) noteGuard.saving = false;
+				await tick();
+				focusFirstError();
+			};
+		},
+		() => {
+			noteGuard.saving = false;
 		}
-		await update();
-		await tick();
-		focusFirstError();
-	});
+	);
 </script>
 
 <div>
@@ -145,7 +171,7 @@
 				{/if}
 			{/snippet}
 			{#snippet actions()}
-				<form method="POST" action="?/star" use:enhance={enhanceWithFocus}>
+				<form method="POST" action={formAction('star')} use:enhance={enhanceWithFocus}>
 					<input type="hidden" name="is_starred" value={job.isStarred ? '0' : '1'} />
 					<Button type="submit" variant="outline" aria-pressed={job.isStarred}>
 						<Star
@@ -158,10 +184,10 @@
 					href={'/jobs/' + job.id + '/edit?return_to=' + encodeURIComponent(data.returnTo)}
 					variant="outline"><Pencil data-icon="inline-start" />Edit</Button
 				>
-				<Button href={networkHref({ add_history: '1' }) + '#add-history'} variant="outline"
+				<Button onclick={() => openEditor('add')} variant="outline"
 					><Plus data-icon="inline-start" />Add history</Button
 				>
-				<Button href={networkHref({ change_stage: '1' }) + '#change-stage'}>Change stage</Button>
+				<Button onclick={() => openEditor('move')}>Change stage</Button>
 			{/snippet}
 		</PageHeader>
 
@@ -175,71 +201,9 @@
 			<Notice tone="error" title="The change was not saved">{pageError}</Notice>
 		{/if}
 
-		<section class="space-y-4" aria-label="Stage and history actions">
-			<p class="text-sm text-muted-foreground">
-				Current stage: <strong>{job.currentStage.name}</strong> · {job.isActive
-					? 'Active'
-					: 'Closed'}
-			</p>
-			<details
-				id="change-stage"
-				class="disclosure"
-				open={data.changeStageOpen || form?.action === 'changeStage'}
-			>
-				<summary>Change stage</summary>
-				<form
-					method="POST"
-					action={networkAction('changeStage')}
-					use:enhance={stageGuard.enhance}
-					oninput={stageGuard.markDirty}
-					class="disclosure-body space-y-4"
-				>
-					<p class="text-sm">Change current placement and record a milestone together.</p>
-					<p class="meta-text">* Required</p>
-					{#if moveErrors.form}<Notice tone="error" title="Stage was not changed"
-							>{moveErrors.form}</Notice
-						>{/if}
-					<JobHistoryFields
-						stages={data.stages}
-						prefix="move"
-						moving
-						currentStageId={job.currentStageId}
-						today={data.today}
-						errors={moveErrors}
-						values={form?.action === 'changeStage' ? values : {}}
-					/>
-					<div class="form-actions"><Button type="submit">Change stage</Button></div>
-				</form>
-			</details>
-			<details
-				id="add-history"
-				class="disclosure"
-				open={data.addHistoryOpen || form?.action === 'addUpdate'}
-			>
-				<summary>Add history</summary>
-				<form
-					method="POST"
-					action={networkAction('addUpdate')}
-					use:enhance={historyGuard.enhance}
-					oninput={historyGuard.markDirty}
-					class="disclosure-body space-y-4"
-				>
-					<p class="text-sm">Records history only; does not change the current stage.</p>
-					<p class="meta-text">* Required</p>
-					{#if addErrors.form}<Notice tone="error" title="History was not added"
-							>{addErrors.form}</Notice
-						>{/if}
-					<JobHistoryFields
-						stages={data.stages}
-						prefix="history"
-						today={data.today}
-						errors={addErrors}
-						values={form?.action === 'addUpdate' ? values : {}}
-					/>
-					<div class="form-actions"><Button type="submit">Add history</Button></div>
-				</form>
-			</details>
-		</section>
+		<p class="text-sm text-muted-foreground">
+			Current stage: <strong>{job.currentStage.name}</strong> · {job.isActive ? 'Active' : 'Closed'}
+		</p>
 		<div class="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
 			<div class="min-w-0 space-y-6">
 				<SectionCard title="History">
@@ -249,13 +213,9 @@
 								Upcoming
 							</h3>
 							<Timeline
-								{historyGuard}
-								stages={data.stages}
-								jobId={job.id}
+								onedit={(entry) => openEditor('edit', entry)}
 								entries={upcoming}
 								scheduled
-								{errors}
-								{values}
 							/>
 						</section>
 					{/if}
@@ -267,20 +227,13 @@
 							description="Record the first step, like applying, when it happens."
 						>
 							{#snippet actions()}
-								<Button href={networkHref({ add_history: '1' }) + '#add-history'}
+								<Button onclick={() => openEditor('add')}
 									><Plus data-icon="inline-start" />Add history</Button
 								>
 							{/snippet}
 						</EmptyState>
 					{:else if history.length > 0}
-						<Timeline
-							{historyGuard}
-							stages={data.stages}
-							jobId={job.id}
-							entries={history}
-							{errors}
-							{values}
-						/>
+						<Timeline onedit={(entry) => openEditor('edit', entry)} entries={history} />
 					{/if}
 				</SectionCard>
 
@@ -387,7 +340,7 @@
 								>
 								<form
 									method="POST"
-									action={networkAction('networkUnlink')}
+									action={formAction('networkUnlink')}
 									use:enhance={enhanceNetwork}
 								>
 									<input type="hidden" name="network_id" value={person.id} /><Button
@@ -422,67 +375,12 @@
 							</p>{/if}
 					{:else}<p class="text-sm text-muted-foreground">No follow-up scheduled.</p>{/if}
 					{#if !job.isActive && job.followUpDate}<p class="text-sm text-muted-foreground">
-							Kept here while closed. Changing to an open stage shows it on the Dashboard again.
+							Kept here while closed. Changing to an open stage shows this follow-up in Needs
+							attention again.
 						</p>{/if}
-					<details
-						class="disclosure inset-surface group"
-						open={form?.action === 'followUp' && Boolean(form?.errors)}
-					>
-						<summary
-							>{job.followUpDate ? 'Reschedule or edit' : 'Schedule follow-up'}<ChevronDown
-								class="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
-							/></summary
-						>
-						<form
-							method="POST"
-							action="?/followUp"
-							use:enhance={enhanceWithFocus}
-							class="disclosure-body"
-						>
-							{#if form?.action === 'followUp' && errors.form}<Notice
-									tone="error"
-									title="Follow-up was not saved">{errors.form}</Notice
-								>{/if}
-							<Field
-								id="follow_up_date"
-								label="Follow-up date"
-								error={form?.action === 'followUp' ? errors.follow_up_date : undefined}
-							>
-								{#snippet control(attrs)}<Input
-										{...attrs}
-										name="follow_up_date"
-										type="date"
-										value={form?.action === 'followUp'
-											? (values.follow_up_date ?? job.followUpDate ?? '')
-											: (job.followUpDate ?? '')}
-									/>{/snippet}
-							</Field>
-							<Field
-								id="follow_up_comment"
-								label="Comment"
-								hint="Optional. Set a date to add a comment."
-								error={form?.action === 'followUp' ? errors.follow_up_comment : undefined}
-							>
-								{#snippet control(attrs)}<Textarea
-										{...attrs}
-										name="follow_up_comment"
-										rows={3}
-										maxlength={10000}
-										value={form?.action === 'followUp'
-											? (values.follow_up_comment ?? job.followUpComment ?? '')
-											: (job.followUpComment ?? '')}
-									/>{/snippet}
-							</Field>
-							<Button type="submit" variant="outline">Save follow-up</Button>
-						</form>
-					</details>
-					{#if job.followUpDate}<form
-							method="POST"
-							action="?/clearFollowUp"
-							use:enhance={enhanceWithFocus}
-						>
-							<Button type="submit" variant="ghost" size="sm">Clear follow-up</Button>
-						</form>{/if}
+					<Button variant="outline" onclick={() => openEditor('followUp')}>
+						{job.followUpDate ? 'Reschedule or edit' : 'Schedule follow-up'}
+					</Button>
 				</SectionCard>
 				<SectionCard title="Assistant assessment">
 					<p class="text-2xl font-semibold tabular-nums">{job.score ?? 'Unscored'}</p>
@@ -526,47 +424,48 @@
 		</div>
 	</PageShell>
 </div>
-<UnsavedGuard guard={combinedGuard} />
 
-<Dialog.Root bind:open={networkNoteOpen}>
-	<Dialog.Content class="sm:max-w-md">
-		<Dialog.Header>
-			<Dialog.Title>Edit link note</Dialog.Title>
-			<Dialog.Description>{notePersonName || 'Linked person'} · {job.title}</Dialog.Description>
-		</Dialog.Header>
-		<form
-			method="POST"
-			action={networkAction('networkNote')}
-			use:enhance={enhanceNetwork}
-			class="space-y-5"
-		>
-			<input type="hidden" name="network_id" value={notePersonId} />
-			{#if form?.action === 'network-note' && networkErrors.form}<Notice
-					tone="error"
-					title="Link note not saved">{networkErrors.form}</Notice
-				>{/if}
-			<Field
-				id="network_relationship_note"
-				label="Relationship note"
-				error={form?.action === 'network-note' ? networkErrors.notes : undefined}
+<UnsavedDialog bind:open={networkNoteOpen} guard={noteGuard}>
+	{#snippet children(close)}
+		<Dialog.Content class="sm:max-w-md">
+			<Dialog.Header>
+				<Dialog.Title>Edit link note</Dialog.Title>
+				<Dialog.Description>{notePersonName || 'Linked person'} · {job.title}</Dialog.Description>
+			</Dialog.Header>
+			<form
+				id="job-link-note"
+				oninput={noteGuard.markDirty}
+				method="POST"
+				action={formAction('networkNote')}
+				use:enhance={enhanceNetwork}
+				class="space-y-5"
 			>
-				{#snippet control(attrs)}<Textarea
-						{...attrs}
-						name="notes"
-						maxlength={2000}
-						rows={4}
-						bind:value={networkNote}
-					/>{/snippet}
-			</Field>
-			<Dialog.Footer>
-				<Button type="button" variant="ghost" onclick={() => (networkNoteOpen = false)}
-					>Cancel</Button
+				<input type="hidden" name="network_id" value={notePersonId} />
+				{#if form?.action === 'network-note' && networkErrors.form}<Notice
+						tone="error"
+						title="Link note not saved">{networkErrors.form}</Notice
+					>{/if}
+				<Field
+					id="network_relationship_note"
+					label="Relationship note"
+					error={form?.action === 'network-note' ? networkErrors.notes : undefined}
 				>
-				<Button type="submit">Save note</Button>
-			</Dialog.Footer>
-		</form>
-	</Dialog.Content>
-</Dialog.Root>
+					{#snippet control(attrs)}<Textarea
+							{...attrs}
+							name="notes"
+							maxlength={2000}
+							rows={4}
+							bind:value={networkNote}
+						/>{/snippet}
+				</Field>
+				<Dialog.Footer>
+					<Button type="button" variant="ghost" onclick={close}>Cancel</Button>
+					<Button type="submit">Save note</Button>
+				</Dialog.Footer>
+			</form>
+		</Dialog.Content>
+	{/snippet}
+</UnsavedDialog>
 
 <Dialog.Root bind:open={personPickerOpen}>
 	<Dialog.Content class="sm:max-w-2xl">
@@ -621,7 +520,7 @@
 		</form>
 		<form
 			method="POST"
-			action={networkAction('networkLink')}
+			action={formAction('networkLink')}
 			use:enhance={enhanceNetwork}
 			class="space-y-4"
 		>
@@ -704,3 +603,15 @@
 		</form>
 	</Dialog.Content>
 </Dialog.Root>
+
+{#if editor}
+	{#key `${editor.mode}-${editor.entry?.id ?? ''}`}
+		<JobUpdateDialog
+			{data}
+			mode={editor.mode}
+			entry={editor.entry}
+			form={editorFailure}
+			onclose={() => (editor = null)}
+		/>
+	{/key}
+{/if}
