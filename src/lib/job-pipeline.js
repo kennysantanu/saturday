@@ -8,10 +8,8 @@ export function pipelinePage(value) {
 }
 
 /** Build from authoritative columns, dropping obsolete stages and clamping their pages. */
-export function pipelineHref(columns, stageId, page, firstStageId) {
+export function pipelineHref(columns, stageId, page) {
 	const query = new URLSearchParams();
-	if (columns.some((column) => column.id === firstStageId))
-		query.set('pipeline_stage', String(firstStageId));
 	for (const column of columns) {
 		const number = Math.max(
 			1,

@@ -54,6 +54,8 @@
 
 	// A short cross-fade between routes, skipped when the user prefers reduced motion.
 	onNavigate((navigation) => {
+		// Dashboard stage paging has its own horizontal slide rather than a route cross-fade.
+		if (navigation.from?.url.pathname === '/' && navigation.to?.url.pathname === '/') return;
 		if (!document.startViewTransition) return;
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 		return new Promise((resolve) => {

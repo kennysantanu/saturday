@@ -28,7 +28,7 @@ LAN and password settings are independent. For an explicitly authorized preferen
 3. Reconnect and call `get_saturday_info`. Compare `installation_id`, `dataset_id`, and `build.id` with Settings. Read a known numbered job when available; do not create a record merely to test access. Empty workspaces support the identity call.
 4. If a real client call is unavailable, report verification pending. A protocol smoke test, build, or installer receipt does not prove client access. Optional PDF or shortcut failures should be reported separately from app readiness.
 
-For candidate verification on disposable data, also exercise tool discovery, job create/read/edit/search, person linking, document editing/designations, validation failure, previewed restore, and reconnect after rebuilding. Record client/version/execution mode and build. This broader test is separate from verifying access to a user's workspace.
+For candidate verification on disposable data, also exercise tool discovery, job create/read/edit/search, person linking, document editing/designations, validation failure, previewed restore, and reconnect after rebuilding. Discover workflow IDs with `list_workflow_stages`; verify `change_job_stage` updates placement plus a milestone while `add_job_update` only adds history. Dashboard is read-only and Jobs remains a list. Re-read authoritative placement/history after an uncertain write before retrying. Record client/version/execution mode and build. This broader test is separate from verifying access to a user's workspace.
 
 ## Maintain an existing installation
 

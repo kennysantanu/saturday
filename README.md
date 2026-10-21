@@ -5,7 +5,7 @@ Saturday is a local career dashboard for your job search, career pivot, or next 
 ## What Saturday can do
 
 - **Jobs:** track opportunities with editable workflow stages, posting details, stars, follow-ups and deadlines. Change stage on job detail or add history separately. Search, combine filters, sort and paginate the job list; configure stages in Settings.
-- **Dashboard:** see active jobs, upcoming events, due follow-ups, application deadlines, and historical progress counts.
+- **Dashboard:** browse a compact read-only Kanban of current job stages, then review due follow-ups, deadlines, upcoming milestones, and separate milestone-history counts. Open a job to change its stage; Jobs remains a searchable list.
 - **Network:** save people, link them to jobs, keep relationship notes, schedule follow-ups, and record interactions.
 - **Documents and Profile:** upload files, edit Markdown/HTML/TXT, designate a Master CV and templates, attach independent copies to jobs, and generate PDFs from saved HTML.
 - **Backups:** manually save the database, files, or both; download, import, preview restores, and retain recovery snapshots.
