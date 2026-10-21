@@ -10,7 +10,7 @@
 		moving = false,
 		currentStageId,
 		today,
-		values = {},
+		values = $bindable({ stage_id: '', event_date: '', note: '' }),
 		errors = {}
 	}: {
 		stages: Stage[];
@@ -18,13 +18,10 @@
 		moving?: boolean;
 		currentStageId?: number;
 		today: string;
-		values?: Record<string, string | undefined>;
+		values?: { stage_id: string; event_date: string; note: string };
 		errors?: Record<string, string | undefined>;
 	} = $props();
-	let selected = $state('');
-	$effect(() => {
-		selected = values.stage_id ?? '';
-	});
+	const selected = $derived(values.stage_id);
 	const destination = $derived(stages.find((stage) => String(stage.id) === selected));
 </script>
 
@@ -34,7 +31,7 @@
 	required={moving}
 	error={errors.stage_id}
 >
-	{#snippet control(attrs)}<NativeSelect {...attrs} name="stage_id" bind:value={selected}>
+	{#snippet control(attrs)}<NativeSelect {...attrs} name="stage_id" bind:value={values.stage_id}>
 			<option value="">{moving ? 'Choose a stage' : 'General note'}</option>
 			{#each [false, true] as closed}
 				<optgroup label={closed ? 'Closed destinations' : 'Open progression'}>
@@ -68,7 +65,7 @@
 			{...attrs}
 			name="event_date"
 			type="date"
-			value={values.event_date ?? today}
+			bind:value={values.event_date}
 			max={moving ? today : undefined}
 		/>{/snippet}
 </Field>
@@ -76,7 +73,7 @@
 	{#snippet control(attrs)}<Textarea
 			{...attrs}
 			name="note"
-			value={values.note ?? ''}
+			bind:value={values.note}
 			rows={3}
 			maxlength={10000}
 		/>{/snippet}

@@ -40,6 +40,10 @@ IDs are lowercase kebab case, at most 40 characters. Local tool names use lowerc
 
 `page.svelte` receives `data` and `form` props inside Saturday’s layout. It owns one page’s markup. Use `$lib/extension-ui.js` to import existing `PageShell`, `PageHeader`, `SectionCard`, `Field`, `Notice`, `FilterBar`, `Pagination`, `ConfirmDialog`, `UnsavedGuard`, `UnsavedChanges`, `Button`, `Input`, `Textarea`, and `enhance`. Read [the design guide](design-guide.md). Other supported imports are package-relative files, `svelte`, `zod`, and individual `@lucide/svelte/icons/...` imports. The sample demonstrates explicit forms and an unsaved-change guard. Do not import private components or server modules in the browser.
 
+`Pagination` also accepts optional `compact={true}` for icon Previous/Next controls and a short page count. Its default keeps the visible Previous/Next labels. Give each instance a descriptive `label`; compact controls retain accessible names and tooltips.
+
+`ConfirmDialog` accepts optional `formAction` and `formNoValidate` when a confirmed action shares an existing form. For example, deletion can submit a separate action without validating unrelated edit fields. Both default to ordinary form submission behavior.
+
 The optional server entry exports:
 
 - `load({ url }, ctx)` returns serializable page data. Search/pagination/selection can use URL parameters.

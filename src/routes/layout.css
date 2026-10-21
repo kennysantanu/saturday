@@ -38,7 +38,7 @@
 
 	/* Concentric radius scale. Nested surfaces step down one level. */
 	--r-shell: 28px; /* top bar, tab bar, dialog, toast, empty state */
-	--r-card: 24px; /* cards, disclosures, funnel, summary */
+	--r-card: 24px; /* cards, disclosures, pipeline, summary */
 	--r-group: 16px; /* inset groups inside a card: notices, code blocks, callouts */
 	--r-control: 12px; /* fields, selects, compact buttons */
 	--tabbar-h: 64px;
@@ -546,6 +546,12 @@ p {
 	border: 0;
 	background: transparent;
 }
+/* Match the 48rem dialog-sheet breakpoint for action layout. */
+@media (width >= 48rem) {
+	.job-update-actions > [data-variant='destructive'] {
+		margin-right: auto;
+	}
+}
 @keyframes sheet-in {
 	from {
 		opacity: 0;
@@ -562,7 +568,7 @@ p {
 /* ---- Toast ---- */
 .toast {
 	position: fixed;
-	z-index: 60;
+	z-index: 45;
 	left: 50%;
 	translate: -50% 0;
 	bottom: max(24px, env(safe-area-inset-bottom));
@@ -594,57 +600,10 @@ p {
 }
 
 /* ---- Dashboard ---- */
-.activity-summary {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	justify-content: space-between;
-	gap: 20px 24px;
-	padding: 28px 32px;
-	border-radius: var(--r-card);
-	/* Mixing toward the card keeps contrast with --accent-foreground in both themes. */
-	background: linear-gradient(
-		135deg,
-		var(--accent),
-		color-mix(in srgb, var(--accent) 60%, var(--card))
-	);
-	color: var(--accent-foreground);
-}
-.activity-main {
-	display: flex;
-	align-items: center;
-	gap: 24px;
-	min-width: 0;
-	border-radius: var(--r-group);
-}
-.activity-chips {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-}
-.activity-chip {
-	display: inline-flex;
-	align-items: center;
-	gap: 8px;
-	min-height: 44px;
-	padding: 0 18px;
-	border-radius: 999px;
-	background: var(--card);
-	color: var(--foreground);
-	font-size: 0.875rem;
-}
-@media (hover: hover) {
-	.activity-chip:hover {
-		background: var(--muted);
-	}
-}
-.dashboard-layout {
+.dashboard-overview {
 	display: grid;
 	gap: 32px;
-}
-.dashboard-main,
-.dashboard-side {
-	display: contents;
+	align-items: start;
 }
 .group-title {
 	padding: 12px 24px;
@@ -652,145 +611,119 @@ p {
 	font-weight: 600;
 	background: var(--muted);
 }
-@media (width < 64rem) {
-	.dash-attention {
-		order: 1;
-	}
-	.dash-upcoming {
-		order: 2;
-	}
-	.dash-recent {
-		order: 3;
-	}
-	.dash-progress {
-		order: 4;
-	}
-}
 @media (width >= 64rem) {
-	.dashboard-layout {
-		grid-template-columns: minmax(0, 1fr) minmax(19rem, 24rem);
-		align-items: start;
+	.dashboard-overview {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
-	.dashboard-main,
-	.dashboard-side {
-		display: grid;
-		gap: 32px;
-		min-width: 0;
-	}
-	/* The side column is narrow, so rows use the stacked phone layout. */
-	.dashboard-side .list-row {
+	.dashboard-overview .list-row {
 		grid-template-columns: 36px minmax(0, 1fr) 16px;
-		column-gap: 12px;
-		row-gap: 10px;
-		padding: 20px;
 	}
-	.dashboard-side .row-mark {
-		width: 36px;
-		height: 36px;
-		border-radius: 11px;
-	}
-	.dashboard-side .list-row-status {
+	.dashboard-overview .list-row-status {
 		grid-column: 2;
-		grid-row: 2;
 		align-items: flex-start;
 	}
-	.dashboard-side .list-row > svg {
+	.dashboard-overview .list-row > svg {
 		grid-column: 3;
 		grid-row: 1;
 	}
 }
-.activity-count {
-	font-size: 3.5rem;
-	line-height: 1;
-	font-weight: 700;
-	letter-spacing: -0.06em;
-	font-variant-numeric: tabular-nums;
-}
-.funnel {
+.pipeline-browser {
 	display: grid;
-	overflow: hidden;
-	container-type: inline-size;
-	border-radius: var(--r-card);
+	grid-template-columns: 40px minmax(0, 1fr) 40px;
+	align-items: start;
+	gap: 8px;
+	min-width: 0;
+}
+.pipeline-arrow {
+	margin-top: 4px;
+}
+.pipeline-board {
+	display: grid;
+	grid-template-columns: repeat(var(--pipeline-columns, 1), minmax(0, 1fr));
+	gap: 12px;
+	min-width: 0;
+	align-items: start;
+}
+.pipeline-column {
+	position: relative;
+	min-width: 0;
+	padding: 12px;
+	border-radius: var(--r-group);
+	background: var(--muted);
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	overflow-wrap: anywhere;
+}
+.pipeline-heading {
+	scroll-margin-block: 8rem;
+}
+.pipeline-heading:focus-visible {
+	outline: 3px solid var(--ring);
+	outline-offset: 4px;
+}
+.pipeline-jobs {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	min-width: 0;
+	gap: 8px;
+	max-height: 22rem;
+	overflow-y: auto;
+	margin: -4px;
+	padding: 4px;
+}
+.pipeline-card {
+	display: block;
+	min-width: 0;
+	padding: 10px 12px;
+	border: 1px solid var(--border);
+	border-radius: var(--r-control);
 	background: var(--card);
-	box-shadow: 0 2px 8px rgb(25 39 67 / 3%);
-}
-.funnel-row {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) auto;
-	align-items: center;
-	column-gap: 16px;
-	row-gap: 10px;
-	padding: 16px 20px;
 	transition: background-color 160ms;
 }
-.funnel-row + .funnel-row {
-	border-top: 1px solid var(--border);
+.pipeline-card > * + * {
+	margin-top: 2px;
 }
-.funnel-row:focus-visible,
-.history-stat:focus-visible,
+.pipeline-card > p {
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+@media (width >= 48rem) {
+	.pipeline-browser {
+		grid-template-columns: 40px minmax(0, 1fr) 40px;
+		gap: 12px;
+	}
+}
+.milestone-counts {
+	display: grid;
+	gap: 8px;
+}
+.milestone-count {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: 16px;
+	padding: 12px 16px;
+	background: var(--card);
+	border-radius: var(--r-group);
+	overflow-wrap: anywhere;
+	font-size: 0.875rem;
+}
+.milestone-count > strong {
+	flex-shrink: 0;
+	white-space: nowrap;
+}
+@media (hover: hover) {
+	.pipeline-card:hover,
+	.milestone-count:hover {
+		background: var(--accent);
+	}
+}
 .list-row:focus-visible {
 	outline-offset: -4px;
 	border-radius: var(--r-group);
 }
-.activity-main:focus-visible,
-.activity-chip:focus-visible {
-	outline-offset: 2px;
-}
-.funnel-track {
-	grid-column: 1 / -1;
-	grid-row: 2;
-	height: 8px;
-	border-radius: 999px;
-	background: var(--muted);
-	overflow: hidden;
-}
-.funnel-bar {
-	display: block;
-	height: 100%;
-	border-radius: 999px;
-	background: var(--primary);
-}
-.funnel-label {
-	grid-column: 1;
-	grid-row: 1;
-}
-.funnel-count {
-	grid-column: 2;
-	grid-row: 1;
-	text-align: right;
-	font-size: 1.25rem;
-	font-weight: 650;
-	font-variant-numeric: tabular-nums;
-}
-@container (min-width: 32rem) {
-	.funnel-row {
-		grid-template-columns: minmax(8rem, 11rem) minmax(0, 1fr) 3rem;
-		row-gap: 0;
-		padding: 16px 24px;
-	}
-	.funnel-track {
-		grid-column: 2;
-		grid-row: 1;
-	}
-	.funnel-count {
-		grid-column: 3;
-	}
-}
-.history-grid {
-	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 1px;
-	background: var(--border);
-	border-radius: var(--r-card);
-	overflow: hidden;
-}
-.history-stat {
-	background: var(--card);
-	padding: 20px 24px;
-	transition: background-color 160ms;
-	overflow-wrap: anywhere;
-}
-
 /* ---- Job lists ---- */
 .list-row {
 	display: grid;
@@ -830,8 +763,6 @@ p {
 	white-space: normal;
 }
 @media (hover: hover) {
-	.funnel-row:hover,
-	.history-stat:hover,
 	a.list-row:hover {
 		background: var(--muted);
 	}
@@ -895,11 +826,6 @@ html {
 	animation-duration: 160ms;
 }
 
-@media (width < 64rem) {
-	.history-stat {
-		padding: 20px 16px;
-	}
-}
 @media (width < 48rem) {
 	.app-shell {
 		padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
@@ -953,18 +879,6 @@ html {
 	}
 	.page-actions {
 		gap: 8px;
-	}
-	.activity-summary {
-		padding: 20px;
-		gap: 16px;
-	}
-	.activity-main {
-		flex-wrap: wrap;
-		gap: 12px;
-	}
-	.activity-count {
-		font-size: 3rem;
-		overflow-wrap: anywhere;
 	}
 	.list-row {
 		grid-template-columns: 36px minmax(0, 1fr) 16px;
@@ -1269,7 +1183,7 @@ form[aria-busy='true'] [data-slot='button'][type='submit']::after {
 	}
 	[data-slot='card'],
 	.empty-state,
-	.funnel {
+	.pipeline-column {
 		outline: 1px solid var(--border);
 	}
 	.navigation-item[aria-current='page'],
@@ -1307,7 +1221,7 @@ form[aria-busy='true'] [data-slot='button'][type='submit']::after {
 	[data-slot='dialog-content'],
 	[data-slot='button'],
 	.job-filters,
-	.funnel {
+	.pipeline-column {
 		border: 1px solid ButtonText;
 	}
 	.navigation-item[aria-current='page'],
@@ -1315,9 +1229,6 @@ form[aria-busy='true'] [data-slot='button'][type='submit']::after {
 	.job-filters a[aria-current='page'] {
 		outline: 2px solid Highlight;
 		outline-offset: -3px;
-	}
-	.funnel-bar {
-		background: Highlight;
 	}
 }
 

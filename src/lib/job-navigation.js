@@ -20,7 +20,9 @@ export function jobReturn(value) {
 		return (
 			url.pathname +
 			url.search +
-			(url.pathname === '/' && url.hash === '#job-pipeline' ? url.hash : '')
+			(url.pathname === '/' && /^#(?:job-pipeline|pipeline-stage-[1-9]\d*)$/.test(url.hash)
+				? url.hash
+				: '')
 		);
 	} catch {
 		return '/jobs';

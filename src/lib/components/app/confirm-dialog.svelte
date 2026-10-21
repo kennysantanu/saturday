@@ -13,6 +13,8 @@
 		description,
 		confirmLabel,
 		formId,
+		formAction,
+		formNoValidate = false,
 		destructive = false,
 		children
 	}: {
@@ -21,6 +23,8 @@
 		description: string;
 		confirmLabel: string;
 		formId: string;
+		formAction?: string;
+		formNoValidate?: boolean;
 		destructive?: boolean;
 		children?: Snippet;
 	} = $props();
@@ -35,8 +39,12 @@
 		{@render children?.()}
 		<Dialog.Footer>
 			<Button type="button" variant="ghost" onclick={() => (open = false)}>Cancel</Button>
-			<Button type="submit" form={formId} variant={destructive ? 'destructive' : 'default'}
-				>{confirmLabel}</Button
+			<Button
+				type="submit"
+				form={formId}
+				formaction={formAction}
+				formnovalidate={formNoValidate}
+				variant={destructive ? 'destructive' : 'default'}>{confirmLabel}</Button
 			>
 		</Dialog.Footer>
 	</Dialog.Content>

@@ -14,6 +14,8 @@
 	import Field from '$lib/components/app/field.svelte';
 	import Notice from '$lib/components/app/notice.svelte';
 	import ConfirmDialog from '$lib/components/app/confirm-dialog.svelte';
+	import UnsavedDialog from '$lib/components/app/unsaved-dialog.svelte';
+	import { UnsavedChanges } from '$lib/unsaved.svelte';
 	import DueBadge from '$lib/components/app/due-badge.svelte';
 	import EmptyState from '$lib/components/app/empty-state.svelte';
 	import LinkedItem from '$lib/components/app/linked-item.svelte';
@@ -30,6 +32,14 @@
 	const person = $derived(data.person);
 	const errors = $derived(form?.errors ?? data.errors ?? {});
 	const values = $derived(form?.values ?? {});
+	const followGuard = new UnsavedChanges();
+	const interactionGuard = new UnsavedChanges();
+	const noteGuard = new UnsavedChanges();
+	const dialogGuards: Record<string, UnsavedChanges> = {
+		'network-follow-up': followGuard,
+		'network-interaction': interactionGuard,
+		'network-link-note': noteGuard
+	};
 	let followOpen = $state(false);
 	let interactionOpen = $state(false);
 	let interactionId = $state('');
@@ -86,17 +96,28 @@
 		interactionNote = '';
 		interactionOpen = true;
 	}
-	const enhanceNetwork: SubmitFunction = withPending(() => async ({ result, update }) => {
-		if (result.type === 'redirect' || result.type === 'success') {
-			followOpen = false;
-			interactionOpen = false;
-			deleteOpen = false;
-			noteOpen = false;
+	const enhanceNetwork: SubmitFunction = withPending(
+		({ formElement }) => {
+			const guard = dialogGuards[formElement.id];
+			if (guard) guard.saving = true;
+			return async ({ result, update }) => {
+				if (result.type === 'redirect' || result.type === 'success') {
+					if (guard) guard.dirty = false;
+					followOpen = false;
+					interactionOpen = false;
+					deleteOpen = false;
+					noteOpen = false;
+				}
+				await update({ reset: false });
+				if (guard) guard.saving = false;
+				await tick();
+				focusFirstError();
+			};
+		},
+		() => {
+			for (const guard of Object.values(dialogGuards)) guard.saving = false;
 		}
-		await update();
-		await tick();
-		focusFirstError();
-	});
+	);
 </script>
 
 <PageShell title={`${person.name} · Network`}>
@@ -285,117 +306,123 @@
 	</SectionCard>
 </PageShell>
 
-<Dialog.Root bind:open={followOpen}>
-	<Dialog.Content class="sm:max-w-md">
-		<Dialog.Header>
-			<Dialog.Title
-				>{person.follow_up_date ? 'Reschedule follow-up' : 'Schedule follow-up'}</Dialog.Title
-			>
-			<Dialog.Description
-				>Plan your next contact with {person.name}. Recording an interaction keeps this reminder.</Dialog.Description
-			>
-		</Dialog.Header>
-		<form
-			method="POST"
-			action={formAction('followUp')}
-			use:enhance={enhanceNetwork}
-			class="space-y-5"
-		>
-			{#if form?.action === 'follow-up' && errors.form}<Notice
-					tone="error"
-					title="Follow-up not saved">{errors.form}</Notice
-				>{/if}
-			<Field
-				id="follow_up_date"
-				label="Follow-up date"
-				error={form?.action === 'follow-up' ? errors.follow_up_date : undefined}
-			>
-				{#snippet control(attrs)}<Input
-						{...attrs}
-						type="date"
-						name="follow_up_date"
-						value={form?.action === 'follow-up'
-							? values.follow_up_date
-							: (person.follow_up_date ?? '')}
-					/>{/snippet}
-			</Field>
-			<Field
-				id="follow_up_comment"
-				label="Follow-up comment"
-				hint="Clearing the date also clears the comment."
-				error={form?.action === 'follow-up' ? errors.follow_up_comment : undefined}
-			>
-				{#snippet control(attrs)}<Textarea
-						{...attrs}
-						name="follow_up_comment"
-						maxlength={2000}
-						value={form?.action === 'follow-up'
-							? values.follow_up_comment
-							: (person.follow_up_comment ?? '')}
-					/>{/snippet}
-			</Field>
-			<Dialog.Footer>
-				<Button type="button" variant="ghost" onclick={() => (followOpen = false)}>Cancel</Button>
-				<Button type="submit">Save follow-up</Button>
-			</Dialog.Footer>
-		</form>
-	</Dialog.Content>
-</Dialog.Root>
-
-<Dialog.Root bind:open={interactionOpen}>
-	<Dialog.Content class="sm:max-w-lg">
-		<Dialog.Header>
-			<Dialog.Title>{interactionId ? 'Edit interaction' : 'Add interaction'}</Dialog.Title>
-			<Dialog.Description
-				>Record what happened with {person.name}. Future contact belongs in Follow-up.</Dialog.Description
-			>
-		</Dialog.Header>
-		<form
-			method="POST"
-			action={formAction(interactionId ? 'editInteraction' : 'addInteraction')}
-			use:enhance={enhanceNetwork}
-			class="space-y-5"
-		>
-			<p class="text-sm text-muted-foreground">
-				<span class="text-destructive" aria-hidden="true">*</span> Required
-			</p>
-			{#if (form?.action === 'addInteraction' || form?.action === 'editInteraction') && errors.form}<Notice
-					tone="error"
-					title="Interaction not saved">{errors.form}</Notice
-				>{/if}
-			{#if interactionId}<input type="hidden" name="update_id" value={interactionId} />{/if}
-			<Field
-				id="interaction_date"
-				label="Interaction date"
-				required
-				error={errors.interaction_date}
-			>
-				{#snippet control(attrs)}<Input
-						{...attrs}
-						type="date"
-						name="interaction_date"
-						max={data.today}
-						bind:value={interactionDate}
-					/>{/snippet}
-			</Field>
-			<Field id="interaction_note" label="Interaction note" required error={errors.note}>
-				{#snippet control(attrs)}<Textarea
-						{...attrs}
-						name="note"
-						rows={6}
-						maxlength={20000}
-						bind:value={interactionNote}
-					/>{/snippet}
-			</Field>
-			<Dialog.Footer>
-				<Button type="button" variant="ghost" onclick={() => (interactionOpen = false)}
-					>Cancel</Button
+<UnsavedDialog bind:open={followOpen} guard={followGuard}>
+	{#snippet children(close)}
+		<Dialog.Content class="sm:max-w-md">
+			<Dialog.Header>
+				<Dialog.Title
+					>{person.follow_up_date ? 'Reschedule follow-up' : 'Schedule follow-up'}</Dialog.Title
 				>
-				<Button type="submit">Save interaction</Button>
-			</Dialog.Footer>
-		</form>
-	</Dialog.Content>
-</Dialog.Root>
+				<Dialog.Description
+					>Plan your next contact with {person.name}. Recording an interaction keeps this reminder.</Dialog.Description
+				>
+			</Dialog.Header>
+			<form
+				id="network-follow-up"
+				oninput={followGuard.markDirty}
+				method="POST"
+				action={formAction('followUp')}
+				use:enhance={enhanceNetwork}
+				class="space-y-5"
+			>
+				{#if form?.action === 'follow-up' && errors.form}<Notice
+						tone="error"
+						title="Follow-up not saved">{errors.form}</Notice
+					>{/if}
+				<Field
+					id="follow_up_date"
+					label="Follow-up date"
+					error={form?.action === 'follow-up' ? errors.follow_up_date : undefined}
+				>
+					{#snippet control(attrs)}<Input
+							{...attrs}
+							type="date"
+							name="follow_up_date"
+							value={form?.action === 'follow-up'
+								? values.follow_up_date
+								: (person.follow_up_date ?? '')}
+						/>{/snippet}
+				</Field>
+				<Field
+					id="follow_up_comment"
+					label="Follow-up comment"
+					hint="Clearing the date also clears the comment."
+					error={form?.action === 'follow-up' ? errors.follow_up_comment : undefined}
+				>
+					{#snippet control(attrs)}<Textarea
+							{...attrs}
+							name="follow_up_comment"
+							maxlength={2000}
+							value={form?.action === 'follow-up'
+								? values.follow_up_comment
+								: (person.follow_up_comment ?? '')}
+						/>{/snippet}
+				</Field>
+				<Dialog.Footer>
+					<Button type="button" variant="ghost" onclick={close}>Cancel</Button>
+					<Button type="submit">Save follow-up</Button>
+				</Dialog.Footer>
+			</form>
+		</Dialog.Content>
+	{/snippet}
+</UnsavedDialog>
+
+<UnsavedDialog bind:open={interactionOpen} guard={interactionGuard}>
+	{#snippet children(close)}
+		<Dialog.Content class="sm:max-w-lg">
+			<Dialog.Header>
+				<Dialog.Title>{interactionId ? 'Edit interaction' : 'Add interaction'}</Dialog.Title>
+				<Dialog.Description
+					>Record what happened with {person.name}. Future contact belongs in Follow-up.</Dialog.Description
+				>
+			</Dialog.Header>
+			<form
+				id="network-interaction"
+				oninput={interactionGuard.markDirty}
+				method="POST"
+				action={formAction(interactionId ? 'editInteraction' : 'addInteraction')}
+				use:enhance={enhanceNetwork}
+				class="space-y-5"
+			>
+				<p class="text-sm text-muted-foreground">
+					<span class="text-destructive" aria-hidden="true">*</span> Required
+				</p>
+				{#if (form?.action === 'addInteraction' || form?.action === 'editInteraction') && errors.form}<Notice
+						tone="error"
+						title="Interaction not saved">{errors.form}</Notice
+					>{/if}
+				{#if interactionId}<input type="hidden" name="update_id" value={interactionId} />{/if}
+				<Field
+					id="interaction_date"
+					label="Interaction date"
+					required
+					error={errors.interaction_date}
+				>
+					{#snippet control(attrs)}<Input
+							{...attrs}
+							type="date"
+							name="interaction_date"
+							max={data.today}
+							bind:value={interactionDate}
+						/>{/snippet}
+				</Field>
+				<Field id="interaction_note" label="Interaction note" required error={errors.note}>
+					{#snippet control(attrs)}<Textarea
+							{...attrs}
+							name="note"
+							rows={6}
+							maxlength={20000}
+							bind:value={interactionNote}
+						/>{/snippet}
+				</Field>
+				<Dialog.Footer>
+					<Button type="button" variant="ghost" onclick={close}>Cancel</Button>
+					<Button type="submit">Save interaction</Button>
+				</Dialog.Footer>
+			</form>
+		</Dialog.Content>
+	{/snippet}
+</UnsavedDialog>
 
 <form
 	id="delete-interaction"
@@ -423,38 +450,47 @@
 		>{/if}
 </ConfirmDialog>
 
-<Dialog.Root bind:open={noteOpen}>
-	<Dialog.Content class="sm:max-w-md">
-		<Dialog.Header>
-			<Dialog.Title>Edit link note</Dialog.Title>
-			<Dialog.Description>{person.name} · {noteJobTitle || 'Linked job'}</Dialog.Description>
-		</Dialog.Header>
-		<form method="POST" action={formAction('note')} use:enhance={enhanceNetwork} class="space-y-5">
-			<input type="hidden" name="job_id" value={noteJob} />
-			{#if form?.action === 'network-note' && errors.form}<Notice
-					tone="error"
-					title="Link note not saved">{errors.form}</Notice
-				>{/if}
-			<Field
-				id="relationship_notes"
-				label="Relationship note"
-				error={form?.action === 'network-note' ? errors.notes : undefined}
+<UnsavedDialog bind:open={noteOpen} guard={noteGuard}>
+	{#snippet children(close)}
+		<Dialog.Content class="sm:max-w-md">
+			<Dialog.Header>
+				<Dialog.Title>Edit link note</Dialog.Title>
+				<Dialog.Description>{person.name} · {noteJobTitle || 'Linked job'}</Dialog.Description>
+			</Dialog.Header>
+			<form
+				id="network-link-note"
+				oninput={noteGuard.markDirty}
+				method="POST"
+				action={formAction('note')}
+				use:enhance={enhanceNetwork}
+				class="space-y-5"
 			>
-				{#snippet control(attrs)}<Textarea
-						{...attrs}
-						name="notes"
-						maxlength={2000}
-						rows={4}
-						bind:value={noteText}
-					/>{/snippet}
-			</Field>
-			<Dialog.Footer>
-				<Button type="button" variant="ghost" onclick={() => (noteOpen = false)}>Cancel</Button>
-				<Button type="submit">Save note</Button>
-			</Dialog.Footer>
-		</form>
-	</Dialog.Content>
-</Dialog.Root>
+				<input type="hidden" name="job_id" value={noteJob} />
+				{#if form?.action === 'network-note' && errors.form}<Notice
+						tone="error"
+						title="Link note not saved">{errors.form}</Notice
+					>{/if}
+				<Field
+					id="relationship_notes"
+					label="Relationship note"
+					error={form?.action === 'network-note' ? errors.notes : undefined}
+				>
+					{#snippet control(attrs)}<Textarea
+							{...attrs}
+							name="notes"
+							maxlength={2000}
+							rows={4}
+							bind:value={noteText}
+						/>{/snippet}
+				</Field>
+				<Dialog.Footer>
+					<Button type="button" variant="ghost" onclick={close}>Cancel</Button>
+					<Button type="submit">Save note</Button>
+				</Dialog.Footer>
+			</form>
+		</Dialog.Content>
+	{/snippet}
+</UnsavedDialog>
 
 <Dialog.Root bind:open={pickerOpen}>
 	<Dialog.Content class="sm:max-w-2xl">

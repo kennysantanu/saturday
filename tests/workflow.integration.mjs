@@ -11,6 +11,13 @@ import { migrateDatabase } from '../src/lib/server/database.js';
 import { createJob, getJob } from '../src/lib/server/services.js';
 import { listWorkflowStages } from '../src/lib/server/workflow.js';
 import { jobReturn } from '../src/lib/job-navigation.js';
+import {
+	createNetwork,
+	linkJobNetwork,
+	getNetwork,
+	listNetworkUpdates,
+	listNetworks
+} from '../src/lib/server/networks.js';
 
 test('production stage/history actions, result round trips and read-only overview', async (t) => {
 	const root = await mkdtemp(join(tmpdir(), 'saturday-workflow-web-'));
@@ -52,8 +59,10 @@ test('production stage/history actions, result round trips and read-only overvie
 		assert(ready, logs);
 		const returnTo = '/jobs?query=Workflow&current_stage=' + job.currentStageId;
 		const detail = `/jobs/${job.id}?return_to=${encodeURIComponent(returnTo)}`;
-		const post = (action, values) =>
-			fetch(base + `/jobs/${job.id}?/${action}&return_to=${encodeURIComponent(returnTo)}`, {
+		const formUrl = (action) =>
+			`/jobs/${job.id}?/${action}&return_to=${encodeURIComponent(returnTo)}`;
+		const post = (path, values) =>
+			fetch(base + formUrl(path), {
 				method: 'POST',
 				headers: {
 					origin: base,
@@ -68,7 +77,11 @@ test('production stage/history actions, result round trips and read-only overvie
 		assert(html.includes('Add history'));
 		assert(!html.includes('Dismiss job'));
 		assert(!html.includes('Reopen job'));
-		const history = await post('addUpdate', {
+		assert(!html.includes(`/jobs/${job.id}/change-stage?`));
+		assert(!html.includes(`/jobs/${job.id}/history/new?`));
+		for (const path of ['change-stage', 'history/new', 'history/1/edit'])
+			assert.equal((await fetch(base + `/jobs/${job.id}/${path}`)).status, 404);
+		const history = await post('addHistory', {
 			stage_id: String(interview.id),
 			event_date: '2099-01-01',
 			note: 'Scheduled'
@@ -100,6 +113,63 @@ test('production stage/history actions, result round trips and read-only overvie
 		assert.equal(invalid.status, 400);
 		assert((await invalid.text()).includes('Keep draft'));
 		assert.equal(getJob(job.id).currentStageId, closed.id);
+		const scheduledEntry = getJob(job.id).updates.find((entry) => entry.note === 'Scheduled');
+		const editPost = (entryId, action, values) =>
+			post(action === 'delete' ? 'deleteHistory' : 'editHistory', {
+				...values,
+				update_id: entryId
+			});
+		const corrected = await editPost(scheduledEntry.id, 'save', {
+			stage_id: interview.id,
+			event_date: '2099-01-01',
+			note: 'Corrected scheduled'
+		});
+		assert.equal(corrected.status, 303);
+		assert.equal(getJob(job.id).currentStageId, closed.id);
+		assert.equal(
+			getJob(job.id).updates.find((e) => e.id === scheduledEntry.id).note,
+			'Corrected scheduled'
+		);
+		const currentEntry = getJob(job.id).updates.find((entry) => entry.stageId === closed.id);
+		const blocked = await editPost(currentEntry.id, 'delete', {
+			stage_id: interview.id,
+			event_date: '2020-01-01',
+			note: 'Keep delete draft'
+		});
+		assert.equal(blocked.status, 400);
+		const blockedHtml = await blocked.text();
+		assert(blockedHtml.includes('milestone supports the current stage'));
+		assert(blockedHtml.includes('Keep delete draft'));
+		assert.equal(getJob(job.id).updates.find((e) => e.id === currentEntry.id).note, 'Closed');
+		const other = createJob({ job_title: 'Other owner', company_name: 'Example' });
+		const otherEntry = other.updates[0];
+		// A posted job ID cannot redirect a correction away from its route owner.
+		assert.equal(
+			(
+				await editPost(scheduledEntry.id, 'save', {
+					job_id: other.id,
+					stage_id: interview.id,
+					event_date: '2099-01-01',
+					note: 'Scoped correction'
+				})
+			).status,
+			303
+		);
+		assert.equal(getJob(other.id).updates[0].note, null);
+		assert.equal((await editPost(otherEntry.id, 'delete', {})).status, 400);
+		assert.equal(getJob(other.id).updates.length, 1);
+		assert.equal((await post('editHistory', { update_id: 'invalid' })).status, 400);
+		// Move the fixture out of New so the existing Settings retirement checks remain valid.
+		const { moveJobStage } = await import('../src/lib/server/services.js');
+		moveJobStage(other.id, { stage_id: closed.id, event_date: '2020-01-01' });
+		assert.equal((await editPost(scheduledEntry.id, 'delete', {})).status, 303);
+		assert(!getJob(job.id).updates.some((entry) => entry.id === scheduledEntry.id));
+		const sameCount = getJob(job.id).updates.length;
+		assert.equal(
+			(await post('changeStage', { stage_id: closed.id, event_date: '2020-01-01' })).status,
+			303
+		);
+		assert.equal(getJob(job.id).updates.length, sameCount);
 		for (const input of [
 			'https://evil.test',
 			'//evil.test',
@@ -191,28 +261,339 @@ test('production stage/history actions, result round trips and read-only overvie
 		const errors = [];
 		page.on('pageerror', (e) => errors.push(e.message));
 		await page.setViewport({ width: 1280, height: 960 });
-		await page.goto(base + detail + '&change_stage=1', { waitUntil: 'networkidle0' });
+		await page.goto(base + detail, { waitUntil: 'networkidle0' });
+		const button = (text) => page.click(`button::-p-text(${text})`);
+		const settle = () => page.waitForNetworkIdle({ idleTime: 300 });
+		const saveDialog = async () => {
+			await page.click('#job-update-form button[type="submit"]:not([formaction])');
+			await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+			await settle();
+			await settle();
+			assert.equal(new URL(page.url()).pathname, `/jobs/${job.id}`);
+			assert.equal(new URL(page.url()).searchParams.get('return_to'), returnTo);
+		};
+		await button('Change stage');
+		await page.waitForSelector('#move-stage');
+		assert.equal(new URL(page.url()).pathname, `/jobs/${job.id}`);
+		assert.equal(
+			await page.$eval('[data-slot="dialog-title"]', (el) => el.textContent.trim()),
+			'Change stage'
+		);
+		await page.screenshot({
+			path: '/tmp/saturday-change-stage-dialog-desktop.png',
+			fullPage: true
+		});
 		await page.select('#move-stage', String(interview.id));
 		await page.type('#move-note', 'Browser stage note');
-		await Promise.all([
-			page.waitForNavigation({ waitUntil: 'networkidle0' }),
-			page.click('form[action*="/changeStage"] button[type="submit"]')
-		]);
+		await saveDialog();
 		assert.equal(getJob(job.id).currentStageId, interview.id);
-		await page.goto(base + detail + '&add_history=1', { waitUntil: 'networkidle0' });
+		await button('Add history');
+		await page.waitForSelector('#history-note');
+		assert(await page.$eval('#history-date', (el) => !!el.value));
 		await page.type('#history-note', 'Browser history only');
-		await Promise.all([
-			page.waitForNavigation({ waitUntil: 'networkidle0' }),
-			page.click('form[action*="/addUpdate"] button[type="submit"]')
-		]);
+		await saveDialog();
 		assert.equal(getJob(job.id).currentStageId, interview.id);
-		await new Promise((resolve) => setTimeout(resolve, 300));
-		await page.screenshot({ path: '/tmp/saturday-workflow-detail.png', fullPage: true });
+		const browserEntry = getJob(job.id).updates.find(
+			(entry) => entry.note === 'Browser history only'
+		);
+		await page.click('button[aria-label^="Edit history: General note"]');
+		await page.waitForSelector('#correction-note');
+		assert.equal(await page.$eval('#correction-note', (el) => el.value), 'Browser history only');
+		await page.locator('#correction-note').fill('Corrected in browser');
+		await saveDialog();
+		assert.equal(
+			getJob(job.id).updates.find((entry) => entry.id === browserEntry.id).note,
+			'Corrected in browser'
+		);
+		await page.click('button[aria-label^="Edit history: General note"]');
+		await page.waitForSelector('#correction-note');
+		await page.locator('#correction-note').fill('Unsaved draft');
+		await page.click('#job-update-form button[data-variant="ghost"]');
+		await page.waitForSelector('button::-p-text(Keep editing)');
+		await button('Keep editing');
+		await page.waitForSelector('button::-p-text(Keep editing)', { hidden: true });
+		assert.equal(await page.$eval('#correction-note', (el) => el.value), 'Unsaved draft');
+		// Escape also protects the draft, and Discard closes the editor.
+		await page.keyboard.press('Escape');
+		await page.waitForSelector('button::-p-text(Discard changes)');
+		await button('Discard changes');
+		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await settle();
+		await settle();
+		await page.click('button[aria-label^="Edit history: General note"]');
+		await settle();
+		await page.waitForSelector('#correction-note');
 		await page.setViewport({ width: 320, height: 900 });
-		await page.goto(base + '/jobs', { waitUntil: 'networkidle0' });
+		await settle();
 		assert(await page.$eval('html', (el) => el.scrollWidth <= innerWidth + 1));
-		await page.screenshot({ path: '/tmp/saturday-workflow-jobs-phone.png', fullPage: true });
+		assert(
+			await page.$eval('[data-slot="dialog-content"]', (el) => {
+				const r = el.getBoundingClientRect();
+				return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
+			})
+		);
+		assert(
+			await page.$eval('#job-update-form button[type="submit"]:not([formaction])', (el) => {
+				const r = el.getBoundingClientRect();
+				return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+			})
+		);
+		const stackedActions = () =>
+			page.$eval('#job-update-form [data-slot="dialog-footer"]', (el) => {
+				const buttons = [...el.querySelectorAll('button')];
+				const rects = buttons.map((button) => button.getBoundingClientRect());
+				return (
+					buttons.length === 3 &&
+					rects.every(
+						(r, i) =>
+							Math.abs(r.left - rects[0].left) < 1 &&
+							Math.abs(r.width - rects[0].width) < 1 &&
+							r.left >= 0 &&
+							r.right <= innerWidth &&
+							r.height >= 44 &&
+							(i === 0 || r.bottom <= rects[i - 1].top)
+					)
+				);
+			});
+		assert(await stackedActions());
+		for (const width of [640, 767]) {
+			await page.setViewport({ width, height: 960 });
+			await settle();
+			assert(await stackedActions(), `Footer should stack at ${width}px`);
+		}
+		await page.setViewport({ width: 768, height: 960 });
+		await settle();
+		assert(
+			await page.$eval('#job-update-form [data-slot="dialog-footer"]', (el) => {
+				const buttons = [...el.querySelectorAll('button')];
+				return buttons.every(
+					(button) =>
+						Math.abs(button.getBoundingClientRect().top - buttons[0].getBoundingClientRect().top) <
+						1
+				);
+			})
+		);
+		await page.setViewport({ width: 320, height: 900 });
+		await settle();
+		await page.screenshot({ path: '/tmp/saturday-edit-history-dialog-phone.png' });
+		await page.click('#job-update-form button[data-variant="destructive"]');
+		await page.waitForSelector('button[form="job-update-form"]');
+		await page.click('button[form="job-update-form"]');
+		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await settle();
+		await settle();
+		assert(!getJob(job.id).updates.some((entry) => entry.id === browserEntry.id));
+		assert.equal(getJob(job.id).currentStageId, interview.id);
+		await button('Schedule follow-up');
+		await page.waitForSelector('#follow_up_date');
+		await page.locator('#follow_up_date').fill('2099-01-01');
+		await page.type('#follow_up_comment', 'Phone follow-up');
+		await saveDialog();
+		assert.equal(getJob(job.id).followUpComment, 'Phone follow-up');
+		assert.equal(await page.$('button::-p-text(Clear follow-up)'), null);
+		await button('Reschedule or edit');
+		await page.waitForSelector('#follow_up_comment');
+		await settle();
+		assert(await stackedActions());
+		await page.screenshot({ path: '/tmp/saturday-follow-up-actions-phone.png' });
+		assert.equal(await page.$eval('#follow_up_comment', (el) => el.value), 'Phone follow-up');
+		const historyCount = getJob(job.id).updates.length;
+		// Clearing ignores invalid draft values and retains the original return context.
+		await page.locator('#follow_up_comment').fill('Unsaved comment to discard');
+		await page.locator('#follow_up_date').fill('');
+		await page.click('#job-update-form button[formaction*="clearFollowUp"]');
+		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await settle();
+		assert.equal(getJob(job.id).followUpDate, null);
+		assert.equal(getJob(job.id).followUpComment, null);
+		assert.equal(getJob(job.id).updates.length, historyCount);
+		assert.equal(new URL(page.url()).searchParams.get('return_to'), returnTo);
+		assert.equal(await page.$('button::-p-text(Clear follow-up)'), null);
 		await page.setViewport({ width: 1280, height: 960 });
+		// Invalid correction fields do not prevent deletion reaching the server safeguard.
+		await page.click('button[aria-label^="Edit history: Interview"]');
+		await page.waitForSelector('#correction-note');
+		await page.select('#correction-stage', '');
+		await page.locator('#correction-date').fill('');
+		await page.locator('#correction-note').fill('Protected draft stays here');
+		await page.click('#job-update-form button[data-variant="destructive"]');
+		await page.waitForSelector('button[form="job-update-form"]');
+		await page.click('button[form="job-update-form"]');
+		await page.waitForSelector('#job-update-form [role="alert"]');
+		await page.waitForSelector('button[form="job-update-form"]', { hidden: true });
+		await page.waitForSelector('#job-update-form:not([aria-busy="true"])');
+		await settle();
+		assert.equal(
+			await page.$eval('#correction-note', (el) => el.value),
+			'Protected draft stays here'
+		);
+		assert.equal(await page.$eval('#correction-date', (el) => el.value), '');
+		assert(
+			(await page.$eval('#job-update-form [role="alert"]', (el) => el.textContent)).includes(
+				'Change stage first'
+			)
+		);
+		await page.click('#job-update-form button[data-variant="ghost"]');
+		await page.waitForSelector('button::-p-text(Discard changes)');
+		await button('Discard changes');
+		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await settle();
+		// A server validation failure keeps all fields inside the Add history dialog.
+		await button('Add history');
+		await page.waitForSelector('#history-note');
+		await page.type('#history-note', 'Failed save draft');
+		await page.locator('#history-date').fill('');
+		await page.$eval('#job-update-form', (el) => (el.noValidate = true));
+		await page.click('#job-update-form button[type="submit"]:not([formaction])');
+		await page.waitForSelector('#history-date[aria-invalid="true"]');
+		await settle();
+		assert.equal(await page.$eval('#history-note', (el) => el.value), 'Failed save draft');
+		assert.equal(await page.$eval(':focus', (el) => el.id), 'history-date');
+		await page.locator('#history-date').fill('2020-01-01');
+		await saveDialog();
+		assert(getJob(job.id).updates.some((entry) => entry.note === 'Failed save draft'));
+		await button('Add history');
+		await page.waitForSelector('#history-note');
+		await page.type('#history-note', 'Keep my short note');
+		await page.click('[data-slot="dialog-close"]');
+		await page.waitForSelector('button::-p-text(Keep editing)');
+		await button('Keep editing');
+		await page.waitForSelector('button::-p-text(Keep editing)', { hidden: true });
+		await settle();
+		assert.equal(await page.$eval('#history-note', (el) => el.value), 'Keep my short note');
+		await page.mouse.click(1, 1);
+		await page.waitForSelector('button::-p-text(Keep editing)');
+		await button('Keep editing');
+		await page.waitForSelector('button::-p-text(Keep editing)', { hidden: true });
+		await settle();
+		// Expired sign-in leaves the dialog and draft intact, and resets save progress.
+		await page.setRequestInterception(true);
+		const intercept = (request) => {
+			if (request.method() === 'POST' && request.url().includes('/addHistory')) {
+				void request.respond({
+					status: 401,
+					contentType: 'application/json',
+					headers: { 'x-saturday-auth': 'required' },
+					body: JSON.stringify({ type: 'failure', status: 401, auth_required: true })
+				});
+			} else void request.continue();
+		};
+		page.on('request', intercept);
+		await page.click('#job-update-form button[type="submit"]:not([formaction])');
+		await page.waitForFunction(() => document.body.innerText.includes('Session expired'));
+		await page.waitForSelector('#job-update-form:not([aria-busy="true"])');
+		assert.equal(await page.$eval('#history-note', (el) => el.value), 'Keep my short note');
+		page.off('request', intercept);
+		await page.setRequestInterception(false);
+		await saveDialog();
+		assert(getJob(job.id).updates.some((entry) => entry.note === 'Keep my short note'));
+		// Star keeps both filtered-list and Dashboard return context, including native forms.
+		const dashboardReturn = `/?pipeline_stage=${interview.id}#pipeline-stage-${interview.id}`;
+		for (const origin of [returnTo, dashboardReturn]) {
+			await page.goto(base + `/jobs/${job.id}?return_to=${encodeURIComponent(origin)}`, {
+				waitUntil: 'networkidle0'
+			});
+			const starred = !getJob(job.id).isStarred;
+			await page.click('form[action^="?/star"] button');
+			await page.waitForFunction(
+				(value) =>
+					document.querySelector('form[action^="?/star"] button')?.getAttribute('aria-pressed') ===
+					String(value),
+				{},
+				starred
+			);
+			await settle();
+			assert.equal(new URL(page.url()).searchParams.get('return_to'), origin);
+			assert.equal(getJob(job.id).isStarred, starred);
+		}
+		const native = await browser.newPage();
+		await native.setJavaScriptEnabled(false);
+		await native.goto(base + `/jobs/${job.id}?return_to=${encodeURIComponent(dashboardReturn)}`);
+		await Promise.all([native.waitForNavigation(), native.click('form[action^="?/star"] button')]);
+		assert.equal(new URL(native.url()).searchParams.get('return_to'), dashboardReturn);
+		await native.close();
+
+		const person = createNetwork({ name: 'Draft protection contact' });
+		linkJobNetwork({ job_id: job.id, network_id: person.id, notes: 'Saved relationship' });
+		const keepDraft = async (field, expected, dismiss) => {
+			await dismiss();
+			await page.waitForSelector('button::-p-text(Keep editing)');
+			await button('Keep editing');
+			await page.waitForSelector('button::-p-text(Keep editing)', { hidden: true });
+			await settle();
+			assert.equal(await page.$eval(field, (el) => el.value), expected);
+		};
+		const discardDraft = async (formId) => {
+			await page.click(`#${formId} button[data-variant="ghost"]`);
+			await page.waitForSelector('button::-p-text(Discard changes)');
+			await button('Discard changes');
+			await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+			await settle();
+		};
+		await page.goto(base + `/networks/${person.id}`, { waitUntil: 'networkidle0' });
+		await button('Add interaction');
+		await page.waitForSelector('#interaction_note');
+		await page.type('#interaction_note', 'Unsaved interaction');
+		await keepDraft('#interaction_note', 'Unsaved interaction', () =>
+			page.keyboard.press('Escape')
+		);
+		await discardDraft('network-interaction');
+		assert.equal(listNetworkUpdates({ network_id: person.id }).updates.length, 0);
+		await button('Add interaction');
+		await page.waitForSelector('#interaction_note');
+		assert.equal(await page.$eval('#interaction_note', (el) => el.value), '');
+		await page.type('#interaction_note', 'Interaction validation draft');
+		await page.locator('#interaction_date').fill('2099-01-01');
+		await page.$eval('#network-interaction', (el) => (el.noValidate = true));
+		await page.click('#network-interaction button[type="submit"]');
+		await page.waitForSelector('#interaction_date[aria-invalid="true"]');
+		await settle();
+		assert.equal(
+			await page.$eval('#interaction_note', (el) => el.value),
+			'Interaction validation draft'
+		);
+		await page.locator('#interaction_date').fill('2020-01-01');
+		await page.click('#network-interaction button[type="submit"]');
+		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await settle();
+		assert.equal(
+			listNetworkUpdates({ network_id: person.id }).updates[0].note,
+			'Interaction validation draft'
+		);
+		await button('Schedule follow-up');
+		await page.waitForSelector('#follow_up_comment');
+		await page.locator('#follow_up_date').fill('2099-01-01');
+		await page.type('#follow_up_comment', 'Unsaved follow-up');
+		await keepDraft('#follow_up_comment', 'Unsaved follow-up', () =>
+			page.click('[data-slot="dialog-close"]')
+		);
+		await page.click('#network-follow-up button[type="submit"]');
+		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await settle();
+		assert.equal(getNetwork(person.id).follow_up_comment, 'Unsaved follow-up');
+		await button('Edit link note');
+		await page.waitForSelector('#relationship_notes');
+		await page.locator('#relationship_notes').fill('Unsaved Network link note');
+		await keepDraft('#relationship_notes', 'Unsaved Network link note', () =>
+			page.mouse.click(1, 1)
+		);
+		await discardDraft('network-link-note');
+		assert.equal(listNetworks({ job_id: job.id }).networks[0].job_link.notes, 'Saved relationship');
+
+		await page.goto(base + detail, { waitUntil: 'networkidle0' });
+		await button('Edit link note');
+		await page.waitForSelector('#network_relationship_note');
+		await page.locator('#network_relationship_note').fill('Unsaved Job link note');
+		await keepDraft('#network_relationship_note', 'Unsaved Job link note', () =>
+			page.click('#job-link-note button[data-variant="ghost"]')
+		);
+		await page.click('#job-link-note button[type="submit"]');
+		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await settle();
+		assert.equal(
+			listNetworks({ job_id: job.id }).networks[0].job_link.notes,
+			'Unsaved Job link note'
+		);
 		await page.goto(base + '/settings#workflow', { waitUntil: 'networkidle0' });
 		await page.click(`#workflow-stage-${custom.id} summary`);
 		await page.locator(`#workflow-name-${custom.id}`).fill('Conversation again');
@@ -234,6 +615,8 @@ test('production stage/history actions, result round trips and read-only overvie
 			screening.id
 		);
 		assert.equal(listWorkflowStages().find((s) => s.is_starting).id, screening.id);
+		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await page.waitForNetworkIdle({ idleTime: 300 });
 		await page.$eval('#workflow-new-name', (el) => (el.closest('details').open = true));
 		await page.type('#workflow-new-name', 'Applied');
 		await page.click('#workflow form:has(input[value="add"]) button[type="submit"]');

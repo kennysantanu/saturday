@@ -8,12 +8,12 @@ Saturday is a local SvelteKit app with a restrained glass navigation layer and s
 
 Reserve glass/blur for the functional layer: top bar, tab bar, toast, dialog, and scroll edge. Use solid surfaces for cards, lists, statistics, fields, buttons, disclosures, and history. Selection uses a tinted fill without another blur layer.
 
-| Token         | Value | Use                                          |
-| ------------- | ----- | -------------------------------------------- |
-| `--r-shell`   | 28px  | Top/tab bars, dialogs, toasts, empty states  |
-| `--r-card`    | 24px  | Cards, disclosures, funnel, activity summary |
-| `--r-group`   | 16px  | Insets, notices, code blocks, callouts       |
-| `--r-control` | 12px  | Fields, selects, compact buttons             |
+| Token         | Value | Use                                         |
+| ------------- | ----- | ------------------------------------------- |
+| `--r-shell`   | 28px  | Top/tab bars, dialogs, toasts, empty states |
+| `--r-card`    | 24px  | Cards, disclosures                          |
+| `--r-group`   | 16px  | Insets, notices, code blocks, callouts      |
+| `--r-control` | 12px  | Fields, selects, compact buttons            |
 
 Use `rounded-[var(--r-group)]` and the other tokens, not Tailwind's numbered/named radius scale for app surfaces. Nested surfaces step down; navigation items use the existing concentric radii (18px top bar, 22px tab bar).
 
@@ -65,9 +65,9 @@ Explain conditional behavior in a field hint where needed. Preserve drafts and s
 
 ## Dialogs and feedback
 
-Dialogs use centered glass panels at desktop widths and bottom sheets below 48rem, with a dimmed backdrop and solid controls. Always include a title and description. Use `sm:max-w-md` for short forms/confirmation, `sm:max-w-lg` for longer forms, and `sm:max-w-2xl` for pickers. Cancel comes first and uses ghost styling.
+Dialogs use centered glass panels at desktop widths and bottom sheets below 48rem, with a dimmed backdrop and solid controls. Always include a title and description. Use `sm:max-w-md` for short forms/confirmation, `sm:max-w-lg` for longer forms, and `sm:max-w-2xl` for pickers. Stack footer buttons below 48rem and use a row at 48rem and wider, matching the sheet breakpoint. Cancel uses ghost styling.
 
-Use `ConfirmDialog` for consequential actions; it submits the form identified by `formId`. Never use `window.confirm`. Entry corrections follow the same dialog pattern as additions. Keep dialog errors inside the dialog and preserve focus on failure.
+Use `ConfirmDialog` for consequential actions; it submits the form identified by `formId`. Never use `window.confirm`. Keep corrections consistent with the feature’s add/edit flow. Short job updates use dialogs matching Network follow-up and interaction forms. Keep Add/Edit job as dedicated pages for their longer content. Use UnsavedDialog with an UnsavedChanges guard for short Network follow-up/interaction and relationship-note forms; wire Cancel to its provided close callback and preserve dirty/saving state through enhanced submissions. Keep dialog errors inside the dialog and preserve focus on failure. Toasts sit below dialog overlays so a previous success message cannot cover a mobile form action.
 
 `RowActions` exposes Edit with icon/text; other actions use `ActionMenu`, with permanent Delete tinted, separated, and last. Empty states explain the next step and offer one primary action.
 
@@ -77,11 +77,11 @@ Successful server saves redirect with `?saved=<key>` from `SAVED_MESSAGES` in `$
 
 ### Dashboard and Jobs
 
-Dashboard shows today's date, Add job, Active now, Needs attention, Recently updated, Coming up and dynamic Milestone history totals. Stage names/order come from storage, with open stages before closed destinations. Milestone totals count distinct jobs including closed jobs and scheduled entries, link to `/jobs?view=all&milestone_stage=<id>`, and stay distinct from current placement. Archived history remains searchable. Show readable date/DueBadge cues; status never relies on color alone. Dashboard remains an overview without stage mutations.
+Dashboard shows today's date and Add job, then a full-width read-only Job pipeline with View all jobs. Below it, use two columns from 64rem: Notifications on the left (Needs attention and Coming up) and Milestone history on the right. Stack Notifications before Milestone history below 64rem. The board's stage counts replace the separate Active now summary. The board makes every unarchived stage available, including empty and closed stages, with full current counts and independent 20-card pages sorted by latest change. Use semantic headings/lists, shared Pagination, stable stage-ID URLs and column focus on paging/detail return. Show only as many complete stages as fit, with previous/next stage arrows flanking the board and no horizontal scrollbar. Below 48rem show one stage. Preserve the visible stage window and independent job pages in URLs, including native navigation without JavaScript. Stage names link to their current-stage Jobs filter. Cards have exactly two visible, ellipsized lines: role and company; put the job number in the accessible link name and full text in the tooltip. Keep compact shared Pagination for job pages within a stage. Initiate stage changes from job detail and omit drag affordances, layout toggles and Dashboard filters. Keep configured stage order without extra open/closed labels on the board. Archived history belongs in a compact disclosure, without board columns. Stage names/order come from storage, with open stages before closed destinations. Milestone totals count distinct jobs including closed jobs and scheduled entries, link to `/jobs?view=all&milestone_stage=<id>`, and stay distinct from current placement. Archived history remains searchable. Show readable date/DueBadge cues; status never relies on color alone. Dashboard remains an overview without stage mutations.
 
 Jobs is list-only with a visible Search jobs field, GET Apply, URL/chip state, sort choices and Pagination. Specific text fields belong in Advanced filters. Current stage and Milestone history filters use stable stage IDs and force All while selected. Use Active/Closed/All labels. Rows open detail with validated internal return URLs; preserve filters/pages across edits and show an explanation if changed placement leaves the original results.
 
-On job detail, Change stage is primary; Add history, Edit and Star/Unstar are secondary. Change stage saves placement and a milestone together. Add history records a note/past/scheduled milestone without moving the job. Reuse stage/date/note fields with distinct help, required cues and success feedback. Native disclosures/forms support keyboard and no-JavaScript use; protect drafts with one combined unsaved-changes prompt. Do not add dedicated Dismiss/Reopen buttons or a second placement field to ordinary editing. History edit/delete never changes placement and blocks removal of sole current-stage evidence with Change stage first guidance. Keep future Scheduled and retired Archived cues readable.
+On job detail, Change stage is primary; Add history, Edit and Star/Unstar are secondary. Change stage, Add history, Edit history, and Schedule/Reschedule follow-up open shared dialogs with the same glass panel, responsive bottom sheet, labelled controls, spacing and Cancel/Save footer as Network. Use compact three-row note fields; keep Add/Edit job on dedicated pages. Change stage saves placement and a milestone together; Add history records a note/past/scheduled milestone without moving the job. Timeline entries show a small ghost Edit history button with a Pencil icon opening a prefilled dialog, with confirmed Delete history inside. Preserve drafts and focus on validation/authentication failure. Ask before dismissing unsaved edits through Cancel, Close, Escape or the backdrop, and protect navigation while editing. Successful saves close the dialog, refresh detail, and preserve the original Dashboard/Jobs context. Keep required cues, distinct help and success feedback. Do not add dedicated Dismiss/Reopen buttons or a second placement field to ordinary editing. History edit/delete never changes placement and blocks removal of sole current-stage evidence with Change stage first guidance. Keep future Scheduled and retired Archived cues readable.
 
 ### Network
 

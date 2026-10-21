@@ -6,6 +6,7 @@ import {
 	jobToStorage
 } from '../job-fields.js';
 import { startingStage, stageById, readWorkflow } from './workflow.js';
+import { PIPELINE_PAGE_SIZE, pipelinePage } from '../job-pipeline.js';
 import { inTransaction, withDatabase, reserveJobFileIds } from './database.js';
 import {
 	jobSearchSchema,
@@ -422,18 +423,72 @@ export function correctJobUpdate(id, correction = {}) {
 		})
 	);
 }
-export function getDashboardStats({ today = localCalendarDate() } = {}) {
+export function getDashboardStats({ today = localCalendarDate(), pipelinePages = {} } = {}) {
 	return withDatabase((db) => {
 		db.exec('BEGIN');
 		const stages = readWorkflow(db);
-		const stagesWithHistory = stages.map((stage) => ({
-			...stage,
-			history_count: Number(
-				db
-					.prepare('SELECT COUNT(DISTINCT job_id) AS n FROM job_updates WHERE stage_id=?')
-					.get(stage.id).n
-			)
-		}));
+		const errors = {};
+		// A failed section is unavailable, never an empty result. Other reads share this snapshot.
+		const section = (key, read, fallback) => {
+			try {
+				return read();
+			} catch (error) {
+				console.error(`Dashboard ${key} could not be loaded`, error);
+				errors[key] = 'This section could not be loaded. Reload to try again.';
+				return fallback;
+			}
+		};
+		const stagesWithHistory = section(
+			'history',
+			() =>
+				stages.map((stage) => ({
+					...stage,
+					history_count: Number(
+						db
+							.prepare('SELECT COUNT(DISTINCT job_id) AS n FROM job_updates WHERE stage_id=?')
+							.get(stage.id).n
+					)
+				})),
+			[]
+		);
+		const pipeline = section(
+			'pipeline',
+			() =>
+				stages
+					.filter((stage) => !stage.is_archived)
+					.map((stage) => {
+						const total = Number(stage.job_count);
+						const totalPages = Math.max(1, Math.ceil(total / PIPELINE_PAGE_SIZE));
+						const page = Math.min(pipelinePage(pipelinePages[stage.id]), totalPages);
+						const jobs = db
+							.prepare(
+								`${joinedJobs} WHERE j.current_stage_id=? ORDER BY j.updated_at DESC,j.id DESC LIMIT ? OFFSET ?`
+							)
+							.all(stage.id, PIPELINE_PAGE_SIZE, (page - 1) * PIPELINE_PAGE_SIZE)
+							.map((row) => {
+								const job = jobFromRow(row);
+								return {
+									id: job.id,
+									title: job.title,
+									company: job.company,
+									currentStage: job.currentStage,
+									isStarred: job.isStarred,
+									followUpDate: job.followUpDate,
+									applicationDeadline: job.applicationDeadline
+								};
+							});
+						return {
+							id: stage.id,
+							name: stage.name,
+							is_closed: stage.is_closed,
+							total,
+							page,
+							totalPages,
+							jobs
+						};
+					}),
+			[]
+		);
 		const stats = {
 			active: Number(
 				db
@@ -443,23 +498,25 @@ export function getDashboardStats({ today = localCalendarDate() } = {}) {
 					.get().n
 			)
 		};
-		const recentJobs = db
-			.prepare(`${joinedJobs} ORDER BY j.updated_at DESC,j.id DESC LIMIT 5`)
-			.all()
-			.map((row) => ({ ...jobFromRow(row), updates: undefined }));
-		const upcoming = db
-			.prepare(
-				`SELECT u.*,s.name AS stage_name,j.job_title,j.company_name FROM job_updates u JOIN jobs j ON j.id=u.job_id JOIN workflow_stages current ON current.id=j.current_stage_id LEFT JOIN workflow_stages s ON s.id=u.stage_id WHERE u.event_date>? AND current.is_closed=0 ORDER BY u.event_date,u.id LIMIT 5`
-			)
-			.all(today)
-			.map((row) => ({
-				id: row.id,
-				jobId: row.job_id,
-				label: row.stage_name ?? 'General note',
-				date: row.event_date,
-				title: row.job_title,
-				company: row.company_name
-			}));
+		const upcoming = section(
+			'upcoming',
+			() =>
+				db
+					.prepare(
+						`SELECT u.*,s.name AS stage_name,current.name AS current_stage_name,j.job_title,j.company_name FROM job_updates u JOIN jobs j ON j.id=u.job_id JOIN workflow_stages current ON current.id=j.current_stage_id LEFT JOIN workflow_stages s ON s.id=u.stage_id WHERE u.event_date>? AND current.is_closed=0 ORDER BY u.event_date,u.id LIMIT 5`
+					)
+					.all(today)
+					.map((row) => ({
+						id: row.id,
+						jobId: row.job_id,
+						label: row.stage_name ?? 'General note',
+						stage: row.current_stage_name,
+						date: row.event_date,
+						title: row.job_title,
+						company: row.company_name
+					})),
+			[]
+		);
 		const due = (column, extra = '', args = []) =>
 			db
 				.prepare(
@@ -471,19 +528,26 @@ export function getDashboardStats({ today = localCalendarDate() } = {}) {
 					title: row.job_title,
 					company: row.company_name,
 					date: row[column],
-					comment: column === 'follow_up_date' ? row.follow_up_comment : null
+					comment: column === 'follow_up_date' ? row.follow_up_comment : null,
+					stage: row.stage_name
 				}));
-		const followUps = due('follow_up_date');
-		const deadlines = due('application_deadline', 'AND j.application_deadline>=?', [today]);
+		const attention = section(
+			'attention',
+			() => ({
+				followUps: due('follow_up_date'),
+				deadlines: due('application_deadline', 'AND j.application_deadline>=?', [today])
+			}),
+			{ followUps: [], deadlines: [] }
+		);
 		const totalJobs = Number(db.prepare('SELECT COUNT(*) AS n FROM jobs').get().n);
 		db.exec('COMMIT');
 		return {
 			stats,
 			stages: stagesWithHistory,
-			recentJobs,
+			pipeline,
+			errors,
 			upcoming,
-			followUps,
-			deadlines,
+			...attention,
 			totalJobs
 		};
 	});
