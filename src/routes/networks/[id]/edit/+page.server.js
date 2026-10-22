@@ -1,16 +1,20 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { getNetwork, editNetwork } from '$lib/server/networks.js';
 import { ValidationError, ServiceError } from '$lib/server/validation.js';
-export function load({ params }) {
+import { networkEditReturn } from '$lib/network-navigation.js';
+export function load({ params, url }) {
 	try {
-		return { person: getNetwork(params.id) };
+		return {
+			person: getNetwork(params.id),
+			back: networkEditReturn(url.searchParams.get('return_to'), params.id)
+		};
 	} catch (e) {
 		if (e instanceof ServiceError || e instanceof ValidationError) error(404, 'Person not found');
 		throw e;
 	}
 }
 export const actions = {
-	default: async ({ request, params }) => {
+	default: async ({ request, params, url }) => {
 		const values = Object.fromEntries(
 			Array.from((await request.formData()).entries(), ([key, value]) => [
 				key,
@@ -28,6 +32,8 @@ export const actions = {
 				values
 			});
 		}
-		redirect(303, `/networks/${params.id}?saved=person`);
+		const back = new URL(networkEditReturn(url.searchParams.get('return_to'), params.id), url);
+		back.searchParams.set('saved', 'person');
+		redirect(303, back.pathname + back.search);
 	}
 };

@@ -8,7 +8,8 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import puppeteer from 'puppeteer';
 import { migrateDatabase } from '../src/lib/server/database.js';
-import { createJob, getJob } from '../src/lib/server/services.js';
+import { createJob, getJob, setJobScore, addJobUpdate } from '../src/lib/server/services.js';
+import { createDocument } from '../src/lib/server/files/documents.js';
 import {
 	listWorkflowStages,
 	addWorkflowStage,
@@ -402,7 +403,7 @@ test('production stage/history actions, result round trips and read-only overvie
 		await saveDialog();
 		assert.equal(getJob(job.id).followUpComment, 'Phone follow-up');
 		assert.equal(await page.$('button::-p-text(Clear follow-up)'), null);
-		await button('Reschedule or edit');
+		await button('Edit follow-up');
 		await page.waitForSelector('#follow_up_comment');
 		await settle();
 		assert(await stackedActions());
@@ -524,7 +525,7 @@ test('production stage/history actions, result round trips and read-only overvie
 		assert.equal(new URL(native.url()).searchParams.get('return_to'), dashboardReturn);
 		await native.close();
 
-		const person = createNetwork({ name: 'Draft protection contact' });
+		const person = createNetwork({ name: 'Draft protection contact', organization: 'Return QA' });
 		linkJobNetwork({ job_id: job.id, network_id: person.id, notes: 'Saved relationship' });
 		const keepDraft = async (field, expected, dismiss) => {
 			await dismiss();
@@ -582,6 +583,87 @@ test('production stage/history actions, result round trips and read-only overvie
 		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
 		await settle();
 		assert.equal(getNetwork(person.id).follow_up_comment, 'Unsaved follow-up');
+		// Existing reminder and interaction removal use the same editor pattern as Jobs.
+		assert.equal(await page.$('main form[action*="clearFollowUp"]'), null);
+		await button('Edit follow-up');
+		await page.waitForSelector('#network-follow-up');
+		await page.locator('#follow_up_comment').fill('Reminder edit');
+		await page.click('#network-follow-up button[type="submit"]:not([formaction])');
+		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		assert.equal(getNetwork(person.id).follow_up_comment, 'Reminder edit');
+		await button('Edit follow-up');
+		await page.waitForSelector('#network-follow-up');
+		await page.click('#network-follow-up button[formaction*="clearFollowUp"]');
+		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		assert.equal(getNetwork(person.id).follow_up_date, null);
+		assert.equal(getNetwork(person.id).follow_up_comment, null);
+		await button('Edit interaction');
+		await page.waitForSelector('#interaction_note');
+		await page.locator('#interaction_note').fill('Keep this interaction draft');
+		await page.setViewport({ width: 320, height: 900 });
+		await settle();
+		assert.equal(
+			await page.$eval(
+				'#network-interaction [data-slot="dialog-footer"]',
+				(el) => getComputedStyle(el).flexDirection
+			),
+			'column-reverse'
+		);
+		const actions = await page.$$eval(
+			'#network-interaction [data-slot="dialog-footer"] button',
+			(buttons) =>
+				buttons.map((el) => ({
+					x: el.getBoundingClientRect().x,
+					width: el.getBoundingClientRect().width,
+					y: el.getBoundingClientRect().y
+				}))
+		);
+		assert.equal(actions.length, 3);
+		assert(
+			actions.every(
+				(rect) => Math.abs(rect.x - actions[0].x) < 1 && Math.abs(rect.width - actions[0].width) < 1
+			)
+		);
+		assert.equal(new Set(actions.map((rect) => rect.y)).size, 3);
+		await page.screenshot({ path: '/tmp/saturday-network-interaction-phone.png' });
+		await page.click('#network-interaction button[data-variant="destructive"]');
+		await page.waitForSelector('button[form="network-interaction"]');
+		await page.click(
+			'[data-slot="dialog-content"]:has(button[form="network-interaction"]) button[data-variant="ghost"]'
+		);
+		await page.waitForSelector('button[form="network-interaction"]', { hidden: true });
+		assert.equal(
+			await page.$eval('#interaction_note', (el) => el.value),
+			'Keep this interaction draft'
+		);
+		// A failed confirmed delete returns to editing without dropping unsaved fields.
+		await page.$eval('#network-interaction input[name="confirm"]', (el) => (el.value = 'false'));
+		await page.click('#network-interaction button[data-variant="destructive"]');
+		await page.waitForSelector('button[form="network-interaction"]');
+		await page.click('button[form="network-interaction"]');
+		await page.waitForSelector('#network-interaction [role="alert"]');
+		await page.waitForSelector('button[form="network-interaction"]', { hidden: true });
+		assert.equal(
+			await page.$eval('#interaction_note', (el) => el.value),
+			'Keep this interaction draft'
+		);
+		assert.equal(listNetworkUpdates({ network_id: person.id }).updates.length, 1);
+		await page.$eval('#network-interaction input[name="confirm"]', (el) => (el.value = 'true'));
+		await page.setViewport({ width: 1280, height: 900 });
+		await settle();
+		assert.equal(
+			await page.$eval(
+				'#network-interaction [data-slot="dialog-footer"]',
+				(el) => getComputedStyle(el).flexDirection
+			),
+			'row'
+		);
+		await page.screenshot({ path: '/tmp/saturday-network-interaction-desktop.png' });
+		await page.click('#network-interaction button[data-variant="destructive"]');
+		await page.waitForSelector('button[form="network-interaction"]');
+		await page.click('button[form="network-interaction"]');
+		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		assert.equal(listNetworkUpdates({ network_id: person.id }).updates.length, 0);
 		await button('Edit link note');
 		await page.waitForSelector('#relationship_notes');
 		await page.locator('#relationship_notes').fill('Unsaved Network link note');
@@ -605,6 +687,53 @@ test('production stage/history actions, result round trips and read-only overvie
 			listNetworks({ job_id: job.id }).networks[0].job_link.notes,
 			'Unsaved Job link note'
 		);
+		// Person detail/edit preserves filtered Network pages and independent detail pages.
+		for (let i = 0; i < 50; i++)
+			createNetwork({ name: `A navigation ${i}`, organization: 'Return QA' });
+		const networkResults = '/networks?organization=Return+QA&page=2';
+		await page.goto(base + networkResults, { waitUntil: 'networkidle0' });
+		await page.click(`a[href^="/networks/${person.id}?"]`);
+		await page.waitForFunction((id) => location.pathname === `/networks/${id}`, {}, person.id);
+		await page.waitForSelector('a[href*="/edit?"]');
+		assert.equal(new URL(page.url()).searchParams.get('return_to'), networkResults);
+		const personDetail = new URL(page.url());
+		personDetail.searchParams.set('jobs_page', '2');
+		personDetail.searchParams.set('updates_page', '3');
+		await page.goto(personDetail.href, { waitUntil: 'networkidle0' });
+		await page.click('a[href*="/edit?"]');
+		await page.waitForSelector('#name');
+		const editBack = await page.$eval('a.back-link', (el) => el.getAttribute('href'));
+		assert.equal(new URL(editBack, base).searchParams.get('updates_page'), '3');
+		await page.click('.form-actions a');
+		await page.waitForSelector('a[href*="/edit?"]');
+		assert.equal(new URL(page.url()).searchParams.get('jobs_page'), '2');
+		await page.click('a[href*="/edit?"]');
+		await page.waitForSelector('#name');
+		await page.locator('#name').fill('');
+		await page.$eval('form:has(#name)', (el) => (el.noValidate = true));
+		await page.click('button[type="submit"]');
+		await page.waitForSelector('#name[aria-invalid="true"]');
+		assert.equal(await page.$eval('a.back-link', (el) => el.getAttribute('href')), editBack);
+		await page.locator('#name').fill(person.name);
+		await page.click('button[type="submit"]');
+		await page.waitForSelector('a[href*="/edit?"]');
+		assert.equal(new URL(page.url()).searchParams.get('updates_page'), '3');
+		assert.equal(await page.$eval('a.back-link', (el) => el.getAttribute('href')), networkResults);
+		await page.click('a.back-link');
+		await page.waitForFunction(() => location.pathname === '/networks');
+		await page.waitForSelector('a[href^="/networks/' + person.id + '?"]');
+		assert.equal(new URL(page.url()).pathname + new URL(page.url()).search, networkResults);
+		// A job-origin person returns to that exact job, including its original results.
+		await page.goto(base + detail + '&network_page=2', { waitUntil: 'networkidle0' });
+		await page.click(`a[href^="/networks/${person.id}?"]`);
+		await page.waitForFunction((id) => location.pathname === `/networks/${id}`, {}, person.id);
+		await page.waitForSelector('a[href*="/edit?"]');
+		const jobBack = await page.$eval('a.back-link', (el) => el.getAttribute('href'));
+		assert.equal(new URL(jobBack, base).pathname, `/jobs/${job.id}`);
+		assert.equal(new URL(jobBack, base).searchParams.get('return_to'), returnTo);
+		assert.equal(new URL(jobBack, base).searchParams.get('network_page'), '2');
+		await page.click('a.back-link');
+		await page.waitForSelector('button::-p-text(Change stage)');
 		// A destination retired by another client while editing must preserve the draft.
 		addWorkflowStage({ name: 'Retired while editing' });
 		const retiring = listWorkflowStages().find((stage) => stage.name === 'Retired while editing');
@@ -682,6 +811,170 @@ test('production stage/history actions, result round trips and read-only overvie
 		await page.goto(base + '/settings#workflow', { waitUntil: 'networkidle0' });
 		assert(await page.$eval('html', (el) => el.scrollWidth <= innerWidth + 1));
 		await page.screenshot({ path: '/tmp/saturday-workflow-settings-phone.png' });
+		// Compact job detail preserves full content, zero scores and a logical responsive order.
+		const layoutJob = createJob({
+			job_title: 'A long engineering role title that wraps on a narrow phone',
+			company_name: 'Example company',
+			location: 'Remote',
+			job_description: 'Description content. '.repeat(80) + 'Description end marker',
+			follow_up_date: '2020-01-01',
+			follow_up_comment: 'Follow up with the recruiter.'
+		});
+		for (let i = 0; i < 8; i++)
+			addJobUpdate({
+				job_id: layoutJob.id,
+				event_date: '2020-01-01',
+				note: 'History note ' + i + '. ' + 'Long note. '.repeat(40)
+			});
+		for (let i = 0; i < 4; i++)
+			addJobUpdate({ job_id: layoutJob.id, event_date: '2099-01-01', note: 'Scheduled ' + i });
+		for (let i = 0; i < 6; i++)
+			await createDocument({
+				scope: String(layoutJob.id),
+				filename: `layout-${i}.md`,
+				content: 'Document content'
+			});
+		await page.goto(base + `/jobs/${layoutJob.id}`, { waitUntil: 'networkidle0' });
+		assert.equal(await page.$('.job-score'), null);
+		assert.equal(await page.$eval('#job-information', (el) => el.open), false);
+		const order = await page.$$eval(
+			'#job-follow-up, #job-information, #job-history, #job-documents, #job-network, #job-description',
+			(elements) => elements.map((el) => el.id)
+		);
+		assert.deepEqual(order, [
+			'job-follow-up',
+			'job-information',
+			'job-history',
+			'job-documents',
+			'job-network',
+			'job-description'
+		]);
+		assert.equal(
+			await page.$$eval(
+				'#job-documents li',
+				(items) => items.filter((el) => el.checkVisibility()).length
+			),
+			3
+		);
+		await page.click('#more-job-documents > summary');
+		assert.equal(
+			await page.$$eval(
+				'#job-documents li',
+				(items) => items.filter((el) => el.checkVisibility()).length
+			),
+			6
+		);
+		await page.click('#more-job-documents > summary');
+		assert.equal(await page.$eval('#more-job-history', (el) => el.open), false);
+		await page.click('#more-job-history > summary');
+		assert.equal(await page.$eval('#more-job-history', (el) => el.open), true);
+		await page.click('#more-job-history > summary');
+		await page.click('#job-description summary');
+		assert(
+			await page.$eval(
+				'#job-description details',
+				(el) => el.open && el.innerText.includes('Description end marker')
+			)
+		);
+		await page.click('#job-description summary');
+		setJobScore(layoutJob.id, {
+			score: 0,
+			score_comment: 'Zero is a valid assessment.\nRead-only assistant notes.'
+		});
+		await page.reload({ waitUntil: 'networkidle0' });
+		await page.waitForSelector('.job-score');
+		assert.equal(await page.$eval('.job-score-number', (el) => el.textContent), '0');
+		const headerLayout = () =>
+			page.evaluate(() => {
+				const score = document.querySelector('.job-score').getBoundingClientRect();
+				const copy = document.querySelector('.page-title-copy').getBoundingClientRect();
+				const meta = document.querySelector('.page-meta').getBoundingClientRect();
+				return (
+					meta.top >= copy.bottom &&
+					Math.abs(meta.left - copy.left) < 1 &&
+					document.querySelector('.job-score').parentElement ===
+						document.querySelector('.page-meta') &&
+					document.querySelector('.page-meta').children[1].classList.contains('job-score') &&
+					score.top >= meta.top
+				);
+			});
+		assert(await headerLayout(), 'Metadata orders current stage before the optional score');
+		await page.click('.job-score');
+		await page.waitForSelector('[data-slot="dialog-content"]');
+		assert(
+			(await page.$eval('[data-slot="dialog-content"]', (el) => el.textContent)).includes(
+				'Zero is a valid assessment.'
+			)
+		);
+		assert.equal(
+			await page.$('[data-slot="dialog-content"] input, [data-slot="dialog-content"] textarea'),
+			null
+		);
+		await page.keyboard.press('Escape');
+		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await settle();
+		assert.equal(await page.$eval('.job-score', (el) => document.activeElement === el), true);
+		assert(await page.$eval('html', (el) => el.scrollWidth <= innerWidth + 1));
+		await page.screenshot({ path: '/tmp/saturday-job-detail-phone.png', fullPage: true });
+		await page.setViewport({ width: 1280, height: 960 });
+		await page.goto(base + `/jobs/${layoutJob.id}`, { waitUntil: 'networkidle0' });
+		await page.waitForFunction(() => document.querySelector('#job-information').open);
+		assert(await headerLayout());
+		assert.equal(
+			await page.$eval('.navigation-item', (el) => getComputedStyle(el).flexDirection),
+			'row'
+		);
+		for (const width of [768, 900, 1024]) {
+			await page.setViewport({ width, height: 960 });
+			assert.equal(
+				await page.$eval('.navigation-item', (el) => getComputedStyle(el).flexDirection),
+				'column'
+			);
+			assert(await page.$eval('html', (el) => el.scrollWidth <= innerWidth + 1));
+			assert(
+				await page.$eval('.desktop-navigation', (el) => {
+					const nav = el.getBoundingClientRect();
+					const brand = document.querySelector('.topbar-brand').getBoundingClientRect();
+					const topbar = document.querySelector('.app-topbar').getBoundingClientRect();
+					return nav.left >= brand.right && nav.right <= topbar.right;
+				})
+			);
+		}
+		await page.screenshot({ path: '/tmp/saturday-topnav-compact.png' });
+		await page.setViewport({ width: 1280, height: 960 });
+		assert(
+			await page.evaluate(
+				() =>
+					document.querySelector('#job-follow-up').getBoundingClientRect().right <
+					document.querySelector('#job-history').getBoundingClientRect().left
+			)
+		);
+		await page.screenshot({ path: '/tmp/saturday-job-detail-desktop.png', fullPage: true });
+		setJobScore(layoutJob.id, { score: 8.5, score_comment: null });
+		await page.reload({ waitUntil: 'networkidle0' });
+		await page.click('.job-score');
+		await page.waitForSelector('[data-slot="dialog-content"]');
+		assert(
+			(await page.$eval('[data-slot="dialog-content"]', (el) => el.textContent)).includes(
+				'No assessment notes provided.'
+			)
+		);
+		await page.keyboard.press('Escape');
+		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		const nativeDetail = await browser.newPage();
+		await nativeDetail.setJavaScriptEnabled(false);
+		await nativeDetail.goto(base + `/jobs/${layoutJob.id}`);
+		for (const selector of [
+			'#job-information',
+			'#more-job-history',
+			'#more-upcoming-history',
+			'#more-job-documents',
+			'#job-description details'
+		]) {
+			await nativeDetail.click(selector + ' > summary');
+			assert.equal(await nativeDetail.$eval(selector, (el) => el.open), true);
+		}
+		await nativeDetail.close();
 		assert.deepEqual(errors, []);
 	} finally {
 		await browser?.close();

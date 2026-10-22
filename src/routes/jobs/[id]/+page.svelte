@@ -1,7 +1,8 @@
 <script lang="ts">
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { page } from '$app/state';
-	import { tick } from 'svelte';
+	import { networkDetailUrl } from '$lib/network-navigation.js';
+	import { tick, onMount } from 'svelte';
 	import Bot from '@lucide/svelte/icons/bot';
 	import { enhance } from '$app/forms';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -10,7 +11,8 @@
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import Link2 from '@lucide/svelte/icons/link-2';
-	import UserPlus from '@lucide/svelte/icons/user-plus';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import { jobInfoFields } from '$lib/job-fields.js';
 	import DueBadge from '$lib/components/app/due-badge.svelte';
 	import EmptyState from '$lib/components/app/empty-state.svelte';
@@ -20,10 +22,10 @@
 	import PageHeader from '$lib/components/app/page-header.svelte';
 	import PageShell from '$lib/components/app/page-shell.svelte';
 	import Pagination from '$lib/components/app/pagination.svelte';
-	import RadioOption from '$lib/components/app/radio-option.svelte';
 	import SectionCard from '$lib/components/app/section-card.svelte';
 	import StatusBadge from '$lib/components/app/status-badge.svelte';
 	import Timeline from '$lib/components/app/timeline.svelte';
+	import ExpandableText from '$lib/components/app/expandable-text.svelte';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
@@ -32,6 +34,7 @@
 	import { focusFirstError, enhanceWithFocus, withPending } from '$lib/forms';
 	import { hostOf, formatDate } from '$lib/format';
 	import JobUpdateDialog from '$lib/components/app/job-update-dialog.svelte';
+	import JobPersonPicker from '$lib/components/app/job-person-picker.svelte';
 	import UnsavedDialog from '$lib/components/app/unsaved-dialog.svelte';
 	import { UnsavedChanges } from '$lib/unsaved.svelte';
 
@@ -50,7 +53,15 @@
 	const errors = $derived(form?.errors ?? {});
 	const values = $derived(form?.values ?? {});
 	const pageError = $derived(form?.action === 'star' ? errors.form : undefined);
-	let descriptionOpen = $state(false);
+	let scoreOpen = $state(false);
+	let infoOpen = $state(false);
+	onMount(() => {
+		const desktop = matchMedia('(min-width: 64rem)');
+		const sync = () => (infoOpen = desktop.matches);
+		sync();
+		desktop.addEventListener('change', sync);
+		return () => desktop.removeEventListener('change', sync);
+	});
 	let editor = $state<{ mode: 'move' | 'add' | 'edit' | 'followUp'; entry?: JobUpdate } | null>(
 		null
 	);
@@ -91,10 +102,6 @@
 			.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id)
 	);
 	const history = $derived(updates.filter((entry) => entry.date <= data.today));
-	const longDescription = $derived(
-		(job.description?.length ?? 0) > 480 || (job.description?.split('\n').length ?? 0) > 8
-	);
-	let personPickerOpen = $state(false);
 	let networkNoteOpen = $state(false);
 	const noteGuard = new UnsavedChanges();
 	let notePersonId = $state('');
@@ -104,11 +111,7 @@
 		form?.action?.startsWith('network-') ? errors : data.networkErrors
 	);
 	$effect(() => {
-		personPickerOpen = !!data.personPicker;
-	});
-	$effect(() => {
 		if (!form?.errors) return;
-		if (form.action === 'network-linked') personPickerOpen = true;
 		if (form.action === 'network-note') {
 			networkNoteOpen = true;
 			notePersonId = values.network_id ?? '';
@@ -151,6 +154,39 @@
 	);
 </script>
 
+{#snippet documentRows(documents: typeof data.documents)}
+	<ul class="divide-y">
+		{#each documents as doc (doc.id)}
+			<li class="flex flex-wrap items-center justify-between gap-3 py-3">
+				<a class="link min-w-0 break-all" href={`/jobs/${job.id}/documents/${doc.id}`}
+					>{doc.filename}</a
+				>
+				<a class="link text-sm" href={`/api/files/${doc.id}?scope=${job.id}`}
+					>Download<span class="sr-only"> {doc.filename}</span></a
+				>
+			</li>
+		{/each}
+	</ul>
+{/snippet}
+
+{#if job.score !== null && job.score !== undefined}
+	<Dialog.Root bind:open={scoreOpen}>
+		<Dialog.Content class="sm:max-w-lg">
+			<Dialog.Header>
+				<Dialog.Title>Assistant assessment</Dialog.Title>
+				<Dialog.Description>Score and notes provided by your AI assistant.</Dialog.Description>
+			</Dialog.Header>
+			<p class="text-2xl font-semibold break-words tabular-nums">{job.score}</p>
+			<p class="text-sm break-words whitespace-pre-wrap">
+				{job.scoreComment || 'No assessment notes provided.'}
+			</p>
+			<Dialog.Footer
+				><Button variant="ghost" onclick={() => (scoreOpen = false)}>Close</Button></Dialog.Footer
+			>
+		</Dialog.Content>
+	</Dialog.Root>
+{/if}
+
 <div>
 	<PageShell title={`${job.title} · ${job.company}`}>
 		<PageHeader
@@ -164,6 +200,20 @@
 		>
 			{#snippet meta()}
 				<StatusBadge status={job.status} class="h-7 text-sm" />
+				{#if job.score !== null && job.score !== undefined}
+					<Button
+						variant="outline"
+						size="sm"
+						class="job-score"
+						title={`Assistant score: ${job.score}`}
+						aria-label={`Assistant score: ${job.score}. View assessment notes`}
+						aria-haspopup="dialog"
+						onclick={() => (scoreOpen = true)}
+					>
+						Score <span class="job-score-number font-semibold tabular-nums">{job.score}</span
+						><ChevronRight data-icon="inline-end" aria-hidden="true" />
+					</Button>
+				{/if}
 				{#if job.createdVia === 'mcp'}
 					<Badge variant="outline" class="gap-1 text-muted-foreground"
 						><Bot class="size-3.5" aria-hidden="true" />Added by assistant</Badge
@@ -201,12 +251,70 @@
 			<Notice tone="error" title="The change was not saved">{pageError}</Notice>
 		{/if}
 
-		<p class="text-sm text-muted-foreground">
-			Current stage: <strong>{job.currentStage.name}</strong> · {job.isActive ? 'Active' : 'Closed'}
-		</p>
-		<div class="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
+		<div class="grid min-w-0 gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
+			<aside class="min-w-0 space-y-6">
+				<SectionCard
+					id="job-follow-up"
+					title="Follow-up"
+					class="compact-card"
+					contentClass="space-y-3"
+				>
+					{#snippet action()}
+						<Button variant="ghost" size="sm" onclick={() => openEditor('followUp')}>
+							{job.followUpDate ? 'Edit follow-up' : 'Schedule follow-up'}
+						</Button>
+					{/snippet}
+					{#if job.followUpDate}
+						<p title={formatDate(job.followUpDate)}>
+							<DueBadge date={job.followUpDate} today={data.today} />
+						</p>
+						{#if job.followUpComment}<div class="text-sm">
+								<ExpandableText text={job.followUpComment} limit={160} lines={3} />
+							</div>{/if}
+					{:else}<p class="text-sm text-muted-foreground">Not scheduled.</p>{/if}
+					{#if !job.isActive && job.followUpDate}<p class="text-sm text-muted-foreground">
+							Kept here while closed. Changing to an open stage shows this follow-up in Needs
+							attention again.
+						</p>{/if}
+				</SectionCard>
+				<details id="job-information" class="disclosure" bind:open={infoOpen}>
+					<summary
+						><h2 class="text-base font-medium">Job details</h2>
+						<ChevronDown class="size-4 shrink-0" aria-hidden="true" /></summary
+					>
+					<div class="disclosure-body text-sm">
+						{#each jobInfoFields as field (field.name)}
+							{#if job[field.key]}<div class="space-y-1">
+									<p class="text-muted-foreground">{field.label}</p>
+									<p class="break-words whitespace-pre-wrap">
+										{field.type === 'date' ? formatDate(job[field.key]) : job[field.key]}
+									</p>
+								</div>{/if}
+						{/each}
+						{#if job.postingUrl}
+							<div class="space-y-1">
+								<p class="text-muted-foreground">Job posting link</p>
+								<a
+									href={job.postingUrl}
+									target="_blank"
+									rel="noopener noreferrer"
+									title={job.postingUrl}
+									class="link inline-flex items-center gap-1 break-all"
+									>{hostOf(job.postingUrl)}<ExternalLink class="size-3.5 shrink-0" /><span
+										class="sr-only">(opens in a new tab)</span
+									></a
+								>
+							</div>
+						{/if}
+						<div class="space-y-1">
+							<p class="text-muted-foreground">Job notes</p>
+							<ExpandableText text={job.notes ?? 'No notes yet.'} limit={280} lines={4} />
+						</div>
+					</div>
+				</details>
+			</aside>
 			<div class="min-w-0 space-y-6">
-				<SectionCard title="History">
+				<SectionCard id="job-history" title="History" count={updates.length}>
 					{#if upcoming.length > 0}
 						<section aria-labelledby="upcoming-heading" class="space-y-3">
 							<h3 id="upcoming-heading" class="text-sm font-medium text-muted-foreground">
@@ -214,9 +322,24 @@
 							</h3>
 							<Timeline
 								onedit={(entry) => openEditor('edit', entry)}
-								entries={upcoming}
+								entries={upcoming.slice(0, 3)}
 								scheduled
 							/>
+							{#if upcoming.length > 3}
+								<details class="content-expander" id="more-upcoming-history">
+									<summary
+										><span class="expand-label">Show more upcoming ({upcoming.length - 3})</span
+										><span class="collapse-label">Show less upcoming</span></summary
+									>
+									<div class="pt-4">
+										<Timeline
+											onedit={(entry) => openEditor('edit', entry)}
+											entries={upcoming.slice(3)}
+											scheduled
+										/>
+									</div>
+								</details>
+							{/if}
 						</section>
 					{/if}
 
@@ -233,36 +356,27 @@
 							{/snippet}
 						</EmptyState>
 					{:else if history.length > 0}
-						<Timeline onedit={(entry) => openEditor('edit', entry)} entries={history} />
+						<Timeline onedit={(entry) => openEditor('edit', entry)} entries={history.slice(0, 5)} />
+						{#if history.length > 5}
+							<details class="content-expander" id="more-job-history">
+								<summary
+									><span class="expand-label">Show more history ({history.length - 5})</span><span
+										class="collapse-label">Show less history</span
+									></summary
+								>
+								<div class="pt-4">
+									<Timeline
+										onedit={(entry) => openEditor('edit', entry)}
+										entries={history.slice(5)}
+									/>
+								</div>
+							</details>
+						{/if}
 					{/if}
 				</SectionCard>
 
-				{#if job.description}
-					<SectionCard title="Job description">
-						<p
-							id="job-description"
-							class="text-base leading-relaxed break-words whitespace-pre-wrap text-muted-foreground {longDescription &&
-							!descriptionOpen
-								? 'line-clamp-8'
-								: ''}"
-						>
-							{job.description}
-						</p>
-						{#if longDescription}
-							<Button
-								variant="ghost"
-								size="sm"
-								class="-ml-2"
-								aria-expanded={descriptionOpen}
-								aria-controls="job-description"
-								onclick={() => (descriptionOpen = !descriptionOpen)}
-								>{descriptionOpen ? 'Show less' : 'Show more'}</Button
-							>
-						{/if}
-					</SectionCard>
-				{/if}
-
 				<SectionCard
+					id="job-documents"
 					title="Documents"
 					count={data.documentCount}
 					description="Tailored resumes, cover letters and notes for this job."
@@ -276,18 +390,23 @@
 							>{data.documentsError}</Notice
 						>{/if}
 					{#if data.documents.length}
-						<ul class="divide-y">
-							{#each data.documents.slice(0, 5) as doc (doc.id)}
-								<li class="flex flex-wrap items-center justify-between gap-3 py-3">
-									<a class="link min-w-0 break-all" href={`/jobs/${job.id}/documents/${doc.id}`}
-										>{doc.filename}</a
-									>
-									<a class="link text-sm" href={`/api/files/${doc.id}?scope=${job.id}`}
-										>Download<span class="sr-only"> {doc.filename}</span></a
-									>
-								</li>
-							{/each}
-						</ul>
+						{@render documentRows(data.documents.slice(0, 3))}
+						{#if data.documents.length > 3}
+							<details class="content-expander" id="more-job-documents">
+								<summary
+									><span class="expand-label"
+										>Show more documents ({data.documents.length - 3})</span
+									><span class="collapse-label">Show less documents</span></summary
+								>
+								{@render documentRows(data.documents.slice(3))}
+							</details>
+						{/if}
+						{#if data.documentCount > data.documents.length}<p
+								class="text-sm text-muted-foreground"
+							>
+								Showing {data.documents.length} of {data.documentCount}. Use Manage documents for
+								the full list.
+							</p>{/if}
 					{:else if !data.documentsError}
 						<EmptyState
 							size="inline"
@@ -297,9 +416,13 @@
 					{/if}
 				</SectionCard>
 
-				<SectionCard title="Network" count={data.people.total}>
+				<SectionCard id="job-network" title="Network" count={data.people.total}>
 					{#snippet action()}
-						<Button variant="outline" href={networkHref({ link_person: '1', person_page: null })}
+						<Button
+							variant="outline"
+							data-sveltekit-noscroll
+							data-sveltekit-keepfocus
+							href={networkHref({ link_person: '1', person_page: null })}
 							><Link2 data-icon="inline-start" />Link person</Button
 						>
 					{/snippet}
@@ -322,7 +445,7 @@
 					{#each data.people.networks as person (person.id)}
 						<LinkedItem
 							recordNumber={person.id}
-							href={`/networks/${person.id}`}
+							href={networkDetailUrl(person.id, page.url.pathname + page.url.search)}
 							title={person.name}
 							subtitle={[person.role, person.organization].filter(Boolean).join(' · ')}
 							note={person.job_link.notes}
@@ -361,66 +484,16 @@
 						next={networkHref({ network_page: data.people.page + 1 })}
 					/>
 				</SectionCard>
+				{#if job.description}
+					<SectionCard
+						id="job-description"
+						title="Job description"
+						contentClass="text-base leading-relaxed text-muted-foreground"
+					>
+						<ExpandableText text={job.description} />
+					</SectionCard>
+				{/if}
 			</div>
-
-			<aside class="min-w-0 space-y-6">
-				<SectionCard title="Follow-up">
-					{#if job.followUpDate}
-						<p class="space-y-1">
-							<DueBadge date={job.followUpDate} today={data.today} />
-						</p>
-						<p class="text-sm text-muted-foreground">{formatDate(job.followUpDate)}</p>
-						{#if job.followUpComment}<p class="text-sm break-words whitespace-pre-wrap">
-								{job.followUpComment}
-							</p>{/if}
-					{:else}<p class="text-sm text-muted-foreground">No follow-up scheduled.</p>{/if}
-					{#if !job.isActive && job.followUpDate}<p class="text-sm text-muted-foreground">
-							Kept here while closed. Changing to an open stage shows this follow-up in Needs
-							attention again.
-						</p>{/if}
-					<Button variant="outline" onclick={() => openEditor('followUp')}>
-						{job.followUpDate ? 'Reschedule or edit' : 'Schedule follow-up'}
-					</Button>
-				</SectionCard>
-				<SectionCard title="Assistant assessment">
-					<p class="text-2xl font-semibold tabular-nums">{job.score ?? 'Unscored'}</p>
-					{#if job.scoreComment}<p class="text-sm break-words whitespace-pre-wrap">
-							{job.scoreComment}
-						</p>{/if}
-					<p class="text-sm text-muted-foreground">
-						Your AI assistant manages the score and its explanation.
-					</p>
-				</SectionCard>
-				<SectionCard title="Job information" contentClass="text-sm">
-					{#each jobInfoFields as field (field.name)}
-						{#if job[field.key]}<div class="space-y-1">
-								<p class="text-muted-foreground">{field.label}</p>
-								<p class="break-words whitespace-pre-wrap">
-									{field.type === 'date' ? formatDate(job[field.key]) : job[field.key]}
-								</p>
-							</div>{/if}
-					{/each}
-					{#if job.postingUrl}
-						<div class="space-y-1">
-							<p class="text-muted-foreground">Job posting link</p>
-							<a
-								href={job.postingUrl}
-								target="_blank"
-								rel="noopener noreferrer"
-								title={job.postingUrl}
-								class="link inline-flex items-center gap-1 break-all"
-								>{hostOf(job.postingUrl)}<ExternalLink class="size-3.5 shrink-0" /><span
-									class="sr-only">(opens in a new tab)</span
-								></a
-							>
-						</div>
-					{/if}
-					<div class="space-y-1">
-						<p class="text-muted-foreground">Job notes</p>
-						<p class="break-words whitespace-pre-wrap">{job.notes ?? 'No notes yet.'}</p>
-					</div>
-				</SectionCard>
-			</aside>
 		</div>
 	</PageShell>
 </div>
@@ -467,142 +540,9 @@
 	{/snippet}
 </UnsavedDialog>
 
-<Dialog.Root bind:open={personPickerOpen}>
-	<Dialog.Content class="sm:max-w-2xl">
-		<Dialog.Header>
-			<Dialog.Title>Link person</Dialog.Title>
-			<Dialog.Description>Select someone for {job.title} at {job.company}.</Dialog.Description>
-		</Dialog.Header>
-		<form method="GET" action={`/jobs/${job.id}`} class="space-y-4">
-			{#if Object.keys(data.networkErrors).length}<Notice
-					tone="error"
-					title="Check the search or page values"
-					>{Object.values(data.networkErrors).join(' ')}</Notice
-				>{/if}
-			<input type="hidden" name="link_person" value="1" />
-			{#if data.networkQuery.network_page}<input
-					type="hidden"
-					name="network_page"
-					value={data.networkQuery.network_page}
-				/>{/if}
-			<div class="grid gap-4 sm:grid-cols-3">
-				<Field id="person_name" label="Name">
-					{#snippet control(attrs)}<Input
-							{...attrs}
-							name="person_name"
-							maxlength={200}
-							value={data.networkQuery.person_name ?? ''}
-						/>{/snippet}
-				</Field>
-				<Field id="person_role" label="Role">
-					{#snippet control(attrs)}<Input
-							{...attrs}
-							name="person_role"
-							maxlength={200}
-							value={data.networkQuery.person_role ?? ''}
-						/>{/snippet}
-				</Field>
-				<Field id="person_organization" label="Organization">
-					{#snippet control(attrs)}<Input
-							{...attrs}
-							name="person_organization"
-							maxlength={200}
-							value={data.networkQuery.person_organization ?? ''}
-						/>{/snippet}
-				</Field>
-			</div>
-			<div class="flex flex-wrap gap-2">
-				<Button type="submit" variant="outline">Search people</Button>
-				<Button href={`/networks/new?job_id=${job.id}`} variant="ghost"
-					><UserPlus data-icon="inline-start" />Add person</Button
-				>
-			</div>
-		</form>
-		<form
-			method="POST"
-			action={formAction('networkLink')}
-			use:enhance={enhanceNetwork}
-			class="space-y-4"
-		>
-			{#if form?.action === 'network-linked' && networkErrors.form}<Notice
-					tone="error"
-					title="Could not link person">{networkErrors.form}</Notice
-				>{/if}
-			<fieldset class="space-y-2">
-				<legend class="mb-2 text-sm font-medium"
-					>Choose a person <span class="text-destructive" aria-hidden="true">*</span></legend
-				>
-				{#if data.selectedPerson && !data.personPicker?.networks.some((person: { id: number }) => person.id === data.selectedPerson.id)}
-					<RadioOption
-						name="network_id"
-						value={data.selectedPerson.id}
-						checked
-						required
-						disabled={data.linkedPersonIds.includes(data.selectedPerson.id)}
-						label={`${data.selectedPerson.name} #${data.selectedPerson.id}`}
-					/>
-				{/if}
-				{#each data.personPicker?.networks ?? [] as person (person.id)}
-					<RadioOption
-						name="network_id"
-						value={person.id}
-						required
-						disabled={data.linkedPersonIds.includes(person.id)}
-						checked={String(values.network_id ?? data.selectedPerson?.id) === String(person.id)}
-						label={`${person.name} #${person.id}`}
-						description={`${[person.role, person.organization].filter(Boolean).join(' · ')}${data.linkedPersonIds.includes(person.id) ? ' · Already linked' : ''}`}
-					/>
-				{/each}
-				{#if !data.personPicker?.networks.length && !data.selectedPerson}<p
-						class="text-sm text-muted-foreground"
-					>
-						No matching people. Add a person or change the search.
-					</p>{/if}
-			</fieldset>
-			{#if networkErrors.network_id}<p class="text-sm text-destructive" role="alert" tabindex="-1">
-					{networkErrors.network_id}
-				</p>{/if}
-			{#if data.personPicker}
-				<Pagination
-					label="Person picker pages"
-					page={data.personPicker.page}
-					totalPages={data.personPicker.totalPages}
-					previous={networkHref({ person_page: data.personPicker.page - 1 })}
-					next={networkHref({ person_page: data.personPicker.page + 1 })}
-				/>
-			{/if}
-			<Field
-				id="new_network_relationship_note"
-				label="Relationship note"
-				error={form?.action === 'network-linked' ? networkErrors.notes : undefined}
-			>
-				{#snippet control(attrs)}<Textarea
-						{...attrs}
-						name="notes"
-						maxlength={2000}
-						rows={3}
-						value={form?.action === 'network-linked' ? values.notes : ''}
-					/>{/snippet}
-			</Field>
-			<Dialog.Footer>
-				<Button
-					variant="ghost"
-					href={networkHref({
-						link_person: null,
-						person: null,
-						person_page: null,
-						person_name: null,
-						person_role: null,
-						person_organization: null
-					})}>Cancel</Button
-				>
-				<Button type="submit" disabled={!data.personPicker?.networks.length && !data.selectedPerson}
-					>Link person</Button
-				>
-			</Dialog.Footer>
-		</form>
-	</Dialog.Content>
-</Dialog.Root>
+{#if data.personPicker}
+	{#key job.id}<JobPersonPicker {data} {form} />{/key}
+{/if}
 
 {#if editor}
 	{#key `${editor.mode}-${editor.entry?.id ?? ''}`}

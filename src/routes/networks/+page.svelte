@@ -15,6 +15,7 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { page } from '$app/state';
+	import { networkDetailUrl } from '$lib/network-navigation.js';
 	let { data } = $props();
 
 	const followUpLabels: Record<string, string> = {
@@ -131,7 +132,7 @@
 				{#each data.networks as person (person.id)}
 					<PersonRow
 						recordNumber={person.id}
-						href={`/networks/${person.id}`}
+						href={networkDetailUrl(person.id, page.url.pathname + page.url.search)}
 						name={person.name}
 						role={person.role}
 						organization={person.organization}

@@ -184,26 +184,7 @@
 					>{/snippet}
 			</Field>
 		</div>
-		<fieldset
-			class="space-y-3"
-			aria-describedby={errors.current_stage ? 'current_stage-error' : undefined}
-		>
-			<legend class="text-sm font-medium">Current stage</legend>
-			<div class="flex flex-wrap gap-x-5 gap-y-3">
-				{#each data.stages.filter((stage: { is_archived: boolean }) => !stage.is_archived) as option}
-					<Checkbox
-						name="current_stage"
-						value={String(option.id)}
-						label={option.name}
-						bind:group={values.current_stage}
-						aria-invalid={Boolean(errors.current_stage)}
-					/>
-				{/each}
-			</div>
-			{#if errors.current_stage}<p id="current_stage-error" class="text-sm text-destructive">
-					{errors.current_stage}
-				</p>{/if}
-		</fieldset>
+
 		{#snippet more()}
 			<details class="disclosure" open={advancedOpen}>
 				<summary

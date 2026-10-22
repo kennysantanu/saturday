@@ -68,16 +68,15 @@ export async function load({ params, url }) {
 		people = networks.listNetworks({ job_id: params.id, page: networkQuery.network_page });
 		if (networkQuery.link_person === '1')
 			personPicker = networks.listNetworks({
-				name: networkQuery.person_name,
-				role: networkQuery.person_role,
-				organization: networkQuery.person_organization,
-				page: networkQuery.person_page
+				query: networkQuery.person_query,
+				page: networkQuery.person_page,
+				limit: 5
 			});
 	} catch (e) {
 		if (!(e instanceof ValidationError)) throw e;
 		networkErrors = e.fieldErrors;
 		people ??= networks.listNetworks({ job_id: params.id });
-		if (networkQuery.link_person === '1') personPicker = networks.listNetworks();
+		if (networkQuery.link_person === '1') personPicker = networks.listNetworks({ limit: 5 });
 	}
 	let selectedPerson = null;
 	if (networkQuery.person) {

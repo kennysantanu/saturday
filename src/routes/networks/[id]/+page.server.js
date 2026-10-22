@@ -2,6 +2,7 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import * as networks from '$lib/server/networks.js';
 import { getJob, searchJobs } from '$lib/server/services.js';
 import { ServiceError, ValidationError, localCalendarDate } from '$lib/server/validation.js';
+import { networkReturn, networkDetailUrl } from '$lib/network-navigation.js';
 
 export function load({ params, url }) {
 	let person;
@@ -12,6 +13,20 @@ export function load({ params, url }) {
 		throw e;
 	}
 	const query = Object.fromEntries(url.searchParams);
+	let returnTo = networkReturn(query.return_to);
+	let missingJob = query.missing_job === '1';
+	if (returnTo.startsWith('/jobs/')) {
+		try {
+			if (!getJob(new URL(returnTo, url).pathname.split('/')[2])) {
+				returnTo = '/networks';
+				missingJob = true;
+			}
+		} catch (e) {
+			if (!(e instanceof ServiceError || e instanceof ValidationError)) throw e;
+			returnTo = '/networks';
+			missingJob = true;
+		}
+	}
 	let linkedJobs,
 		history,
 		picker = null,
@@ -30,6 +45,7 @@ export function load({ params, url }) {
 	}
 	return {
 		person,
+		returnTo,
 		linkedJobs,
 		history,
 		picker,
@@ -37,7 +53,7 @@ export function load({ params, url }) {
 		query,
 		errors,
 		today: localCalendarDate(),
-		missingJob: query.missing_job === '1'
+		missingJob
 	};
 }
 function action(operation, saved) {
@@ -69,12 +85,10 @@ function action(operation, saved) {
 				values
 			});
 		}
-		const next = new URLSearchParams(url.searchParams);
-		for (const key of [...next.keys()])
-			if (key.startsWith('/') || ['link_job', 'job_query', 'picker_page'].includes(key))
-				next.delete(key);
-		next.set('saved', saved);
-		redirect(303, `${url.pathname}?${next}`);
+		redirect(
+			303,
+			networkDetailUrl(params.id, url.searchParams.get('return_to'), url.searchParams, saved)
+		);
 	};
 }
 export const actions = {
