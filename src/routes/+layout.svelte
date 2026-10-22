@@ -59,6 +59,14 @@
 	onNavigate((navigation) => {
 		// Dashboard stage paging has its own horizontal slide rather than a route cross-fade.
 		if (navigation.from?.url.pathname === '/' && navigation.to?.url.pathname === '/') return;
+		// URL-backed person picking owns dialog motion, not a whole-page route cross-fade.
+		if (
+			navigation.from?.url.pathname === navigation.to?.url.pathname &&
+			/^\/jobs\/[1-9]\d*$/.test(navigation.to?.url.pathname ?? '') &&
+			(navigation.from?.url.searchParams.has('link_person') ||
+				navigation.to?.url.searchParams.has('link_person'))
+		)
+			return;
 		if (!document.startViewTransition) return;
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 		return new Promise((resolve) => {

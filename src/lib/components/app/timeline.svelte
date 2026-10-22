@@ -6,6 +6,7 @@
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { formatDate } from '$lib/format';
 	import { cn } from '$lib/utils.js';
+	import ExpandableText from './expandable-text.svelte';
 
 	type Entry = {
 		id: number;
@@ -57,11 +58,11 @@
 				</div>
 			</div>
 			{#if entry.note}
-				<p
+				<div
 					class="mt-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-muted-foreground"
 				>
-					{entry.note}
-				</p>
+					<ExpandableText text={entry.note} limit={280} lines={4} />
+				</div>
 			{/if}
 			<div class="mt-2 flex flex-wrap gap-2">
 				<Button

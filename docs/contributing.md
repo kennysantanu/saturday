@@ -80,6 +80,8 @@ For the optional large-archive case, run `node --max-old-space-size=128 --test t
 | `src/lib/components/ui/`                                          | UI primitives                                                                     |
 | `src/lib/job-fields.js`, `src/lib/job-search.js`                  | Job field registry and browser-safe search/URL choices                            |
 | `src/lib/server/services.js`, `networks.js`, `validation.js`      | Record services, queries, and validation                                          |
+| `src/lib/server/workflow.js`                                      | Workflow configuration, starting-stage selection, ordering, and usage guards      |
+| `src/lib/server/access-settings.js`, `access-auth.js`             | Private access preferences, password verification, and browser sessions           |
 | `src/lib/server/database.js`, `migrations.js`, `compatibility.js` | SQLite access, schema, and supported formats                                      |
 | `src/lib/server/backups.js`, `src/lib/server/files/`              | Database/file backups, documents, PDF, journals, and coordinated recovery         |
 | `src/lib/server/mcp-server.js`                                    | Core tool schemas and adapters; extension tool registration                       |
@@ -92,7 +94,7 @@ For the optional large-archive case, run `node --max-old-space-size=128 --test t
 | `examples/extensions/interview-practice/`                         | Portable extension example                                                        |
 | `docs/`                                                           | User, assistant, and contributor guides                                           |
 
-## Local workflow verification — 2026-10-21
+## Local workflow and access verification — 2026-10-21
 
 The development candidate based on `4f3a26c` plus local changes passed `npm run verify` on macOS 26.4.1 arm64, Node 25.9.0, npm 11.12.1 and managed Chrome 154.0.8037.57: 160 regression tests, eight production HTTP/browser checks, and the document/extension browser review. The package remains an unreleased development version.
 
@@ -101,6 +103,12 @@ Coverage includes more than 100 jobs, independent board pages, empty/closed-only
 A separately created temporary installation built and initialized the workflow baseline, generated an isolated desktop shortcut and JSON/TOML client fixtures, matched web/MCP identities, reflected a stage change on Dashboard, and supported MCP reconnect/read with the UI stopped. It reused local dependencies/runtime and did not alter personal data, the real Desktop, login startup or actual assistant-client configuration.
 
 Desktop/light, 320px/dark, 640px reflow, exact 767/768px dialog boundaries, touch emulation and Chrome accessibility-tree heading/link checks were reviewed. Reflow emulation is not actual browser 200% zoom; touch emulation is not a physical phone; an accessibility tree is not a screen-reader test. Actual zoom, physical touch/assistive technology, other supported platforms/minimum runtimes and real assistant-client verification remain release gates. Native GET lists/board paging and ordinary job forms are covered; quick-edit dialogs require JavaScript.
+
+A subsequent full `npm run verify` on commit `9550890` passed 160 regression tests, eight production HTTP/browser checks and document/extension browser review. Access coverage includes independent LAN/password defaults, all four combinations, initialization interruption/fail-closed behavior, route gates, forged-header rejection, host-only controls, restart/revocation, stopped-server recovery, expired-save/upload drafts and browser Back. Chrome used an actual external IPv4 address for login, job capture, upload/download and logout-all; this is not physical-phone certification.
+
+The wheel-activity follow-up reproduced missing finite-session renewal before the fix and verified trusted renewal, burst throttling, rejected synthetic activity and No expiration afterward. Build, formatting, zero-error/warning type checks, 29 focused tests and four production password/Dashboard/LAN checks passed. The separate theme follow-up passed build/type/format checks, 14 UI-convention tests and nine production checks, including browser-local persistence and fallback behavior; this does not claim a fresh full `verify` run for that follow-up.
+
+Regression entry points are `tests/workflow.test.mjs`, `tests/workflow.integration.mjs`, `tests/dashboard.test.mjs`, `tests/dashboard.integration.mjs`, `tests/access.test.mjs`, `tests/access-network.test.mjs`, `tests/access.integration.mjs`, `tests/access.browser.mjs`, `tests/lan.integration.mjs` and `tests/theme.integration.mjs`. Temporary screenshots/logs and disposable installation paths are review artifacts, not permanent release evidence. Repeat relevant checks against the exact candidate before claiming support.
 
 ## Storage contracts
 
@@ -129,6 +137,18 @@ Search uses bound literal-contains queries, whitelisted sorts, stable ties, read
 
 Network follows the same validation/query conventions. General notes, relationship notes, and interaction notes are distinct. Link/unlink and interactions do not change job status/history or parent detail timestamps. Interaction dates cannot be future dates; follow-ups are independent and are not cleared by interactions. Scope updates by both person and update ID.
 
+### Workflow stages and history
+
+The executable full schema and indexes live in [`migrations.js`](../src/lib/server/migrations.js); do not maintain another SQL copy. `workflow_stages` stores stable IDs, names, ordering, closure/archive flags and timestamps. `jobs.current_stage_id` references current placement; nullable `job_updates.stage_id` distinguishes milestones from general notes. There is no stored job activity flag, fixed event enum, success classification, initial-stage flag or revision counter.
+
+Available stages sort by `is_closed, sort_order, id`; archived rows follow available rows in configuration. The first available open stage starts new jobs, and defaults are seeded only for a new database. Default open progression is New → Applied → Screening → Interview → Offer; Accepted, Rejected and Dismissed are editable closed destinations. Names and display order never enforce transitions: moves may go backward, skip stages or close from any stage.
+
+Stage names are trimmed, 1–80 characters and unique among available stages using the shared trim/lowercase normalization. Archived names may collide; restore requires an available name and retains the ID. Add/restore/unused closure changes append within the stage's type. Up/Down reads current membership, moves one place within the same type and normalizes order in a write transaction. Field-specific actions preserve unrelated/concurrently added data. Starting-stage changes require confirmation and affect future jobs only. Closure cannot change while any job/history references the stage; archive requires no current occupants and must leave an available open stage. There is no permanent stage deletion. Workflow configuration uses ordinary authenticated browser access, including allowed LAN browsers; it is not host-only maintenance and has no MCP mutation tools.
+
+Creation saves starting placement plus its initial milestone atomically. Change stage validates the latest job and available destination, accepts today/past dates, and commits placement plus one milestone together. Same-stage requests change neither timestamps nor history. Last committed moves win, retaining both actual moves' milestones; ordinary detail edits cannot overwrite placement. History-only changes never move a job, but refresh its `updated_at`. Notes require text; milestones may omit notes and use archived stages or confirmed future dates. Scheduled milestones count in distinct-job historical totals without advancing placement. History correction/deletion rechecks ownership and latest placement transactionally and cannot remove the sole milestone supporting that placement; date/note-only corrections remain allowed. Reads never reconstruct placement from history, and clients inspect authoritative state before manually retrying uncertain writes.
+
+Database backups include every stage, job pointer, history entry, dataset identity and allocator counter. Restore validates available names/types/order, at least one available open stage, available current destinations and supporting milestones. Remove dependent records before replacing all stages, including staging defaults; insert incoming stages before jobs/history. Workflow changes invalidate prepared restores through existing fingerprints. Test fresh and populated targets with different stage IDs and custom/archived stages, preserving Network, Profile, file namespaces and counters. Reject old formats unchanged; no development converter or automatic reset is supplied.
+
 ### Documents and recovery
 
 Use `files/` services for every file mutation; routes/tools must not write bytes or the manifest directly. Publication checks hashes/conflict tokens and journals changes. Version conversion runs under the file lock and preserves old metadata. Copies and PDFs get independent IDs; Profile designations refer to stable document IDs.
@@ -138,6 +158,20 @@ Coordinated restore acquires the SQLite write gate before the file lock and pers
 Manual backup orchestration lives in `files/pairs.js`. Database/files/both appear in grouped history; combined downloads/imports stream ZIPs while retaining independent artifact formats. New archives use `backups/database/` and `backups/files/` beside the stores. Supported older adjacent archives remain discoverable. Scheduling/retention workers are removed; old schedule JSON is inert. Core backups exclude extension databases.
 
 ## Installation and lifecycle contracts
+
+### Browser access and authentication
+
+`access-settings.js` owns version-1 `saturday.access` at `<data_root>/access.json`: `allow_lan` defaults false, `idle_timeout_seconds` defaults 3600 (900–2592000 or null for No expiration), and `password` is null or a salted scrypt verifier with its parameters. Initialize under the shared lock by publishing the descriptor marker before the settings file. Missing initialized, malformed or unsupported settings fail closed; preserve valid existing settings. Updates/reinstall retain this private file; career backups exclude it. No account/session tables or new runtime dependencies are involved.
+
+The production supervisor reads saved LAN preference on web-process startup: loopback by default, all IPv4 interfaces when enabled, with occupied-port fallback. Settings shows saved and effective modes separately; saving does not rebind listeners or restart an already-running instance. The actual phone address matters, not a new port-selection field. Supervisor control remains loopback-only. Validate actual sockets and same-origin requests rather than forwarded identity; keep existing CSRF/control-cookie checks. Host-only access/password/server/installation actions remain unavailable to remote browsers even without password protection; ordinary records, workflow configuration and both logout actions remain available under normal authentication. LAN does not expose MCP, configure public hosting or change firewall/router policy. HTTP does not encrypt passwords, sessions or data.
+
+`access-auth.js` uses bounded asynchronous scrypt and login attempts, opaque tokens stored hashed in memory, and a 100-session cap. Successful login prunes expired sessions then evicts the oldest if full; incorrect passwords do not evict. Installation-specific host-only HttpOnly/SameSite cookies use Secure with HTTPS and no Expires/Max-Age. The central hook protects private pages, framework data, APIs, files, backups and extensions; minimal sign-in/session checks and actual-loopback readiness remain available. Private/login/credential responses use no-store. Logout revokes server sessions and clears client state through full navigation; logout-all, password changes and process restart revoke other sessions too. Browser password protection is independent of trusted local stdio MCP.
+
+Finite inactivity is enforced using server receipt times, with no hidden absolute login-age deadline. Trusted interaction on visible pages, including local carousel wheel gestures, uses the shared 30-second throttled activity path. Passive checks/polling and synthetic events do not renew sessions; No expiration skips heartbeats. Timeout changes prune under the old policy before applying the new one; unlimited-to-finite starts a fresh idle period and expired sessions cannot revive. A protected write returns 401 before private work, preserving enhanced drafts/uploads for separate-tab sign-in and manual retry. Browser history restoration rechecks authorization without counting as activity. Already-authorized work or downloaded data cannot be retracted.
+
+Live password/policy changes occur in Settings on the host. Host CLI recovery/credential changes stop and verify the owned UI and respect maintenance locks, refusing independent runtimes; recovery saves LAN off, removes protection and preserves career data. Core MCP exposes neither authentication management nor command execution. Protected installation operations suppress the separate progress gateway but retain durable results; access changes refuse queued/active installation work. Restart uses minimal local readiness then a full reload and fresh sign-in. User recovery commands live in the [installation guide](installation-guide.md#locked-out-of-saturday).
+
+### Owned processes and maintenance
 
 The shared resolver owns all database/file/state/backup/extension/code/runtime/log paths. Setup starts without application dependencies, runs `npm ci`, then loads storage services. Step results and bounded logs persist for retry. Existing source paths are adopted without relocation; missing initialized stores fail instead of creating replacements.
 

@@ -224,6 +224,7 @@ p {
 
 /* ---- Navigation ---- */
 .app-topbar {
+	container: topbar / inline-size;
 	position: sticky;
 	top: max(16px, env(safe-area-inset-top));
 	z-index: 40;
@@ -240,6 +241,10 @@ p {
 	display: flex;
 	align-items: center;
 	gap: 6px;
+}
+.topbar-brand {
+	flex-shrink: 0;
+	white-space: nowrap;
 }
 .navigation-item {
 	display: flex;
@@ -268,6 +273,18 @@ p {
 }
 .navigation-item svg {
 	flex-shrink: 0;
+}
+/* Compact the top links before the brand and labels compete for horizontal space. */
+@container topbar (width < 64rem) {
+	.navigation-item {
+		flex-direction: column;
+		justify-content: center;
+		gap: 2px;
+		padding: 6px 10px;
+		font-size: 0.8125rem;
+		line-height: 1.2;
+		white-space: nowrap;
+	}
 }
 /* Floating tab bar replaces the top navigation on narrow screens. */
 .tab-bar {
@@ -343,6 +360,12 @@ p {
 	letter-spacing: -0.045em;
 	overflow-wrap: anywhere;
 }
+.page-title-row {
+	display: flex;
+	align-items: stretch;
+	gap: 12px;
+	min-width: 0;
+}
 .page-header h1 + p {
 	margin-top: 10px;
 	line-height: 1.6;
@@ -354,6 +377,74 @@ p {
 	flex-wrap: wrap;
 	gap: 10px;
 	align-items: center;
+}
+.job-score-number {
+	max-width: 10ch;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.person-picker[data-slot='dialog-content'] {
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+.person-picker > [data-slot='dialog-header'],
+.person-picker > [data-slot='dialog-footer'] {
+	flex-shrink: 0;
+}
+.person-picker-body {
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+.person-picker-results {
+	max-height: 176px;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+.compact-card {
+	--card-spacing: 12px;
+}
+.compact-card [data-slot='card-header'],
+.compact-card [data-slot='card-content'] {
+	padding-inline: 16px;
+}
+#job-information[open] > summary > svg {
+	rotate: 180deg;
+}
+.content-expander > summary,
+.expandable-text > summary {
+	cursor: pointer;
+	list-style: none;
+	border-radius: 4px;
+}
+.content-expander > summary::-webkit-details-marker,
+.expandable-text > summary::-webkit-details-marker {
+	display: none;
+}
+.content-expander > summary,
+.expandable-text .expand-label,
+.expandable-text .collapse-label {
+	min-height: 44px;
+	align-content: center;
+	color: var(--primary);
+	font-size: 0.875rem;
+	font-weight: 550;
+}
+.expandable-text .expand-label,
+.expandable-text .collapse-label {
+	display: block;
+}
+.collapse-label,
+details[open] > summary > .expand-label,
+.expandable-text[open] .expandable-preview {
+	display: none;
+}
+details[open] > summary > .collapse-label {
+	display: inline;
+}
+.expandable-text:not([open]) .collapse-label {
+	display: none;
 }
 .section-title {
 	font-size: 1.125rem;
@@ -560,7 +651,7 @@ p {
 }
 /* Match the 48rem dialog-sheet breakpoint for action layout. */
 @media (width >= 48rem) {
-	.job-update-actions > [data-variant='destructive'] {
+	.dialog-edit-actions > [data-variant='destructive'] {
 		margin-right: auto;
 	}
 }

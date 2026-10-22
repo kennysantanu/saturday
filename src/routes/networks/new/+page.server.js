@@ -2,6 +2,7 @@ import { fail, redirect } from '@sveltejs/kit';
 import { createNetwork } from '$lib/server/networks.js';
 import { getJob } from '$lib/server/services.js';
 import { ValidationError, ServiceError } from '$lib/server/validation.js';
+import { jobReturn, jobDetailUrl } from '$lib/job-navigation.js';
 function findJob(id) {
 	if (!id) return null;
 	try {
@@ -15,6 +16,7 @@ export function load({ url }) {
 	const jobId = url.searchParams.get('job_id');
 	const job = findJob(jobId);
 	return {
+		returnTo: jobReturn(url.searchParams.get('return_to')),
 		job: job ? { id: job.id, title: job.title, company: job.company } : null,
 		missingJob: !!jobId && !job
 	};
@@ -40,11 +42,15 @@ export const actions = {
 			});
 		}
 		const jobId = url.searchParams.get('job_id');
-		if (jobId && findJob(jobId))
-			redirect(
-				303,
-				`/jobs/${encodeURIComponent(jobId)}?link_person=1&person=${person.id}&saved=person`
+		if (jobId && findJob(jobId)) {
+			const destination = new URL(
+				jobDetailUrl(jobId, url.searchParams.get('return_to'), 'person'),
+				url
 			);
+			destination.searchParams.set('link_person', '1');
+			destination.searchParams.set('person', String(person.id));
+			redirect(303, destination.pathname + destination.search);
+		}
 		redirect(303, `/networks/${person.id}?saved=person${jobId ? '&missing_job=1' : ''}`);
 	}
 };

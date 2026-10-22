@@ -11,7 +11,7 @@
 	let { data, form } = $props();
 	const values = $derived(form?.values ?? data.person);
 	const errors = $derived(form?.errors ?? {});
-	const back = $derived(`/networks/${data.person.id}`);
+	const back = $derived(data.back);
 	const guard = new UnsavedChanges();
 </script>
 

@@ -120,6 +120,25 @@ try {
 	await page.locator('a::-p-text(Explain a difficult project)').click();
 	await settled();
 	assert.equal(await page.$eval('textarea[name="answer"]', (e) => e.value), 'A practice draft');
+	// The sixth destination must also fit the compact top navigation at tablet widths.
+	for (const width of [768, 900, 1024, 1280]) {
+		await page.setViewport({ width, height: 900 });
+		await settled();
+		assert.equal(await page.$$eval('.desktop-navigation a', (items) => items.length), 6);
+		assert.equal(
+			await page.$eval('.navigation-item', (el) => getComputedStyle(el).flexDirection),
+			width < 1104 ? 'column' : 'row'
+		);
+		assert(await page.$eval('html', (el) => el.scrollWidth <= innerWidth + 1));
+		assert(
+			await page.$eval('.desktop-navigation', (el) => {
+				const nav = el.getBoundingClientRect();
+				const brand = document.querySelector('.topbar-brand').getBoundingClientRect();
+				const bar = document.querySelector('.app-topbar').getBoundingClientRect();
+				return nav.left >= brand.right && nav.right <= bar.right;
+			})
+		);
+	}
 	await page.setViewport({ width: 390, height: 844 });
 	await settled();
 	assert.ok(await page.$eval('html', (e) => e.scrollWidth <= e.clientWidth + 1));
@@ -376,17 +395,21 @@ try {
 		'Hiring manager and referrer'
 	);
 	await page.screenshot({ path: join(scratch, 'network-detail-desktop.png'), fullPage: true });
-	await page.locator('button[aria-label^="More actions for interaction"]').click();
-	await page.locator('[role=menuitem]::-p-text(Delete)').click();
-	await page.waitForSelector('[role=dialog]');
+	await page.locator('button::-p-text(Edit interaction)').click();
+	await page.waitForSelector('#network-interaction');
+	await page.locator('#network-interaction button::-p-text(Delete interaction)').click();
+	await page.waitForSelector('button[form="network-interaction"]');
 	await settled();
-	await page.locator('[role=dialog] button::-p-text(Cancel)').click();
+	await page
+		.locator(
+			'[data-slot="dialog-content"]:has(button[form="network-interaction"]) button::-p-text(Cancel)'
+		)
+		.click();
 	assert.equal(networks.getNetwork(personId).interaction_count, 1);
-	await page.waitForSelector('[role=dialog]', { hidden: true });
+	await page.waitForSelector('button[form="network-interaction"]', { hidden: true });
 	await settled();
-	await page.locator('button[aria-label^="More actions for interaction"]').click();
-	await page.locator('[role=menuitem]::-p-text(Delete)').click();
-	await page.locator('[role=dialog] button::-p-text(Delete interaction)').click();
+	await page.locator('#network-interaction button::-p-text(Delete interaction)').click();
+	await page.locator('button[form="network-interaction"]').click();
 	await page.waitForSelector('[role=dialog]', { hidden: true });
 	await settled();
 	assert.equal(networks.getNetwork(personId).interaction_count, 0);
@@ -414,7 +437,7 @@ try {
 	await settled();
 	await page.type('#name', 'Casey Example');
 	await page.locator('button::-p-text(Save person)').click();
-	await page.waitForSelector('[role=dialog] input[type=radio]:checked');
+	await page.waitForSelector('#job-person-link input[type="radio"]:checked');
 	await settled();
 	assert.equal(
 		networks.listNetworks({ job_id: job.id }).total,

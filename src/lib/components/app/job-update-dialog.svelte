@@ -57,7 +57,7 @@
 				: mode === 'add'
 					? 'Add history'
 					: data.job.followUpDate
-						? 'Reschedule follow-up'
+						? 'Edit follow-up'
 						: 'Schedule follow-up'
 	);
 	const description = $derived(
@@ -206,7 +206,7 @@
 			{/if}
 			<Dialog.Footer
 				class={mode === 'edit' || (mode === 'followUp' && data.job.followUpDate)
-					? 'job-update-actions'
+					? 'dialog-edit-actions'
 					: undefined}
 			>
 				{#if mode === 'edit'}

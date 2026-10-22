@@ -139,6 +139,28 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 			organization: 'Acme'
 		});
 		assert.equal(editPerson.type, 'redirect');
+		const personContext =
+			`/networks/${personId}?` +
+			new URLSearchParams({
+				return_to: '/networks?organization=Acme&page=3',
+				jobs_page: '2',
+				updates_page: '3'
+			});
+		const contextualEdit = await postJob(
+			`/networks/${personId}/edit?` + new URLSearchParams({ return_to: personContext }),
+			{ name: 'Alex Example', role: 'Recruiter', organization: 'Acme' }
+		);
+		const editLocation = new URL(contextualEdit.location, base);
+		assert.equal(editLocation.pathname, `/networks/${personId}`);
+		assert.equal(editLocation.searchParams.get('return_to'), '/networks?organization=Acme&page=3');
+		assert.equal(editLocation.searchParams.get('jobs_page'), '2');
+		assert.equal(editLocation.searchParams.get('updates_page'), '3');
+		const unsafeEdit = await postJob(`/networks/${personId}/edit?return_to=https://evil.example`, {
+			name: 'Alex Example',
+			role: 'Recruiter',
+			organization: 'Acme'
+		});
+		assert.equal(new URL(unsafeEdit.location, base).searchParams.get('return_to'), '/networks');
 		const peopleList = await (await fetch(`${base}/networks`)).text();
 		assert.ok(peopleList.includes(`Person number ${personId}`));
 		const personDetail = await (await fetch(`${base}/networks/${personId}`)).text();
@@ -217,7 +239,8 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		);
 		const contextual = await postJob(`/networks/new?job_id=${job.id}`, { name: 'Context person' });
 		assert.equal(contextual.type, 'redirect');
-		assert.ok(contextual.location.startsWith(`/jobs/${job.id}?link_person=1&person=`));
+		assert.equal(new URL(contextual.location, base).pathname, `/jobs/${job.id}`);
+		assert.equal(new URL(contextual.location, base).searchParams.get('link_person'), '1');
 		const contextId = new URL(contextual.location, base).searchParams.get('person');
 		assert.equal(
 			networks.listNetworks({ job_id: job.id }).total,

@@ -7,13 +7,14 @@
 	import UnsavedGuard from '$lib/components/app/unsaved-guard.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { UnsavedChanges } from '$lib/unsaved.svelte';
+	import { jobDetailUrl } from '$lib/job-navigation.js';
 
 	let { data, form } = $props();
 	const values = $derived(form?.values ?? {});
 	const errors = $derived(form?.errors ?? {});
 	const back = $derived(
 		data.job
-			? { href: `/jobs/${data.job.id}`, label: 'job' }
+			? { href: jobDetailUrl(data.job.id, data.returnTo), label: 'job' }
 			: { href: '/networks', label: 'Network' }
 	);
 	const guard = new UnsavedChanges();

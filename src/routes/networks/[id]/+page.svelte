@@ -4,10 +4,10 @@
 	import { page } from '$app/state';
 	import { enhance } from '$app/forms';
 	import { focusFirstError, withPending } from '$lib/forms';
+	import { networkDetailUrl } from '$lib/network-navigation.js';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Link2 from '@lucide/svelte/icons/link-2';
-	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import CalendarPlus from '@lucide/svelte/icons/calendar-plus';
 	import PageHeader from '$lib/components/app/page-header.svelte';
 	import PageShell from '$lib/components/app/page-shell.svelte';
@@ -21,7 +21,6 @@
 	import LinkedItem from '$lib/components/app/linked-item.svelte';
 	import Pagination from '$lib/components/app/pagination.svelte';
 	import RadioOption from '$lib/components/app/radio-option.svelte';
-	import RowActions from '$lib/components/app/row-actions.svelte';
 	import SectionCard from '$lib/components/app/section-card.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -32,6 +31,9 @@
 	const person = $derived(data.person);
 	const errors = $derived(form?.errors ?? data.errors ?? {});
 	const values = $derived(form?.values ?? {});
+	const followFailure = $derived(
+		!!form?.errors && ['follow-up', 'follow-up-cleared'].includes(form.action)
+	);
 	const followGuard = new UnsavedChanges();
 	const interactionGuard = new UnsavedChanges();
 	const noteGuard = new UnsavedChanges();
@@ -46,7 +48,6 @@
 	let interactionDate = $state('');
 	let interactionNote = $state('');
 	let deleteOpen = $state(false);
-	let deleteId = $state('');
 	let noteOpen = $state(false);
 	let noteJob = $state('');
 	let noteJobTitle = $state('');
@@ -57,16 +58,17 @@
 	});
 	$effect(() => {
 		if (!form?.errors) return;
-		if (form.action === 'follow-up') followOpen = true;
-		if (form.action === 'addInteraction' || form.action === 'editInteraction') {
+		if (followFailure) followOpen = true;
+		if (
+			['addInteraction', 'editInteraction', 'deleteInteraction', 'interaction-deleted'].includes(
+				form.action
+			)
+		) {
 			interactionOpen = true;
 			interactionId = values.update_id ?? '';
 			interactionDate = values.interaction_date ?? data.today;
 			interactionNote = values.note ?? '';
-		}
-		if (form.action === 'interaction-deleted' || form.action === 'deleteInteraction') {
-			deleteId = values.update_id ?? '';
-			deleteOpen = true;
+			deleteOpen = false;
 		}
 		if (form.action === 'network-note') {
 			noteOpen = true;
@@ -116,6 +118,7 @@
 		},
 		() => {
 			for (const guard of Object.values(dialogGuards)) guard.saving = false;
+			deleteOpen = false;
 		}
 	);
 </script>
@@ -123,12 +126,13 @@
 <PageShell title={`${person.name} · Network`}>
 	<PageHeader
 		recordNumber={person.id}
-		back={{ href: '/networks', label: 'Network' }}
+		back={{ href: data.returnTo, label: data.returnTo.startsWith('/jobs/') ? 'Job' : 'Network' }}
 		title={person.name}
 		description={[person.role, person.organization].filter(Boolean).join(' · ')}
 	>
-		{#snippet actions()}<Button href={`/networks/${person.id}/edit`} variant="outline"
-				><Pencil data-icon="inline-start" />Edit details</Button
+		{#snippet actions()}<Button
+				href={`/networks/${person.id}/edit?${new URLSearchParams({ return_to: networkDetailUrl(person.id, data.returnTo, page.url.searchParams) })}`}
+				variant="outline"><Pencil data-icon="inline-start" />Edit details</Button
 			>{/snippet}
 	</PageHeader>
 	{#if data.missingJob}<Notice title="Person saved"
@@ -137,7 +141,7 @@
 	{#if Object.keys(data.errors).length}<Notice tone="error" title="Check the page or search values"
 			>{Object.values(data.errors).join(' ')}</Notice
 		>{/if}
-	{#if ['network-unlinked', 'follow-up-cleared'].includes(form?.action ?? '') && errors.form}<Notice
+	{#if form?.action === 'network-unlinked' && errors.form}<Notice
 			tone="error"
 			title="Could not save change">{errors.form}</Notice
 		>{/if}
@@ -192,15 +196,9 @@
 			<div class="flex flex-wrap gap-3">
 				<Button variant="outline" onclick={() => (followOpen = true)}
 					><CalendarPlus data-icon="inline-start" />{person.follow_up_date
-						? 'Reschedule'
+						? 'Edit follow-up'
 						: 'Schedule follow-up'}</Button
-				>{#if person.follow_up_date}<form
-						method="POST"
-						action={formAction('clearFollowUp')}
-						use:enhance={enhanceNetwork}
-					>
-						<Button type="submit" variant="ghost">Clear follow-up</Button>
-					</form>{/if}
+				>
 			</div>
 		</SectionCard>
 	</div>
@@ -272,26 +270,16 @@
 			<div class="space-y-2 border-b pb-4 last:border-0 last:pb-0">
 				<div class="flex items-start justify-between gap-3">
 					<p class="text-sm font-medium">{formatDate(entry.interaction_date)}</p>
-					<RowActions
-						label={`interaction on ${formatDate(entry.interaction_date)}`}
-						onEdit={() => {
+					<Button
+						variant="ghost"
+						size="sm"
+						onclick={() => {
 							interactionId = entry.id;
 							interactionDate = entry.interaction_date;
 							interactionNote = entry.note;
 							interactionOpen = true;
-						}}
-						menu={[
-							{
-								label: 'Delete',
-								icon: Trash2,
-								destructive: true,
-								onselect: () => {
-									deleteId = entry.id;
-									deleteOpen = true;
-								}
-							}
-						]}
-					/>
+						}}><Pencil data-icon="inline-start" />Edit interaction</Button
+					>
 				</div>
 				<p class="text-sm break-words whitespace-pre-wrap text-muted-foreground">{entry.note}</p>
 			</div>
@@ -311,7 +299,7 @@
 		<Dialog.Content class="sm:max-w-md">
 			<Dialog.Header>
 				<Dialog.Title
-					>{person.follow_up_date ? 'Reschedule follow-up' : 'Schedule follow-up'}</Dialog.Title
+					>{person.follow_up_date ? 'Edit follow-up' : 'Schedule follow-up'}</Dialog.Title
 				>
 				<Dialog.Description
 					>Plan your next contact with {person.name}. Recording an interaction keeps this reminder.</Dialog.Description
@@ -325,40 +313,42 @@
 				use:enhance={enhanceNetwork}
 				class="space-y-5"
 			>
-				{#if form?.action === 'follow-up' && errors.form}<Notice
-						tone="error"
-						title="Follow-up not saved">{errors.form}</Notice
+				{#if followFailure && errors.form}<Notice tone="error" title="Follow-up not saved"
+						>{errors.form}</Notice
 					>{/if}
 				<Field
 					id="follow_up_date"
 					label="Follow-up date"
-					error={form?.action === 'follow-up' ? errors.follow_up_date : undefined}
+					error={followFailure ? errors.follow_up_date : undefined}
 				>
 					{#snippet control(attrs)}<Input
 							{...attrs}
 							type="date"
 							name="follow_up_date"
-							value={form?.action === 'follow-up'
-								? values.follow_up_date
-								: (person.follow_up_date ?? '')}
+							value={followFailure ? values.follow_up_date : (person.follow_up_date ?? '')}
 						/>{/snippet}
 				</Field>
 				<Field
 					id="follow_up_comment"
 					label="Follow-up comment"
 					hint="Clearing the date also clears the comment."
-					error={form?.action === 'follow-up' ? errors.follow_up_comment : undefined}
+					error={followFailure ? errors.follow_up_comment : undefined}
 				>
 					{#snippet control(attrs)}<Textarea
 							{...attrs}
 							name="follow_up_comment"
+							rows={3}
 							maxlength={2000}
-							value={form?.action === 'follow-up'
-								? values.follow_up_comment
-								: (person.follow_up_comment ?? '')}
+							value={followFailure ? values.follow_up_comment : (person.follow_up_comment ?? '')}
 						/>{/snippet}
 				</Field>
-				<Dialog.Footer>
+				<Dialog.Footer class={person.follow_up_date ? 'dialog-edit-actions' : undefined}>
+					{#if person.follow_up_date}<Button
+							type="submit"
+							variant="destructive"
+							formaction={formAction('clearFollowUp')}
+							formnovalidate>Clear follow-up</Button
+						>{/if}
 					<Button type="button" variant="ghost" onclick={close}>Cancel</Button>
 					<Button type="submit">Save follow-up</Button>
 				</Dialog.Footer>
@@ -387,11 +377,15 @@
 				<p class="text-sm text-muted-foreground">
 					<span class="text-destructive" aria-hidden="true">*</span> Required
 				</p>
-				{#if (form?.action === 'addInteraction' || form?.action === 'editInteraction') && errors.form}<Notice
+				{#if ['addInteraction', 'editInteraction', 'deleteInteraction', 'interaction-deleted'].includes(form?.action ?? '') && (errors.form || errors.confirm)}<Notice
 						tone="error"
-						title="Interaction not saved">{errors.form}</Notice
+						title="Interaction not saved">{errors.form || errors.confirm}</Notice
 					>{/if}
-				{#if interactionId}<input type="hidden" name="update_id" value={interactionId} />{/if}
+				{#if interactionId}<input type="hidden" name="update_id" value={interactionId} /><input
+						type="hidden"
+						name="confirm"
+						value="true"
+					/>{/if}
 				<Field
 					id="interaction_date"
 					label="Interaction date"
@@ -410,45 +404,34 @@
 					{#snippet control(attrs)}<Textarea
 							{...attrs}
 							name="note"
-							rows={6}
+							rows={3}
 							maxlength={20000}
 							bind:value={interactionNote}
 						/>{/snippet}
 				</Field>
-				<Dialog.Footer>
+				<Dialog.Footer class={interactionId ? 'dialog-edit-actions' : undefined}>
+					{#if interactionId}<Button
+							type="button"
+							variant="destructive"
+							onclick={() => (deleteOpen = true)}>Delete interaction</Button
+						>{/if}
 					<Button type="button" variant="ghost" onclick={close}>Cancel</Button>
 					<Button type="submit">Save interaction</Button>
 				</Dialog.Footer>
 			</form>
 		</Dialog.Content>
+		<ConfirmDialog
+			bind:open={deleteOpen}
+			title="Delete interaction?"
+			description={`This permanently removes this recorded interaction with ${person.name}. Their details, follow-up and job links are kept.`}
+			confirmLabel="Delete interaction"
+			formId="network-interaction"
+			formAction={formAction('deleteInteraction')}
+			formNoValidate
+			destructive
+		/>
 	{/snippet}
 </UnsavedDialog>
-
-<form
-	id="delete-interaction"
-	method="POST"
-	action={formAction('deleteInteraction')}
-	use:enhance={enhanceNetwork}
->
-	<input type="hidden" name="update_id" value={deleteId} /><input
-		type="hidden"
-		name="confirm"
-		value="true"
-	/>
-</form>
-<ConfirmDialog
-	bind:open={deleteOpen}
-	title="Delete interaction?"
-	description={`This permanently removes this recorded interaction with ${person.name}. Their details, follow-up and job links are kept.`}
-	confirmLabel="Delete interaction"
-	formId="delete-interaction"
-	destructive
->
-	{#if errors.form && (form?.action === 'deleteInteraction' || form?.action === 'interaction-deleted')}<Notice
-			tone="error"
-			title="Could not delete interaction">{errors.form}</Notice
-		>{/if}
-</ConfirmDialog>
 
 <UnsavedDialog bind:open={noteOpen} guard={noteGuard}>
 	{#snippet children(close)}
@@ -501,6 +484,7 @@
 			>
 		</Dialog.Header>
 		<form method="GET" action={`/networks/${person.id}`} class="space-y-3">
+			<input type="hidden" name="return_to" value={data.returnTo} />
 			{#if Object.keys(data.errors).length}<Notice
 					tone="error"
 					title="Check the search or page values">{Object.values(data.errors).join(' ')}</Notice
