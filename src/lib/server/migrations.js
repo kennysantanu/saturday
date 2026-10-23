@@ -118,6 +118,38 @@ CREATE TABLE network_updates (
 CREATE INDEX network_updates_timeline
  ON network_updates(network_id, interaction_date DESC, id DESC);
 `
+	},
+	{
+		version: 2,
+		name: 'create_shared_reminders',
+		sql: `
+CREATE TABLE reminders (
+ id INTEGER PRIMARY KEY AUTOINCREMENT CHECK (id BETWEEN 1 AND 9007199254740991),
+ job_id INTEGER REFERENCES jobs(id) ON DELETE RESTRICT,
+ network_id INTEGER REFERENCES networks(id) ON DELETE RESTRICT,
+ note TEXT,
+ scheduled_at TEXT NOT NULL,
+ is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+ dismissed_at TEXT,
+ created_via TEXT NOT NULL CHECK (created_via IN ('manual','mcp')),
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ CHECK ((job_id IS NOT NULL) != (network_id IS NOT NULL)),
+ CHECK ((is_active=1 AND dismissed_at IS NULL) OR (is_active=0 AND dismissed_at IS NOT NULL))
+);
+CREATE INDEX reminders_job ON reminders(job_id,is_active,scheduled_at,id);
+CREATE INDEX reminders_person ON reminders(network_id,is_active,scheduled_at,id);
+CREATE INDEX reminders_active ON reminders(is_active,scheduled_at,id);
+INSERT INTO reminders(job_id,note,scheduled_at,created_via,created_at,updated_at)
+ SELECT id,follow_up_comment,follow_up_date || 'T00:00',created_via,created_at,updated_at FROM jobs WHERE follow_up_date IS NOT NULL;
+INSERT INTO reminders(network_id,note,scheduled_at,created_via,created_at,updated_at)
+ SELECT id,follow_up_comment,follow_up_date || 'T00:00',created_via,created_at,updated_at FROM networks WHERE follow_up_date IS NOT NULL;
+DROP INDEX jobs_follow_up;
+ALTER TABLE jobs DROP COLUMN follow_up_comment;
+ALTER TABLE jobs DROP COLUMN follow_up_date;
+ALTER TABLE networks DROP COLUMN follow_up_comment;
+ALTER TABLE networks DROP COLUMN follow_up_date;
+`
 	}
 ];
 

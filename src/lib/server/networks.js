@@ -1,3 +1,4 @@
+import { activityReminder, nextReminderSql, localScheduleNow } from './reminders.js';
 import { z } from 'zod';
 import { withDatabase, inTransaction } from './database.js';
 import {
@@ -18,7 +19,7 @@ import {
 } from './validation.js';
 import { parseRecordDeletion, assertDeletionDataset } from './validation.js';
 
-const summary = `SELECT n.*, (SELECT MAX(interaction_date) FROM network_updates u WHERE u.network_id=n.id) AS latest_interaction_date, (SELECT COUNT(*) FROM network_updates u WHERE u.network_id=n.id) AS interaction_count FROM networks n`;
+const summary = `SELECT n.*, ${nextReminderSql('n', 'network_id')} AS next_reminder_at, (SELECT MAX(interaction_date) FROM network_updates u WHERE u.network_id=n.id) AS latest_interaction_date, (SELECT COUNT(*) FROM network_updates u WHERE u.network_id=n.id) AS interaction_count FROM networks n`;
 const missing = (label) => {
 	throw new ServiceError(`${label} was not found.`, 'not_found');
 };
@@ -94,13 +95,19 @@ export function listNetworks(input = {}) {
 			where.push('l.job_id=?');
 			args.push(filters.job_id);
 		}
-		if (filters.follow_up === 'not_scheduled') where.push('n.follow_up_date IS NULL');
+		const upcoming = nextReminderSql('n', 'network_id');
+		if (filters.follow_up === 'not_scheduled') where.push(`${upcoming} IS NULL`);
 		else if (filters.follow_up !== 'all') {
+			const condition =
+				filters.follow_up === 'today'
+					? 'substr(r.scheduled_at,1,10)=?'
+					: `r.scheduled_at ${filters.follow_up === 'overdue' ? '<' : '>='} ?`;
 			where.push(
-				`n.follow_up_date ${{ overdue: '<', today: '=', upcoming: '>' }[filters.follow_up]} ?`
+				`EXISTS(SELECT 1 FROM reminders r WHERE r.network_id=n.id AND r.is_active=1 AND ${condition})`
 			);
-			args.push(localCalendarDate());
+			args.push(filters.follow_up === 'today' ? localCalendarDate() : localScheduleNow());
 		}
+
 		const clause = where.length ? ` WHERE ${where.join(' AND ')}` : '';
 		const from = filters.job_id ? ' JOIN job_networks l ON l.network_id=n.id' : '';
 		const select = filters.job_id
@@ -109,7 +116,7 @@ export function listNetworks(input = {}) {
 		const sort =
 			{
 				name: '',
-				follow_up: 'n.follow_up_date IS NULL, n.follow_up_date, ',
+				follow_up: `${nextReminderSql('n', 'network_id')} IS NULL, ${nextReminderSql('n', 'network_id')}, `,
 				latest_interaction: 'latest_interaction_date IS NULL, latest_interaction_date DESC, '
 			}[filters.sort] + 'n.name COLLATE NOCASE, n.id';
 		const { rows, ...pagination } = pageRows(
@@ -138,6 +145,7 @@ export function deleteNetwork(input) {
 	return write((db) => {
 		assertDeletionDataset(db, values.dataset_id);
 		person(db, values.network_id);
+		db.prepare('DELETE FROM reminders WHERE network_id=?').run(values.network_id);
 		db.prepare('DELETE FROM network_updates WHERE network_id=?').run(values.network_id);
 		db.prepare('DELETE FROM job_networks WHERE network_id=?').run(values.network_id);
 		db.prepare('DELETE FROM networks WHERE id=?').run(values.network_id);
@@ -165,12 +173,6 @@ export function editNetwork(id, patch) {
 	return write((db) => {
 		const previous = person(db, id),
 			merged = { ...previous, ...Object.fromEntries(keys.map((key) => [key, patch[key]])) };
-		if (
-			keys.includes('follow_up_date') &&
-			(merged.follow_up_date == null ||
-				(typeof merged.follow_up_date === 'string' && !merged.follow_up_date.trim()))
-		)
-			merged.follow_up_comment = null;
 		const values = parseSchema(networkInputSchema, merged);
 		db.prepare(
 			`UPDATE networks SET ${Object.keys(values)
@@ -178,34 +180,6 @@ export function editNetwork(id, patch) {
 				.join(',')}, updated_at=? WHERE id=?`
 		).run(...Object.values(values), new Date().toISOString(), id);
 		return person(db, id);
-	});
-}
-export function setNetworkFollowUp(input) {
-	if (!Object.hasOwn(input, 'follow_up_date') || input.follow_up_date === undefined)
-		throw new ValidationError({ follow_up_date: 'Supply a date or null to clear.' });
-	const parsed = parseSchema(
-		z.object({
-			network_id: networkIdSchema,
-			follow_up_date: networkInputShape.follow_up_date,
-			follow_up_comment: networkInputShape.follow_up_comment
-		}),
-		input
-	);
-	return write((db) => {
-		const previous = person(db, parsed.network_id);
-		const values = parseSchema(networkInputSchema, {
-			...previous,
-			follow_up_date: parsed.follow_up_date,
-			follow_up_comment: parsed.follow_up_date ? parsed.follow_up_comment : null
-		});
-		if (
-			previous.follow_up_date !== values.follow_up_date ||
-			previous.follow_up_comment !== values.follow_up_comment
-		)
-			db.prepare(
-				'UPDATE networks SET follow_up_date=?, follow_up_comment=?, updated_at=? WHERE id=?'
-			).run(values.follow_up_date, values.follow_up_comment, new Date().toISOString(), previous.id);
-		return person(db, previous.id);
 	});
 }
 export function listNetworkJobs(input) {
@@ -341,6 +315,7 @@ export function addNetworkUpdate(input, createdVia = 'manual') {
 				timestamp,
 				timestamp
 			);
+		activityReminder(db, input, { network_id: values.network_id }, createdVia);
 		return db.prepare('SELECT * FROM network_updates WHERE id=?').get(id);
 	});
 }

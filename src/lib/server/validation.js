@@ -136,14 +136,6 @@ export function jobMcpInputShape({ partial = false, assessment = false } = {}) {
 		})
 	);
 }
-export const followUpMcpSchema = z.object({
-	follow_up_date: jobFieldSchema(
-		editableJobFields.find((field) => field.name === 'follow_up_date'),
-		true
-	),
-	follow_up_comment: jobMcpInputShape().follow_up_comment
-});
-
 const updateSchema = z
 	.object({
 		job_id: recordIdInputSchema,
@@ -311,21 +303,9 @@ export const networkInputShape = {
 			return false;
 		}
 	}, 'Enter an HTTP or HTTPS link.'),
-	notes: optionalText(20000, 'Notes'),
-	follow_up_date: optionalText(10, 'Follow-up date').refine(
-		(value) => value === null || validDate(value),
-		'Enter a real date in YYYY-MM-DD format.'
-	),
-	follow_up_comment: optionalText(2000, 'Follow-up comment')
+	notes: optionalText(20000, 'Notes')
 };
-export const networkInputSchema = z.object(networkInputShape).superRefine((value, ctx) => {
-	if (value.follow_up_comment && !value.follow_up_date)
-		ctx.addIssue({
-			code: 'custom',
-			path: ['follow_up_comment'],
-			message: 'Schedule a follow-up date first.'
-		});
-});
+export const networkInputSchema = z.object(networkInputShape);
 export const networkIdSchema = recordIdInputSchema;
 export const networkPaginationShape = {
 	page: integer(1, Number.MAX_SAFE_INTEGER),
@@ -358,7 +338,7 @@ export const networkUpdateShape = {
 		.refine(validDate, 'Enter a real date in YYYY-MM-DD format.')
 		.refine(
 			(value) => value <= localCalendarDate(),
-			'Record completed interactions only; use Follow-up for future contact.'
+			'Record completed interactions only; use a reminder for future contact.'
 		),
 	note: z.string().trim().min(1, 'Enter an interaction note.').max(20000)
 };

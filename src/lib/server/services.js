@@ -1,3 +1,4 @@
+import { activityReminder, nextReminderSql, reminderFeed, localScheduleNow } from './reminders.js';
 import {
 	editableJobFields,
 	assessmentJobFields,
@@ -30,8 +31,7 @@ function shortDate(value) {
 		timeZone: 'UTC'
 	}).format(new Date(`${value}T00:00:00Z`));
 }
-const joinedJobs =
-	'SELECT j.*, s.name AS stage_name, s.is_closed AS stage_closed, s.is_archived AS stage_archived FROM jobs j JOIN workflow_stages s ON s.id=j.current_stage_id';
+const joinedJobs = `SELECT j.*, ${nextReminderSql('j', 'job_id')} AS next_reminder_at, s.name AS stage_name, s.is_closed AS stage_closed, s.is_archived AS stage_archived FROM jobs j JOIN workflow_stages s ON s.id=j.current_stage_id`;
 function readUpdates(db, jobId) {
 	return db
 		.prepare(
@@ -57,6 +57,7 @@ function updateFromRow(row) {
 function jobFromRow(row, updates = []) {
 	return {
 		...jobFromStorage(row),
+		nextReminder: row.next_reminder_at ?? null,
 		isActive: !row.stage_closed,
 		currentStage: {
 			id: row.current_stage_id,
@@ -179,9 +180,6 @@ export function setJobScore(id, input) {
 		})
 	);
 }
-export function setJobFollowUp(id, date, comment) {
-	return editJob(id, { follow_up_date: date, follow_up_comment: date ? (comment ?? null) : null });
-}
 export function setJobStarred(id, starred) {
 	return editJob(id, { is_starred: starred });
 }
@@ -271,29 +269,52 @@ export function searchJobs(input = {}, { jobId } = {}) {
 		}
 		const now = new Date();
 		const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-		for (const [key, column] of [
-			['follow_up', 'follow_up_date'],
-			['deadline', 'application_deadline']
-		]) {
-			const mode = filters[key];
-			if (mode === 'unset' || mode === 'set')
-				clauses.push(`j.${column} IS ${mode === 'set' ? 'NOT ' : ''}NULL`);
-			if (['overdue', 'today', 'upcoming'].includes(mode)) {
-				clauses.push(`j.${column} ${mode === 'overdue' ? '<' : mode === 'upcoming' ? '>' : '='} ?`);
+		const scheduleNow = localScheduleNow();
+		const mode = filters.follow_up;
+		if (mode === 'unset' || mode === 'set')
+			clauses.push(
+				`${mode === 'unset' ? 'NOT ' : ''}EXISTS(SELECT 1 FROM reminders r WHERE r.job_id=j.id AND r.is_active=1)`
+			);
+		if (['overdue', 'today', 'upcoming', 'range'].includes(mode)) {
+			const conditions = ['r.job_id=j.id', 'r.is_active=1'];
+			if (mode === 'today') {
+				conditions.push('substr(r.scheduled_at,1,10)=?');
 				args.push(today);
 			}
-			if (mode === 'range') {
-				clauses.push(`j.${column} IS NOT NULL`);
-				if (filters[`${key}_from`]) {
-					clauses.push(`j.${column} >= ?`);
-					args.push(filters[`${key}_from`]);
-				}
-				if (filters[`${key}_to`]) {
-					clauses.push(`j.${column} <= ?`);
-					args.push(filters[`${key}_to`]);
-				}
+			if (mode === 'overdue' || mode === 'upcoming') {
+				conditions.push(`r.scheduled_at ${mode === 'overdue' ? '<' : '>='} ?`);
+				args.push(scheduleNow);
 			}
+			if (mode === 'range')
+				for (const [bound, op] of [
+					['from', '>='],
+					['to', '<=']
+				])
+					if (filters[`follow_up_${bound}`]) {
+						conditions.push(`substr(r.scheduled_at,1,10) ${op} ?`);
+						args.push(filters[`follow_up_${bound}`]);
+					}
+			clauses.push(`EXISTS(SELECT 1 FROM reminders r WHERE ${conditions.join(' AND ')})`);
 		}
+		const deadlineMode = filters.deadline;
+		if (['unset', 'set'].includes(deadlineMode))
+			clauses.push(`j.application_deadline IS ${deadlineMode === 'set' ? 'NOT ' : ''}NULL`);
+		if (['overdue', 'today', 'upcoming'].includes(deadlineMode)) {
+			clauses.push(
+				`j.application_deadline ${deadlineMode === 'overdue' ? '<' : deadlineMode === 'upcoming' ? '>' : '='} ?`
+			);
+			args.push(today);
+		}
+		if (deadlineMode === 'range')
+			for (const [bound, op] of [
+				['from', '>='],
+				['to', '<=']
+			])
+				if (filters[`deadline_${bound}`]) {
+					clauses.push(`j.application_deadline ${op} ?`);
+					args.push(filters[`deadline_${bound}`]);
+				}
+
 		for (const key of ['created', 'updated']) {
 			for (const bound of ['from', 'to']) {
 				const value = filters[`${key}_${bound}`];
@@ -319,7 +340,7 @@ export function searchJobs(input = {}, { jobId } = {}) {
 			updated: 'j.updated_at DESC, j.created_at DESC',
 			created: 'j.created_at DESC, j.updated_at DESC',
 			score: 'j.score IS NULL, j.score DESC, j.updated_at DESC',
-			follow_up: 'j.follow_up_date IS NULL, j.follow_up_date ASC, j.updated_at DESC',
+			follow_up: `${nextReminderSql('j', 'job_id')} IS NULL, ${nextReminderSql('j', 'job_id')}, j.updated_at DESC`,
 			deadline: 'j.application_deadline IS NULL, j.application_deadline ASC, j.updated_at DESC'
 		};
 		const from = 'FROM jobs j JOIN workflow_stages s ON s.id=j.current_stage_id';
@@ -363,6 +384,7 @@ export function addJobUpdate(input, createdVia = 'manual') {
 		inTransaction(db, () => {
 			if (!getJobRow(db, values.job_id)) throw new ServiceError('Job not found.', 'not_found');
 			const id = historyEntry(db, values, createdVia);
+			activityReminder(db, input, { job_id: values.job_id }, createdVia);
 			return readUpdates(db, values.job_id).find((row) => row.id === id);
 		})
 	);
@@ -381,10 +403,13 @@ export function moveJobStage(id, input, createdVia = 'manual') {
 			const job = getJobRow(db, id);
 			if (!job) throw new ServiceError('Job not found.', 'not_found');
 			stageById(db, values.stage_id, { available: true });
-			if (job.current_stage_id === values.stage_id)
-				return { ...jobFromRow(job, readUpdates(db, id)), unchanged: true };
+			if (job.current_stage_id === values.stage_id) {
+				activityReminder(db, input, { job_id: id }, createdVia);
+				return { ...jobFromRow(getJobRow(db, id), readUpdates(db, id)), unchanged: true };
+			}
 			db.prepare('UPDATE jobs SET current_stage_id=? WHERE id=?').run(values.stage_id, id);
 			historyEntry(db, values, createdVia);
+			activityReminder(db, input, { job_id: id }, createdVia);
 			return jobFromRow(getJobRow(db, id), readUpdates(db, id));
 		})
 	);
@@ -539,10 +564,10 @@ export function getDashboardStats({ today = localCalendarDate(), pipelinePages =
 		const attention = section(
 			'attention',
 			() => ({
-				followUps: due('follow_up_date'),
+				reminders: reminderFeed(db),
 				deadlines: due('application_deadline', 'AND j.application_deadline>=?', [today])
 			}),
-			{ followUps: [], deadlines: [] }
+			{ reminders: [], deadlines: [] }
 		);
 		const totalJobs = Number(db.prepare('SELECT COUNT(*) AS n FROM jobs').get().n);
 		db.exec('COMMIT');

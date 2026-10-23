@@ -1,3 +1,4 @@
+import { reminderInputShape } from './reminders.js';
 import { normalizeStageName } from './workflow.js';
 import { getInstallation } from './installation.js';
 import { z } from 'zod';
@@ -184,7 +185,8 @@ function connect(path, readOnly = true) {
 function databaseVersion(db) {
 	return Number(db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version);
 }
-function columnsFor() {
+function columnsFor(db) {
+	const version = databaseVersion(db);
 	return {
 		app_metadata: ['id', 'format', 'dataset_id'],
 		workflow_stages: [
@@ -196,7 +198,7 @@ function columnsFor() {
 			'created_at',
 			'updated_at'
 		],
-		jobs: jobColumns(),
+		jobs: jobColumns(version),
 		...columns,
 		networks: [
 			'id',
@@ -207,13 +209,28 @@ function columnsFor() {
 			'email',
 			'link',
 			'notes',
-			'follow_up_date',
-			'follow_up_comment',
+			...(version === 1 ? ['follow_up_date', 'follow_up_comment'] : []),
 			'created_via',
 			'created_at',
 			'updated_at'
 		],
 		job_networks: ['job_id', 'network_id', 'notes', 'created_via', 'created_at', 'updated_at'],
+		...(version >= 2
+			? {
+					reminders: [
+						'id',
+						'job_id',
+						'network_id',
+						'note',
+						'scheduled_at',
+						'is_active',
+						'dismissed_at',
+						'created_via',
+						'created_at',
+						'updated_at'
+					]
+				}
+			: {}),
 		network_updates: [
 			'id',
 			'network_id',
@@ -225,7 +242,14 @@ function columnsFor() {
 		]
 	};
 }
-const allocatedTables = ['workflow_stages', 'jobs', 'job_updates', 'networks', 'network_updates'];
+const allocatedTables = [
+	'workflow_stages',
+	'jobs',
+	'job_updates',
+	'networks',
+	'network_updates',
+	'reminders'
+];
 function allocatorState(db) {
 	const rows = db.prepare('SELECT name, seq FROM sqlite_sequence ORDER BY name').all();
 	const seen = new Set();
@@ -240,19 +264,21 @@ function allocatorState(db) {
 		seen.add(row.name);
 	}
 	return Object.fromEntries(
-		allocatedTables.map((table) => {
-			const seq = rows.find((row) => row.name === table)?.seq ?? 0;
-			const maximum = db.prepare(`SELECT MAX(id) AS maximum FROM ${table}`).get().maximum ?? 0;
-			if (seq < maximum)
-				fail('invalid_backup', 'Record ID allocation state is behind stored records.');
-			return [table, seq];
-		})
+		allocatedTables
+			.filter((table) => table !== 'reminders' || databaseVersion(db) >= 2)
+			.map((table) => {
+				const seq = rows.find((row) => row.name === table)?.seq ?? 0;
+				const maximum = db.prepare(`SELECT MAX(id) AS maximum FROM ${table}`).get().maximum ?? 0;
+				if (seq < maximum)
+					fail('invalid_backup', 'Record ID allocation state is behind stored records.');
+				return [table, seq];
+			})
 	);
 }
 function dataset(db) {
 	return {
 		...Object.fromEntries(
-			Object.entries(columnsFor()).map(([table, fields]) => [
+			Object.entries(columnsFor(db)).map(([table, fields]) => [
 				table,
 				db
 					.prepare(
@@ -292,7 +318,8 @@ function summary(db) {
 			Object.entries({
 				network_count: 'networks',
 				network_link_count: 'job_networks',
-				network_update_count: 'network_updates'
+				network_update_count: 'network_updates',
+				...(databaseVersion(db) >= 2 ? { reminder_count: 'reminders' } : {})
 			}).map(([key, table]) => [
 				key,
 				Number(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n)
@@ -394,6 +421,30 @@ function validate(db) {
 		for (const row of data.networks ?? []) {
 			parseSchema(networkIdSchema, row.id);
 			parseSchema(networkInputSchema, row);
+		}
+		for (const row of [...data.jobs, ...data.networks])
+			if (databaseVersion(db) === 1) {
+				if (row.follow_up_date !== null && !validDate(row.follow_up_date))
+					throw new Error('legacy reminder date');
+				if (
+					row.follow_up_comment !== null &&
+					(typeof row.follow_up_comment !== 'string' ||
+						row.follow_up_comment.length > 10000 ||
+						!row.follow_up_date)
+				)
+					throw new Error('legacy reminder note');
+			}
+		for (const row of data.reminders ?? []) {
+			parseSchema(recordIdSchema, row.id);
+			parseSchema(z.object(reminderInputShape), row);
+			if (
+				(row.job_id !== null) === (row.network_id !== null) ||
+				![0, 1].includes(row.is_active) ||
+				(row.is_active
+					? row.dismissed_at !== null
+					: typeof row.dismissed_at !== 'string' || !Number.isFinite(Date.parse(row.dismissed_at)))
+			)
+				throw new Error('reminder');
 		}
 		for (const row of data.job_networks ?? []) parseSchema(z.object(networkLinkShape), row);
 		for (const row of data.network_updates ?? []) {
@@ -590,7 +641,7 @@ function insertData(db, data, preserveCounters = false) {
 		data.app_metadata[0].dataset_id;
 	const previous = preserveCounters && sameDataset ? allocatorState(db) : {};
 	db.exec('DELETE FROM app_metadata; DELETE FROM workflow_stages');
-	for (const [table, fields] of Object.entries(columnsFor())) {
+	for (const [table, fields] of Object.entries(columnsFor(db))) {
 		const statement = db.prepare(
 			`INSERT INTO ${table} (${fields.join(',')}) VALUES (${fields.map(() => '?').join(',')})`
 		);
@@ -598,7 +649,9 @@ function insertData(db, data, preserveCounters = false) {
 	}
 	db.exec('DELETE FROM sqlite_sequence');
 	const sequence = db.prepare('INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)');
-	for (const table of allocatedTables)
+	for (const table of allocatedTables.filter(
+		(table) => table !== 'reminders' || databaseVersion(db) >= 2
+	))
 		sequence.run(table, Math.max(data.$sequence[table], previous[table] ?? 0));
 }
 function cleanup(now) {
@@ -633,6 +686,7 @@ export function prepareRestore(backupId, { now = Date.now() } = {}) {
 				stage = connect(stagePath, false);
 				applyMigrations(stage, databaseVersion(incoming));
 				inTransaction(stage, () => insertData(stage, dataset(incoming)), { checkFiles: false });
+				applyMigrations(stage);
 				const incomingSummary = validate(stage);
 				const unmatchedJobFolders = fileFolderImpact(stage);
 				stage.close();
@@ -712,7 +766,7 @@ export function restoreBackup(restoreId, confirm, { now = Date.now(), beforeComm
 						fail('restore_stale', 'Current records changed after the preview. Prepare again.');
 					const recovery = snapshot('recovery', now);
 					db.exec(
-						'DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs; DELETE FROM workflow_stages;'
+						'DELETE FROM reminders; DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs; DELETE FROM workflow_stages;'
 					);
 					insertData(db, incoming, true);
 					reserveJobFileIds(db);
@@ -821,7 +875,7 @@ export async function restoreDatabaseWithFiles(restoreId, fileOperation) {
 		const recovery = snapshot('recovery');
 		const files = await fileOperation(recovery, summary(stage));
 		db.exec(
-			'DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs; DELETE FROM workflow_stages;'
+			'DELETE FROM reminders; DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs; DELETE FROM workflow_stages;'
 		);
 		insertData(db, dataset(stage), true);
 		reserveJobFileIds(db);

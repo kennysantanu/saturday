@@ -1,6 +1,6 @@
 // All stored job fields. Forms stay inline; immutable migrations remain the schema source.
-// All current fields belong to the workflow baseline (schema 1). `edit` controls input access.
-export const jobFields = [
+// Retired fields remain available only for historical schema inspection. `edit` controls input access.
+const historicalJobFields = [
 	{ name: 'id', key: 'id', type: 'id', label: 'Job ID', edit: 'system', since: 1, list: true },
 	{
 		name: 'job_title',
@@ -157,6 +157,7 @@ export const jobFields = [
 	},
 	{
 		name: 'follow_up_date',
+		until: 1,
 		key: 'followUpDate',
 		type: 'date',
 		label: 'Follow-up date',
@@ -167,6 +168,7 @@ export const jobFields = [
 	},
 	{
 		name: 'follow_up_comment',
+		until: 1,
 		key: 'followUpComment',
 		type: 'text',
 		label: 'Follow-up comment',
@@ -207,11 +209,14 @@ export const jobFields = [
 		list: true
 	}
 ];
+export const jobFields = historicalJobFields.filter((field) => !field.until);
 export const editableJobFields = jobFields.filter((field) => field.edit === 'user');
 export const assessmentJobFields = jobFields.filter((field) => field.edit === 'assistant');
 export const jobInfoFields = jobFields.filter((field) => field.info);
-export function jobColumns(version = Infinity) {
-	return jobFields.filter((field) => field.since <= version).map((field) => field.name);
+export function jobColumns(version = 2) {
+	return historicalJobFields
+		.filter((field) => field.since <= version && (!field.until || version <= field.until))
+		.map((field) => field.name);
 }
 export function jobFromStorage(row) {
 	return Object.fromEntries(
@@ -232,6 +237,7 @@ export function jobForMcp(job, { list = false } = {}) {
 	return {
 		is_active: job.isActive,
 		current_stage: job.currentStage,
+		next_reminder: job.nextReminder ?? null,
 		...Object.fromEntries(
 			jobFields
 				.filter((field) => !list || field.list)
