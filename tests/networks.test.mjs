@@ -1,3 +1,4 @@
+import { createReminder, editReminder, listReminders } from '../src/lib/server/reminders.js';
 import { stageId, closeJob, reopenJob } from './workflow-fixture.mjs';
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -40,7 +41,7 @@ const job = () => createJob({ job_title: 'Engineer', company_name: 'Acme' });
 function contents() {
 	return withDatabase((db) =>
 		Object.fromEntries(
-			['networks', 'job_networks', 'network_updates'].map((table) => [
+			['networks', 'job_networks', 'network_updates', 'reminders'].map((table) => [
 				table,
 				db
 					.prepare(
@@ -149,16 +150,19 @@ test('stable complete pagination and clamping for more than 100 people', () => {
 	assert.equal(n.listNetworks({ name: 'absent', page: 9 }).page, 1);
 });
 
-test('local calendar follow-up matching, nullable setter, dependency and missing-last sorts', () => {
+test('local calendar reminder matching and missing-last sorts use active schedules', () => {
 	const today = localCalendarDate();
-	const early = n.createNetwork({
-		name: 'Earlier',
-		follow_up_date: '2000-01-01',
-		follow_up_comment: 'Call'
+	const early = n.createNetwork({ name: 'Earlier' }),
+		due = n.createNetwork({ name: 'Due' }),
+		future = n.createNetwork({ name: 'Future' }),
+		none = n.createNetwork({ name: 'Absent' });
+	const r = createReminder({
+		network_id: early.id,
+		scheduled_at: '2000-01-01T00:00',
+		note: 'Call'
 	});
-	const due = n.createNetwork({ name: 'Due', follow_up_date: today });
-	const future = n.createNetwork({ name: 'Future', follow_up_date: '2099-01-01' });
-	const none = n.createNetwork({ name: 'Absent' });
+	createReminder({ network_id: due.id, scheduled_at: today + 'T23:59' });
+	createReminder({ network_id: future.id, scheduled_at: '2099-01-01T00:00' });
 	assert.deepEqual(
 		n.listNetworks({ follow_up: 'overdue' }).networks.map((x) => x.id),
 		[early.id]
@@ -169,7 +173,7 @@ test('local calendar follow-up matching, nullable setter, dependency and missing
 	);
 	assert.deepEqual(
 		n.listNetworks({ follow_up: 'upcoming' }).networks.map((x) => x.id),
-		[future.id]
+		[due.id, future.id]
 	);
 	assert.deepEqual(
 		n.listNetworks({ follow_up: 'not_scheduled' }).networks.map((x) => x.id),
@@ -179,16 +183,9 @@ test('local calendar follow-up matching, nullable setter, dependency and missing
 		n.listNetworks({ sort: 'follow_up' }).networks.map((x) => x.id),
 		[early.id, due.id, future.id, none.id]
 	);
-	invalid(() => n.setNetworkFollowUp({ network_id: early.id }));
-	const saved = n.setNetworkFollowUp({ network_id: early.id, follow_up_date: '2000-01-01' });
-	assert.equal(saved.follow_up_comment, null);
-	assert.deepEqual(
-		n.setNetworkFollowUp({ network_id: early.id, follow_up_date: '2000-01-01' }),
-		saved
-	);
-	n.editNetwork(early.id, { follow_up_comment: 'Changed' });
-	assert.equal(n.editNetwork(early.id, { follow_up_date: '   ' }).follow_up_comment, null);
-	invalid(() => n.editNetwork(none.id, { follow_up_comment: 'No date' }));
+	editReminder({ network_id: early.id, reminder_id: r.id, is_active: false });
+	assert.equal(n.getNetwork(early.id).next_reminder_at, null);
+	assert.equal(listReminders({ network_id: early.id, view: 'inactive' }).total, 1);
 });
 
 test('many-to-many links are retry safe, scoped notes never change parents, inactive jobs supported', () => {
@@ -233,7 +230,7 @@ test('many-to-many links are retry safe, scoped notes never change parents, inac
 });
 
 test('optional interactions use actual date and insertion ties, support corrections and scoped confirmed deletion', () => {
-	const a = n.createNetwork({ name: 'Alex', follow_up_date: '2099-01-01' }),
+	const a = n.createNetwork({ name: 'Alex' }),
 		c = n.createNetwork({ name: 'Casey' });
 	const first = n.addNetworkUpdate(
 		{ network_id: a.id, interaction_date: '2000-01-02', note: 'Message sent' },
@@ -286,7 +283,7 @@ test('optional interactions use actual date and insertion ties, support correcti
 	notFound(() => n.deleteNetworkUpdate({ network_id: a.id, update_id: first.id, confirm: true }));
 	const after = n.getNetwork(a.id);
 	assert.equal(after.updated_at, a.updated_at);
-	assert.equal(after.follow_up_date, a.follow_up_date);
+	assert.equal(after.next_reminder_at, a.next_reminder_at);
 	assert.equal(n.listNetworks({ sort: 'latest_interaction' }).networks[0].id, a.id);
 	assert.equal(n.listNetworks({ sort: 'latest_interaction' }).networks.at(-1).id, c.id);
 	for (const entry of n.listNetworkUpdates({ network_id: a.id }).updates)
@@ -318,10 +315,8 @@ test('more than 100 interactions and linked jobs paginate without hidden caps', 
 });
 
 function populated() {
-	const person = n.createNetwork(
-		{ name: 'Alex', follow_up_date: '2099-01-01', follow_up_comment: 'Call', notes: 'General' },
-		'mcp'
-	);
+	const person = n.createNetwork({ name: 'Alex', notes: 'General' }, 'mcp');
+	createReminder({ network_id: person.id, scheduled_at: '2099-01-01T00:00', note: 'Call' });
 	const j = job();
 	n.linkJobNetwork({ job_id: j.id, network_id: person.id, notes: 'Referrer' }, 'mcp');
 	const entry = n.addNetworkUpdate(
@@ -354,7 +349,12 @@ test('all same-count Network mutations invalidate a restore preview', () => {
 	const backup = b.createBackup();
 	for (const mutate of [
 		() => n.editNetwork(person.id, { notes: 'Changed general note' }),
-		() => n.setNetworkFollowUp({ network_id: person.id, follow_up_date: '2099-02-01' }),
+		() =>
+			editReminder({
+				network_id: person.id,
+				reminder_id: listReminders({ network_id: person.id }).reminders[0].id,
+				scheduled_at: '2099-02-01T00:00'
+			}),
 		() => n.editJobNetwork({ job_id: j.id, network_id: person.id, notes: 'Changed relationship' }),
 		() =>
 			n.editNetworkUpdate({
@@ -404,7 +404,7 @@ test('malformed/orphan Network backups fail without touching live records', () =
 	const before = contents();
 	for (const sql of [
 		"UPDATE networks SET email='invalid'",
-		"UPDATE networks SET follow_up_date='2000-02-30'",
+		"UPDATE reminders SET scheduled_at='2000-02-30T00:00'",
 		"UPDATE job_networks SET network_id='missing'",
 		"UPDATE job_networks SET notes='" + 'x'.repeat(2001) + "'",
 		"UPDATE network_updates SET interaction_date='bad'",

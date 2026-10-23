@@ -1,3 +1,4 @@
+import { createReminder } from '../src/lib/server/reminders.js';
 import { stageId } from './workflow-fixture.mjs';
 import { jobSearchSchema } from '../src/lib/server/validation.js';
 import { test, beforeEach, afterEach } from 'node:test';
@@ -34,8 +35,13 @@ afterEach(() => {
 	if (previousFiles === undefined) delete process.env.SATURDAY_FILES_PATH;
 	else process.env.SATURDAY_FILES_PATH = previousFiles;
 });
-const job = (fields = {}, origin = 'manual') =>
-	createJob({ job_title: 'Engineer', company_name: 'Acme', ...fields }, origin);
+const job = (fields = {}, origin = 'manual') => {
+	const { follow_up_date, ...details } = fields;
+	const record = createJob({ job_title: 'Engineer', company_name: 'Acme', ...details }, origin);
+	if (follow_up_date)
+		createReminder({ job_id: record.id, scheduled_at: follow_up_date + 'T23:59' }, origin);
+	return record;
+};
 const ids = (filters) => searchJobs(filters).jobs.map((job) => job.id);
 const update = (jobId, type, date = '2026-10-01') =>
 	addJobUpdate({ job_id: jobId, stage_id: stageId(type), event_date: date });
@@ -104,7 +110,10 @@ test('date presets and open inclusive ranges distinguish missing, overdue, today
 	for (const key of ['follow_up', 'deadline']) {
 		assert.deepEqual(ids({ [key]: 'overdue' }), [overdue.id]);
 		assert.deepEqual(ids({ [key]: 'today' }), [due.id]);
-		assert.deepEqual(ids({ [key]: 'upcoming' }), [upcoming.id]);
+		assert.deepEqual(
+			new Set(ids({ [key]: 'upcoming' })),
+			new Set(key === 'follow_up' ? [due.id, upcoming.id] : [upcoming.id])
+		);
 		assert.deepEqual(ids({ [key]: 'unset' }), [missing.id]);
 		assert.equal(searchJobs({ [key]: 'set' }).total, 3);
 		assert.deepEqual(ids({ [key]: 'range', [`${key}_from`]: today, [`${key}_to`]: today }), [

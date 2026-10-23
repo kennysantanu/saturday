@@ -626,6 +626,8 @@ function locked(operation, validateRecords = true) {
 		fail('not_found', 'Saturday database not found. Run setup first.');
 	const db = connect(paths().database, false);
 	try {
+		assertFileStorageCompatible();
+		applyMigrations(db);
 		return inTransaction(db, () => {
 			if (validateRecords) validate(db);
 			else validateSchema(db);
@@ -704,7 +706,7 @@ export function prepareRestore(backupId, { now = Date.now() } = {}) {
 					incoming: incomingSummary,
 					requires_confirmation: true,
 					warning:
-						'Restoring replaces all current jobs, people, relationships and history. A complete recovery backup will be created first.' +
+						'Restoring replaces all current jobs, people, relationships, reminders and history. A complete recovery backup will be created first.' +
 						(fileDatasetId() && fileDatasetId() !== incomingSummary.dataset_id
 							? ' Current job files belong to another dataset and will be blocked until matching files are restored. Matching folder numbers do not establish ownership.'
 							: '')

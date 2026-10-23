@@ -86,8 +86,8 @@
 	title={`${label}?`}
 	confirmLabel={pending ? 'Deleting…' : label}
 	description={kind === 'job'
-		? `Permanently delete ${name} (job #${id}), its history, reminder, person relationships and all job-specific documents? Linked people and documents stored elsewhere are kept. This cannot be undone.`
-		: `Permanently delete ${name} (person #${id}), their interactions, reminder and job relationships? Linked jobs are kept. This cannot be undone.`}
+		? `Permanently delete ${name} (job #${id}), its history, reminders, person relationships and all job-specific documents? Linked people and documents stored elsewhere are kept. This cannot be undone.`
+		: `Permanently delete ${name} (person #${id}), their interactions, reminders and job relationships? Linked jobs are kept. This cannot be undone.`}
 	{formId}
 	destructive
 	{pending}

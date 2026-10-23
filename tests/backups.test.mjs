@@ -538,7 +538,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			score_comment: 'Initial fit'
 		});
 		assert.equal(job.id, 1);
-		assert.equal(listing.tools.length, 49);
+		assert.equal(listing.tools.length, 52);
 		for (const name of [
 			'list_networks',
 			'get_network',
@@ -547,7 +547,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			'link_job_network',
 			'edit_job_network',
 			'unlink_job_network',
-			'set_network_follow_up',
+			'dismiss_reminder',
 			'list_network_updates',
 			'add_network_update',
 			'edit_network_update',
@@ -556,7 +556,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			assert.ok(listing.tools.some((t) => t.name === name));
 		for (const name of ['list_networks', 'get_network', 'list_network_updates'])
 			assert.equal(listing.tools.find((t) => t.name === name).annotations.readOnlyHint, true);
-		for (const name of ['link_job_network', 'unlink_job_network', 'set_network_follow_up'])
+		for (const name of ['link_job_network', 'unlink_job_network', 'dismiss_reminder'])
 			assert.equal(listing.tools.find((t) => t.name === name).annotations.idempotentHint, true);
 		assert.equal(
 			listing.tools.find((t) => t.name === 'delete_network_update').annotations.destructiveHint,
@@ -571,7 +571,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			})
 		).network;
 		assert.equal(person.created_via, 'mcp');
-		assert.equal(person.follow_up_date, null);
+		assert.equal(person.next_reminder_at, null);
 		await call('edit_network', { network_id: person.id, phone: '+1 555 0100' });
 		await call('edit_network', { network_id: person.id, email: null });
 		assert.equal((await call('get_network', { network_id: person.id })).network.email, null);
@@ -611,10 +611,10 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 		const detailed = await call('get_network', { network_id: person.id, jobs_limit: 1 });
 		assert.equal(detailed.linked_jobs.jobs[0].id, job.id);
 		assert.equal(detailed.linked_jobs.limit, 1);
-		await call('set_network_follow_up', {
+		await call('create_reminder', {
 			network_id: person.id,
-			follow_up_date: '2000-01-01',
-			follow_up_comment: 'Check in'
+			scheduled_at: '2000-01-01T00:00',
+			note: 'Check in'
 		});
 		assert.equal(
 			(await call('list_networks', { follow_up: 'overdue', sort: 'follow_up' })).networks[0].id,
@@ -644,8 +644,8 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			'Introduced'
 		);
 		assert.equal(
-			(await call('get_network', { network_id: person.id })).network.follow_up_comment,
-			'Check in'
+			(await call('get_network', { network_id: person.id })).network.next_reminder_at,
+			'2000-01-01T00:00'
 		);
 		const otherPerson = (await call('create_network', { name: 'Casey' })).network;
 		assert.equal(
@@ -689,10 +689,10 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 		assert.equal(edited.compensation, '$140k/year');
 		assert.equal(edited.is_starred, true);
 		assert.equal(edited.score, 7.5);
-		await call('set_job_follow_up', {
+		const jobReminder = await call('create_reminder', {
 			job_id: job.id,
-			follow_up_date: '2026-11-01',
-			follow_up_comment: 'Check progress'
+			scheduled_at: '2026-11-01T00:00',
+			note: 'Check progress'
 		});
 		await call('set_job_score', {
 			job_id: job.id,
@@ -700,7 +700,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			score_comment: 'Relevant experience'
 		});
 		const assessed = await call('get_job', { job_id: job.id });
-		assert.equal(assessed.follow_up_comment, 'Check progress');
+		assert.equal(assessed.next_reminder, '2026-11-01T00:00');
 		assert.equal(assessed.score_comment, 'Relevant experience');
 		assert.equal(assessed.score, 8.25);
 		assert.equal(assessed.updates.length, 1);
@@ -731,9 +731,9 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 		});
 		assert.equal(invalidSearch.isError, true);
 		await call('edit_job', { job_id: job.id, source: 'Referral' });
-		assert.equal((await call('get_job', { job_id: job.id })).follow_up_date, '2026-11-01');
-		await call('set_job_follow_up', { job_id: job.id, follow_up_date: null });
-		assert.equal((await call('get_job', { job_id: job.id })).follow_up_comment, null);
+		assert.equal((await call('get_job', { job_id: job.id })).next_reminder, '2026-11-01T00:00');
+		await call('dismiss_reminder', { job_id: job.id, reminder_id: jobReminder.id });
+		assert.equal((await call('get_job', { job_id: job.id })).next_reminder, null);
 		await call('change_job_stage', {
 			job_id: job.id,
 			stage_id: stageId('Accepted'),
@@ -865,7 +865,7 @@ test('an already-open connection rejects a schema changed by another process bef
 			[
 				'--input-type=module',
 				'-e',
-				`import { DatabaseSync } from 'node:sqlite'; const db=new DatabaseSync(process.env.SATURDAY_DB_PATH); db.exec("INSERT INTO schema_migrations VALUES(2,'future','2026-10-08')"); db.close();`
+				`import { DatabaseSync } from 'node:sqlite'; const db=new DatabaseSync(process.env.SATURDAY_DB_PATH); db.exec("INSERT INTO schema_migrations VALUES(3,'future','2026-10-08')"); db.close();`
 			],
 			{ env: process.env, encoding: 'utf8' }
 		);

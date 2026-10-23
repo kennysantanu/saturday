@@ -49,7 +49,7 @@
 </Field>
 {#if moving && destination}<p class="text-sm text-muted-foreground">
 		{destination.is_closed
-			? 'This closes the job. Its follow-up is retained and hidden from Dashboard attention.'
+			? 'This closes the job. Its reminders remain active and visible on Dashboard.'
 			: 'This makes the job active.'} A milestone is recorded with this change.
 	</p>{/if}
 <Field

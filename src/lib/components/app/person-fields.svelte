@@ -4,15 +4,13 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
 
-	/** The fields shared by Add person and Edit person. Add also offers an optional follow-up. */
+	/** The fields shared by Add person and Edit person. Reminders are managed on person detail. */
 	let {
 		value,
-		errors,
-		withFollowUp = false
+		errors
 	}: {
 		value: Record<string, string | null | undefined>;
 		errors: Record<string, string | undefined>;
-		withFollowUp?: boolean;
 	} = $props();
 	const text = (name: string) => value[name] ?? '';
 </script>
@@ -65,31 +63,3 @@
 		</Field>
 	</Card.Content>
 </Card.Root>
-
-{#if withFollowUp}
-	<details class="disclosure" open={!!(errors.follow_up_date || errors.follow_up_comment)}>
-		<summary>Follow-up (optional)</summary>
-		<div class="disclosure-body space-y-5">
-			<Field id="follow_up_date" label="Follow-up date" error={errors.follow_up_date}>
-				{#snippet control(attrs)}
-					<Input {...attrs} name="follow_up_date" type="date" value={text('follow_up_date')} />
-				{/snippet}
-			</Field>
-			<Field
-				id="follow_up_comment"
-				label="Follow-up comment"
-				hint="Choose a date before adding a comment."
-				error={errors.follow_up_comment}
-			>
-				{#snippet control(attrs)}
-					<Textarea
-						{...attrs}
-						name="follow_up_comment"
-						maxlength={2000}
-						value={text('follow_up_comment')}
-					/>
-				{/snippet}
-			</Field>
-		</div>
-	</details>
-{/if}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import RemindersSection from '$lib/components/app/reminders-section.svelte';
 	import RecordDeleteAction from '$lib/components/app/record-delete-action.svelte';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { page } from '$app/state';
@@ -63,37 +64,26 @@
 		desktop.addEventListener('change', sync);
 		return () => desktop.removeEventListener('change', sync);
 	});
-	let editor = $state<{ mode: 'move' | 'add' | 'edit' | 'followUp'; entry?: JobUpdate } | null>(
-		null
-	);
+	let editor = $state<{ mode: 'move' | 'add' | 'edit'; entry?: JobUpdate } | null>(null);
 	let editorFailure = $state<{
 		action: string;
 		values: Record<string, string>;
 		errors: Record<string, string>;
 		moveFirst?: boolean;
 	} | null>(null);
-	function openEditor(mode: 'move' | 'add' | 'edit' | 'followUp', entry?: JobUpdate) {
+	function openEditor(mode: 'move' | 'add' | 'edit', entry?: JobUpdate) {
 		editorFailure = null;
 		editor = { mode, entry };
 	}
 	$effect(() => {
 		if (
 			!form?.errors ||
-			!['changeStage', 'addHistory', 'editHistory', 'deleteHistory', 'followUp'].includes(
-				form.action
-			)
+			!['changeStage', 'addHistory', 'editHistory', 'deleteHistory'].includes(form.action)
 		)
 			return;
 		editorFailure = { ...form, values: form.values ?? {}, errors: form.errors ?? {} };
 		editor = {
-			mode:
-				form.action === 'changeStage'
-					? 'move'
-					: form.action === 'addHistory'
-						? 'add'
-						: form.action === 'followUp'
-							? 'followUp'
-							: 'edit',
+			mode: form.action === 'changeStage' ? 'move' : form.action === 'addHistory' ? 'add' : 'edit',
 			entry: updates.find((entry) => String(entry.id) === form.values?.update_id)
 		};
 	});
@@ -269,30 +259,13 @@
 
 		<div class="grid min-w-0 gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
 			<aside class="min-w-0 space-y-6">
-				<SectionCard
-					id="job-follow-up"
-					title="Follow-up"
-					class="compact-card"
-					contentClass="space-y-3"
-				>
-					{#snippet action()}
-						<Button variant="ghost" size="sm" onclick={() => openEditor('followUp')}>
-							{job.followUpDate ? 'Edit follow-up' : 'Schedule follow-up'}
-						</Button>
-					{/snippet}
-					{#if job.followUpDate}
-						<p title={formatDate(job.followUpDate)}>
-							<DueBadge date={job.followUpDate} today={data.today} />
-						</p>
-						{#if job.followUpComment}<div class="text-sm">
-								<ExpandableText text={job.followUpComment} limit={160} lines={3} />
-							</div>{/if}
-					{:else}<p class="text-sm text-muted-foreground">Not scheduled.</p>{/if}
-					{#if !job.isActive && job.followUpDate}<p class="text-sm text-muted-foreground">
-							Kept here while closed. Changing to an open stage shows this follow-up in Needs
-							attention again.
-						</p>{/if}
-				</SectionCard>
+				<RemindersSection
+					data={data.reminderData}
+					{form}
+					today={data.today}
+					closedJob={!job.isActive}
+				/>
+
 				<details id="job-information" class="disclosure" bind:open={infoOpen}>
 					<summary
 						><h2 class="text-base font-medium">Job details</h2>

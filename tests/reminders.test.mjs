@@ -270,8 +270,12 @@ test('schema 1 backups restore through the reminder migration', () => {
 		"INSERT INTO job_updates(job_id,stage_id,event_date,created_via,created_at,updated_at) VALUES(1,1,'2026-01-01','manual',?,?)"
 	).run(stamp, stamp);
 	db.close();
-	const imported = backups.importBackup(path),
-		preview = backups.prepareRestore(imported.backup_id);
+	const imported = backups.importBackup(path);
+	rmSync(process.env.SATURDAY_DB_PATH);
+	const oldTarget = new DatabaseSync(process.env.SATURDAY_DB_PATH);
+	applyMigrations(oldTarget, 1);
+	oldTarget.close();
+	const preview = backups.prepareRestore(imported.backup_id);
 	backups.restoreBackup(preview.restore_id, true);
 	assert.equal(getJob(1).title, 'Old');
 	assert.equal(list({ job_id: 1 })[0].scheduled_at, '2026-08-01T00:00');
@@ -370,5 +374,50 @@ test('built MCP exposes shared reminder tools and atomic activity scheduling wit
 		child.stdin.end();
 		child.kill();
 		await new Promise((resolve) => child.once('exit', resolve));
+	}
+});
+
+test('parent deletion removes only its reminders and preserves linked-owner reminders', async () => {
+	const j = job(),
+		other = job(),
+		p = person();
+	people.linkJobNetwork({ job_id: j.id, network_id: p.id });
+	people.linkJobNetwork({ job_id: other.id, network_id: p.id });
+	reminders.createReminder({ job_id: j.id, scheduled_at: at });
+	reminders.createReminder({ job_id: other.id, scheduled_at: at });
+	reminders.createReminder({ network_id: p.id, scheduled_at: at });
+	const { createDocument } = await import('../src/lib/server/files/documents.js');
+	await createDocument({ scope: j.id, filename: 'owned.md', content: 'Job file' });
+	const { deleteJob } = await import('../src/lib/server/services.js');
+	await deleteJob({ job_id: j.id, dataset_id: getJob(j.id).dataset_id, confirm: true });
+	assert.equal(list({ job_id: other.id }).length, 1);
+	assert.equal(list({ network_id: p.id }).length, 1);
+	people.deleteNetwork({
+		network_id: p.id,
+		dataset_id: people.getNetwork(p.id).dataset_id,
+		confirm: true
+	});
+	assert.equal(list({ job_id: other.id }).length, 1);
+	withDatabase((db) => assert.equal(db.prepare('SELECT COUNT(*) n FROM reminders').get().n, 1));
+});
+
+test('failed migration rolls back all reminder schema and data changes', () => {
+	const db = new DatabaseSync(':memory:');
+	try {
+		applyMigrations(db, 1);
+		const before = db.prepare('SELECT * FROM app_metadata').get();
+		const exec = db.exec.bind(db);
+		db.exec = (sql) =>
+			exec(sql.includes('CREATE TABLE reminders') ? sql + '\nINVALID MIGRATION STATEMENT;' : sql);
+		assert.throws(() => applyMigrations(db));
+		assertMigrationHistory(db);
+		assert.deepEqual(db.prepare('SELECT * FROM app_metadata').get(), before);
+		assert.equal(db.prepare('SELECT COUNT(*) n FROM schema_migrations').get().n, 1);
+		assert(!db.prepare("SELECT name FROM sqlite_schema WHERE name='reminders'").get());
+		db.exec = exec;
+		applyMigrations(db);
+		assertMigrationHistory(db);
+	} finally {
+		db.close();
 	}
 });

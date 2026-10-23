@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatReminder } from '$lib/format';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Star from '@lucide/svelte/icons/star';
 	import StatusBadge from './status-badge.svelte';
@@ -13,6 +14,7 @@
 		status,
 		latestUpdate,
 		isStarred = false,
+		nextReminder = null,
 		score = null
 	}: {
 		href: string;
@@ -22,6 +24,7 @@
 		status: StatusInfo;
 		latestUpdate: string;
 		isStarred?: boolean;
+		nextReminder?: string | null;
 		score?: number | null;
 	} = $props();
 </script>
@@ -46,6 +49,9 @@
 		{#if score !== null}<span class="meta-text text-muted-foreground">Assistant score: {score}</span
 			>{/if}
 		<span class="meta-text text-muted-foreground">{latestUpdate}</span>
+		{#if nextReminder}<span class="meta-text text-muted-foreground"
+				>Reminder: {formatReminder(nextReminder)}</span
+			>{/if}
 	</div>
 	<ChevronRight
 		class="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"

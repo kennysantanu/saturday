@@ -4,6 +4,7 @@
 	import Bell from '@lucide/svelte/icons/bell';
 	import CalendarClock from '@lucide/svelte/icons/calendar-clock';
 	import TrendingUp from '@lucide/svelte/icons/trending-up';
+	import { networkDetailUrl } from '$lib/network-navigation.js';
 	import DateRow from '$lib/components/app/date-row.svelte';
 	import PageHeader from '$lib/components/app/page-header.svelte';
 	import PageShell from '$lib/components/app/page-shell.svelte';
@@ -16,7 +17,7 @@
 	import { page } from '$app/state';
 	let { data } = $props();
 
-	const isEmpty = $derived(data.totalJobs === 0);
+	const isEmpty = $derived(data.totalJobs === 0 && data.reminders.length === 0);
 	const history = $derived(
 		data.stages.filter((stage: { is_archived: boolean; is_closed: boolean }) => !stage.is_archived)
 	);
@@ -25,12 +26,11 @@
 	);
 
 	const attentionGroups = $derived(
-		[
-			{ key: 'follow-ups', label: 'Follow-ups', items: data.followUps },
-			{ key: 'deadlines', label: 'Application deadlines', items: data.deadlines }
-		].filter((group) => group.items.length > 0)
+		[{ key: 'deadlines', label: 'Application deadlines', items: data.deadlines }].filter(
+			(group) => group.items.length > 0
+		)
 	);
-	const attentionCount = $derived(data.followUps.length + data.deadlines.length);
+	const attentionCount = $derived(data.reminders.length + data.deadlines.length);
 	// today is a local calendar date, so build it without a time-zone shift.
 	const todayLabel = $derived.by(() => {
 		const [year, month, day] = data.today.split('-').map(Number);
@@ -91,7 +91,7 @@
 						<Bell class="size-5 text-muted-foreground" aria-hidden="true" />Notifications
 					</h2>
 					<p class="text-sm text-muted-foreground">
-						Follow-ups, deadlines and upcoming milestones for open jobs.
+						Job and person reminders, application deadlines and upcoming milestones.
 					</p>
 				</div>
 				<section aria-labelledby="attention-heading" class="dash-attention space-y-3">
@@ -108,10 +108,32 @@
 						<EmptyState
 							size="inline"
 							title="Nothing due"
-							description="No follow-ups or deadlines right now. You’re all caught up."
+							description="No reminders or deadlines right now. You’re all caught up."
 						/>
 					{:else}
 						<Card.Root class="gap-0 divide-y divide-border p-0">
+							{#if data.reminders.length}<h4 class="group-title">
+									Reminders <span class="font-normal text-muted-foreground"
+										>({data.reminders.length})</span
+									>
+								</h4>{/if}
+							{#each data.reminders as item (item.id)}
+								<DateRow
+									href={(item.job_id
+										? jobDetailUrl(item.job_id, page.url.pathname + page.url.search)
+										: networkDetailUrl(item.network_id, page.url.pathname + page.url.search)) +
+										'#reminders'}
+									title={item.job_title ?? item.person_name ?? 'Reminder'}
+									subtitle={item.job_id
+										? `${item.company_name}${item.job_closed ? ' · Closed job' : ''}`
+										: 'Network'}
+									comment={item.note}
+									date={item.scheduled_at.slice(0, 10)}
+									schedule={item.scheduled_at}
+									now={data.now}
+									today={data.today}
+								/>
+							{/each}
 							{#each attentionGroups as group (group.key)}
 								<h4 class="group-title">
 									{group.label}

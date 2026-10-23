@@ -1,3 +1,4 @@
+import { listReminders } from '../src/lib/server/reminders.js';
 // Local browser QA using disposable stores. Writes screenshots only to the OS temp directory.
 import puppeteer from 'puppeteer';
 import { spawn } from 'node:child_process';
@@ -348,15 +349,15 @@ try {
 	await page.waitForFunction(() => /\/networks\/[0-9a-f-]+$/.test(location.pathname));
 	const personId = new URL(page.url()).pathname.split('/').at(-1);
 	await settled();
-	await page.locator('button::-p-text(Schedule follow-up)').click();
+	await page.locator('button::-p-text(Add reminder)').click();
 	await page.waitForSelector('[role=dialog]');
 	await settled();
-	await page.$eval('#follow_up_date', (e) => {
+	await page.$eval('#reminder-date', (e) => {
 		e.value = '2000-01-01';
 		e.dispatchEvent(new Event('input', { bubbles: true }));
 	});
-	await page.type('#follow_up_comment', 'Check in');
-	await page.locator('[role=dialog] button::-p-text(Save follow-up)').click();
+	await page.type('#reminder-note', 'Check in');
+	await page.locator('[role=dialog] button[type=submit]::-p-text(Add reminder)').click();
 	await page.waitForSelector('[role=dialog]', { hidden: true });
 	await settled();
 	await page.locator('button::-p-text(Add interaction)').click();
@@ -370,9 +371,9 @@ try {
 	await page.waitForSelector('[role=dialog]', { hidden: true });
 	await settled();
 	assert.equal(
-		networks.getNetwork(personId).follow_up_comment,
+		listReminders({ network_id: personId }).reminders[0].note,
 		'Check in',
-		'Interaction preserves follow-up'
+		'Interaction preserves reminder'
 	);
 	await page.locator('a::-p-text(Link to job)').click();
 	await page.waitForSelector('[role=dialog] input[type=radio]');

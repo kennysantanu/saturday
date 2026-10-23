@@ -1,6 +1,9 @@
 <script lang="ts">
+	import RemindersSection from '$lib/components/app/reminders-section.svelte';
+	import ActivityReminderFields from '$lib/components/app/activity-reminder-fields.svelte';
+	import type { ReminderDraft } from '$lib/reminders';
 	import RecordDeleteAction from '$lib/components/app/record-delete-action.svelte';
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { page } from '$app/state';
 	import { enhance } from '$app/forms';
@@ -32,22 +35,22 @@
 	const person = $derived(data.person);
 	const errors = $derived(form?.errors ?? data.errors ?? {});
 	const values = $derived(form?.values ?? {});
-	const followFailure = $derived(
-		!!form?.errors && ['follow-up', 'follow-up-cleared'].includes(form.action)
-	);
-	const followGuard = new UnsavedChanges();
 	const interactionGuard = new UnsavedChanges();
 	const noteGuard = new UnsavedChanges();
 	const dialogGuards: Record<string, UnsavedChanges> = {
-		'network-follow-up': followGuard,
 		'network-interaction': interactionGuard,
 		'network-link-note': noteGuard
 	};
-	let followOpen = $state(false);
 	let interactionOpen = $state(false);
 	let interactionId = $state('');
 	let interactionDate = $state('');
 	let interactionNote = $state('');
+	let addReminder = $state(false);
+	let interactionReminder = $state<ReminderDraft>({
+		reminder_date: untrack(() => data.today),
+		reminder_time: '00:00',
+		reminder_note: ''
+	});
 	let deleteOpen = $state(false);
 	let noteOpen = $state(false);
 	let noteJob = $state('');
@@ -59,7 +62,6 @@
 	});
 	$effect(() => {
 		if (!form?.errors) return;
-		if (followFailure) followOpen = true;
 		if (
 			['addInteraction', 'editInteraction', 'deleteInteraction', 'interaction-deleted'].includes(
 				form.action
@@ -69,6 +71,12 @@
 			interactionId = values.update_id ?? '';
 			interactionDate = values.interaction_date ?? data.today;
 			interactionNote = values.note ?? '';
+			addReminder = values.add_reminder === 'on';
+			interactionReminder = {
+				reminder_date: values.reminder_date ?? data.today,
+				reminder_time: values.reminder_time ?? '00:00',
+				reminder_note: values.reminder_note ?? ''
+			};
 			deleteOpen = false;
 		}
 		if (form.action === 'network-note') {
@@ -94,6 +102,8 @@
 		return '?/' + name + (params.size ? '&' + params : '');
 	}
 	function addInteraction() {
+		addReminder = false;
+		interactionReminder = { reminder_date: data.today, reminder_time: '00:00', reminder_note: '' };
 		interactionId = '';
 		interactionDate = data.today;
 		interactionNote = '';
@@ -106,7 +116,6 @@
 			return async ({ result, update }) => {
 				if (result.type === 'redirect' || result.type === 'success') {
 					if (guard) guard.dirty = false;
-					followOpen = false;
 					interactionOpen = false;
 					deleteOpen = false;
 					noteOpen = false;
@@ -127,7 +136,14 @@
 <PageShell title={`${person.name} · Network`}>
 	<PageHeader
 		recordNumber={person.id}
-		back={{ href: data.returnTo, label: data.returnTo.startsWith('/jobs/') ? 'Job' : 'Network' }}
+		back={{
+			href: data.returnTo,
+			label: data.returnTo.startsWith('/jobs/')
+				? 'Job'
+				: data.returnTo.split('?')[0] === '/'
+					? 'Dashboard'
+					: 'Network'
+		}}
 		title={person.name}
 		description={[person.role, person.organization].filter(Boolean).join(' · ')}
 	>
@@ -143,7 +159,7 @@
 					name={person.name}
 					counts={{ history: data.history.total, relationships: data.linkedJobs.total }}
 					action={formAction('deletePerson')}
-					disabled={followOpen || interactionOpen || noteOpen || pickerOpen}
+					disabled={interactionOpen || noteOpen || pickerOpen}
 				/>
 			{/key}
 		{/snippet}
@@ -196,24 +212,7 @@
 				</div>
 			</dl>
 		</SectionCard>
-		<SectionCard title="Follow-up">
-			{#if person.follow_up_date}
-				<p><DueBadge date={person.follow_up_date} today={data.today} /></p>
-				<p class="text-sm text-muted-foreground">{formatDate(person.follow_up_date)}</p>
-			{:else}
-				<p class="text-sm text-muted-foreground">Not scheduled.</p>
-			{/if}
-			{#if person.follow_up_comment}<p class="text-sm break-words whitespace-pre-wrap">
-					{person.follow_up_comment}
-				</p>{/if}
-			<div class="flex flex-wrap gap-3">
-				<Button variant="outline" onclick={() => (followOpen = true)}
-					><CalendarPlus data-icon="inline-start" />{person.follow_up_date
-						? 'Edit follow-up'
-						: 'Schedule follow-up'}</Button
-				>
-			</div>
-		</SectionCard>
+		<RemindersSection data={data.reminderData} {form} today={data.today} />
 	</div>
 
 	<SectionCard title="Linked jobs" count={data.linkedJobs.total}>
@@ -307,76 +306,13 @@
 	</SectionCard>
 </PageShell>
 
-<UnsavedDialog bind:open={followOpen} guard={followGuard}>
-	{#snippet children(close)}
-		<Dialog.Content class="sm:max-w-md">
-			<Dialog.Header>
-				<Dialog.Title
-					>{person.follow_up_date ? 'Edit follow-up' : 'Schedule follow-up'}</Dialog.Title
-				>
-				<Dialog.Description
-					>Plan your next contact with {person.name}. Recording an interaction keeps this reminder.</Dialog.Description
-				>
-			</Dialog.Header>
-			<form
-				id="network-follow-up"
-				oninput={followGuard.markDirty}
-				method="POST"
-				action={formAction('followUp')}
-				use:enhance={enhanceNetwork}
-				class="space-y-5"
-			>
-				{#if followFailure && errors.form}<Notice tone="error" title="Follow-up not saved"
-						>{errors.form}</Notice
-					>{/if}
-				<Field
-					id="follow_up_date"
-					label="Follow-up date"
-					error={followFailure ? errors.follow_up_date : undefined}
-				>
-					{#snippet control(attrs)}<Input
-							{...attrs}
-							type="date"
-							name="follow_up_date"
-							value={followFailure ? values.follow_up_date : (person.follow_up_date ?? '')}
-						/>{/snippet}
-				</Field>
-				<Field
-					id="follow_up_comment"
-					label="Follow-up comment"
-					hint="Clearing the date also clears the comment."
-					error={followFailure ? errors.follow_up_comment : undefined}
-				>
-					{#snippet control(attrs)}<Textarea
-							{...attrs}
-							name="follow_up_comment"
-							rows={3}
-							maxlength={2000}
-							value={followFailure ? values.follow_up_comment : (person.follow_up_comment ?? '')}
-						/>{/snippet}
-				</Field>
-				<Dialog.Footer class={person.follow_up_date ? 'dialog-edit-actions' : undefined}>
-					{#if person.follow_up_date}<Button
-							type="submit"
-							variant="destructive"
-							formaction={formAction('clearFollowUp')}
-							formnovalidate>Clear follow-up</Button
-						>{/if}
-					<Button type="button" variant="ghost" onclick={close}>Cancel</Button>
-					<Button type="submit">Save follow-up</Button>
-				</Dialog.Footer>
-			</form>
-		</Dialog.Content>
-	{/snippet}
-</UnsavedDialog>
-
 <UnsavedDialog bind:open={interactionOpen} guard={interactionGuard}>
 	{#snippet children(close)}
 		<Dialog.Content class="sm:max-w-lg">
 			<Dialog.Header>
 				<Dialog.Title>{interactionId ? 'Edit interaction' : 'Add interaction'}</Dialog.Title>
 				<Dialog.Description
-					>Record what happened with {person.name}. Future contact belongs in Follow-up.</Dialog.Description
+					>Record what happened with {person.name}. Add a reminder for future contact.</Dialog.Description
 				>
 			</Dialog.Header>
 			<form
@@ -422,6 +358,14 @@
 							bind:value={interactionNote}
 						/>{/snippet}
 				</Field>
+				<!-- Reminders are created only with new activity, never while correcting existing history. -->
+				{#if !interactionId}<ActivityReminderFields
+						bind:enabled={addReminder}
+						bind:values={interactionReminder}
+						{errors}
+						note={interactionNote}
+						prefix="interaction-reminder"
+					/>{/if}
 				<Dialog.Footer class={interactionId ? 'dialog-edit-actions' : undefined}>
 					{#if interactionId}<Button
 							type="button"
@@ -436,7 +380,7 @@
 		<ConfirmDialog
 			bind:open={deleteOpen}
 			title="Delete interaction?"
-			description={`This permanently removes this recorded interaction with ${person.name}. Their details, follow-up and job links are kept.`}
+			description={`This permanently removes this recorded interaction with ${person.name}. Their details, reminders and job links are kept.`}
 			confirmLabel="Delete interaction"
 			formId="network-interaction"
 			formAction={formAction('deleteInteraction')}

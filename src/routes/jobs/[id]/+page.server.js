@@ -1,10 +1,10 @@
+import { reminderActions, loadReminders, optionalReminder } from '$lib/server/reminder-actions.js';
 import { searchFromUrl } from '$lib/job-search.js';
 import { jobReturn, jobDetailUrl } from '$lib/job-navigation.js';
 import * as networks from '$lib/server/networks.js';
 import { listDocuments } from '$lib/server/files/documents.js';
 import { error, fail, redirect } from '@sveltejs/kit';
 import {
-	setJobFollowUp,
 	moveJobStage,
 	addJobUpdate,
 	correctJobUpdate,
@@ -101,6 +101,7 @@ export async function load({ params, url }) {
 		}
 	}
 	return {
+		reminderData: loadReminders({ job_id: params.id }, url.searchParams),
 		job,
 		outsideResults,
 		returnTo: jobReturn(url.searchParams.get('return_to')),
@@ -146,14 +147,28 @@ function historyAction(mode) {
 			mode === 'changeStage' ? 'stage-changed' : mode === 'addHistory' ? 'update' : 'correction';
 		try {
 			if (mode === 'changeStage') {
-				const changed = moveJobStage(params.id, values, 'manual');
+				const changed = moveJobStage(
+					params.id,
+					{ ...values, ...optionalReminder(values) },
+					'manual'
+				);
 				saved = changed.unchanged
-					? 'stage-unchanged'
+					? values.add_reminder === 'on'
+						? 'reminder'
+						: 'stage-unchanged'
 					: changed.isActive
 						? 'stage-changed'
 						: 'job-closed';
 			} else if (mode === 'addHistory') {
-				addJobUpdate({ ...values, job_id: params.id, stage_id: values.stage_id || null }, 'manual');
+				addJobUpdate(
+					{
+						...values,
+						...optionalReminder(values),
+						job_id: params.id,
+						stage_id: values.stage_id || null
+					},
+					'manual'
+				);
 			} else {
 				// The route owns the job; the service scopes the entry to that job.
 				correctJobUpdate(values.update_id, {
@@ -171,6 +186,7 @@ function historyAction(mode) {
 	};
 }
 export const actions = {
+	...reminderActions('job'),
 	deleteJob: recordDeletionAction('job', deleteJob),
 	changeStage: historyAction('changeStage'),
 	addHistory: historyAction('addHistory'),
@@ -179,24 +195,6 @@ export const actions = {
 	networkLink: networkAction((i) => networks.linkJobNetwork(i, 'manual'), 'network-linked'),
 	networkNote: networkAction(networks.editJobNetwork, 'network-note'),
 	networkUnlink: networkAction(networks.unlinkJobNetwork, 'network-unlinked'),
-	followUp: async ({ params, request, url }) => {
-		const values = formValues(await request.formData());
-		try {
-			setJobFollowUp(params.id, values.follow_up_date || null, values.follow_up_comment);
-		} catch (error) {
-			return actionError(error, values, 'followUp');
-		}
-		redirect(303, jobDetailUrl(params.id, url.searchParams.get('return_to'), `follow-up`));
-	},
-	clearFollowUp: async ({ params, request, url }) => {
-		const values = formValues(await request.formData());
-		try {
-			setJobFollowUp(params.id, null);
-		} catch (error) {
-			return actionError(error, values, 'followUp');
-		}
-		redirect(303, jobDetailUrl(params.id, url.searchParams.get('return_to'), `follow-up-cleared`));
-	},
 	star: async ({ params, request, url }) => {
 		const values = formValues(await request.formData());
 		try {

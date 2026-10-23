@@ -57,3 +57,9 @@ export function formatBytes(bytes: number): string {
 export function initialOf(text: string): string {
 	return text.trim().slice(0, 1).toLocaleUpperCase();
 }
+
+/** A fixed reminder schedule; midnight is hidden without changing its stored meaning. */
+export function formatReminder(value: string): string {
+	const [date, time] = value.split('T');
+	return formatDate(date) + (time && time !== '00:00' ? ` · ${time}` : '');
+}

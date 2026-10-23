@@ -1,3 +1,9 @@
+import {
+	createReminder,
+	editReminder,
+	dismissReminder,
+	listReminders
+} from '../src/lib/server/reminders.js';
 import { stageId, closeJob, reopenJob } from './workflow-fixture.mjs';
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { applyMigrations, schemaVersion } from '../src/lib/server/migrations.js';
 import { jobFields, jobColumns, jobForMcp } from '../src/lib/job-fields.js';
-import { jobMcpInputShape, followUpMcpSchema } from '../src/lib/server/validation.js';
+import { jobMcpInputShape } from '../src/lib/server/validation.js';
 import { z } from 'zod';
 import { migrateDatabase, withDatabase, openDatabase } from '../src/lib/server/database.js';
 import {
@@ -15,7 +21,6 @@ import {
 	editJob,
 	getJob,
 	setJobScore,
-	setJobFollowUp,
 	setJobStarred,
 	getDashboardStats,
 	addJobUpdate,
@@ -53,8 +58,6 @@ const details = {
 	compensation: '$120k–$150k/year + equity',
 	source: 'Referral',
 	application_deadline: '2026-11-01',
-	follow_up_date: '2026-10-01',
-	follow_up_comment: 'Ask about next steps',
 	is_starred: true
 };
 test('UUID development baseline is rejected unchanged even when its version is 1', () => {
@@ -152,20 +155,24 @@ test('manual edits preserve assessment, omitted fields and history, and can clea
 	assert.equal(job.score, null);
 	setJobScore(job.id, { score: 8.5, score_comment: 'Strong fit' });
 	editJob(job.id, { job_title: 'Senior Engineer', score: 0, score_comment: 'Forged again' });
+	const reminder = createReminder({
+		job_id: job.id,
+		scheduled_at: '2026-10-01T00:00',
+		note: 'Ask about next steps'
+	});
 	const saved = getJob(job.id);
 	assert.equal(saved.location, details.location);
-	assert.equal(saved.followUpComment, details.follow_up_comment);
+	assert.equal(saved.nextReminder, reminder.scheduled_at);
 	assert.equal(saved.score, 8.5);
 	assert.equal(saved.scoreComment, 'Strong fit');
 	assert.equal(saved.isStarred, true);
 	assert.equal(saved.status.label, 'New');
 	assert.equal(saved.updates.length, 1);
-	editJob(job.id, { location: '', employment_type: null, follow_up_date: null });
+	editJob(job.id, { location: '', employment_type: null });
 	const cleared = getJob(job.id);
 	assert.equal(cleared.location, null);
 	assert.equal(cleared.employmentType, null);
-	assert.equal(cleared.followUpDate, null);
-	assert.equal(cleared.followUpComment, null);
+	assert.equal(cleared.nextReminder, reminder.scheduled_at);
 	assert.equal(cleared.score, 8.5);
 	setJobStarred(job.id, false);
 	assert.equal(getJob(job.id).isStarred, false);
@@ -175,47 +182,42 @@ test('manual edits preserve assessment, omitted fields and history, and can clea
 test('dates, enums, booleans and assessment are validated before writing', () => {
 	const job = createJob(details);
 	for (const input of [
-		{ follow_up_date: '2026-02-30' },
 		{ application_deadline: 'tomorrow' },
 		{ work_arrangement: 'anywhere' },
 		{ employment_type: 'freelance' },
-		{ is_starred: 'yes' },
-		{ follow_up_comment: 'x'.repeat(10001) }
+		{ is_starred: 'yes' }
 	]) {
 		assert.throws(
 			() => editJob(job.id, input),
 			(error) => error.name === 'ValidationError'
 		);
 	}
-	assert.throws(() =>
-		createJob({ job_title: 'Other', company_name: 'Other', follow_up_comment: 'Needs date' })
-	);
 	for (const score of [NaN, Infinity, '9']) assert.throws(() => setJobScore(job.id, { score }));
-	assert.equal(getJob(job.id).followUpDate, details.follow_up_date);
+	assert.equal(getJob(job.id).nextReminder, null);
 	assert.equal(getJob(job.id).score, null);
 });
-test('follow-ups sort earliest, retain inactive data, reschedule or clear without history', () => {
-	const early = createJob(details);
-	const later = createJob({ ...details, follow_up_date: '2026-12-01' });
-	const stats = getDashboardStats({ today: '2026-10-05' });
+test('reminders sort earliest, retain closed jobs and dismiss without history', () => {
+	const early = createJob(details),
+		later = createJob(details);
+	const r = createReminder({ job_id: early.id, scheduled_at: '2026-10-01T00:00' });
+	createReminder({ job_id: later.id, scheduled_at: '2026-12-01T00:00' });
 	assert.deepEqual(
-		stats.followUps.map((item) => item.jobId),
+		getDashboardStats().reminders.map((r) => r.job_id),
 		[early.id, later.id]
 	);
-	assert.equal(stats.deadlines.length, 2);
-	setJobFollowUp(early.id, '2026-10-05', 'Today');
+	editReminder({
+		job_id: early.id,
+		reminder_id: r.id,
+		scheduled_at: '2026-10-05T09:00',
+		note: 'Today'
+	});
 	assert.equal(getJob(early.id).updates.length, 1);
 	closeJob(early.id, '2026-10-05');
-	assert.equal(getJob(early.id).followUpDate, '2026-10-05');
-	assert.deepEqual(
-		getDashboardStats().followUps.map((item) => item.jobId),
-		[later.id]
-	);
-	reopenJob(early.id, '2026-10-05');
-	assert.equal(getDashboardStats().followUps.length, 2);
-	setJobFollowUp(early.id, null);
-	assert.equal(getJob(early.id).followUpComment, null);
-	assert.equal(getDashboardStats().followUps.length, 1);
+	assert.equal(getJob(early.id).nextReminder, '2026-10-05T09:00');
+	assert.equal(getDashboardStats().reminders.length, 2);
+	dismissReminder({ job_id: early.id, reminder_id: r.id });
+	assert.equal(getDashboardStats().reminders.length, 1);
+	assert.equal(listReminders({ job_id: early.id, view: 'inactive' }).total, 1);
 	assert.equal(getDashboardStats({ today: '2026-12-01' }).deadlines.length, 0);
 });
 test('new backup roundtrip includes all details and assessment; detail changes invalidate preview', () => {
@@ -299,8 +301,6 @@ test('original and added fields share validation, mappings, and access rules', (
 	assert.equal(wire.parse({ work_arrangement: '' }).work_arrangement, '');
 	assert.equal(wire.parse({ score: 10, is_active: false }).score, undefined);
 	assert.equal(wire.parse({ score: 10, is_active: false }).is_active, undefined);
-	assert.equal(followUpMcpSchema.safeParse({}).success, false);
-	assert.equal(followUpMcpSchema.safeParse({ follow_up_date: null }).success, true);
 	assert.equal(new Set(jobFields.map((field) => field.key)).size, jobFields.length);
 	closeJob(job.id, '2026-10-05');
 	const entry = getJob(job.id).updates.find((row) => row.stageId === stageId('Dismissed'));

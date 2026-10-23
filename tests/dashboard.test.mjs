@@ -100,7 +100,7 @@ test('empty, closed-only, renamed, reordered and archived stages have accurate c
 		data.pipeline.findIndex((s) => s.id === offer) <
 			data.pipeline.findIndex((s) => s.name === 'Screening')
 	);
-	assert.deepEqual(data.followUps, []);
+	assert.deepEqual(data.reminders, []);
 	assert.deepEqual(data.upcoming, []);
 	assert(!pipelineHref(data.pipeline, offer, 1).includes(`pipeline_page_${interview}`));
 	assert(data.pipeline.every((s, i, all) => !i || !all[i - 1].is_closed || s.is_closed));

@@ -305,6 +305,7 @@ export function searchJobs(input = {}, { jobId } = {}) {
 			);
 			args.push(today);
 		}
+		if (deadlineMode === 'range') clauses.push('j.application_deadline IS NOT NULL');
 		if (deadlineMode === 'range')
 			for (const [bound, op] of [
 				['from', '>='],
@@ -503,7 +504,7 @@ export function getDashboardStats({ today = localCalendarDate(), pipelinePages =
 									company: job.company,
 									currentStage: job.currentStage,
 									isStarred: job.isStarred,
-									followUpDate: job.followUpDate,
+									nextReminder: job.nextReminder,
 									applicationDeadline: job.applicationDeadline
 								};
 							});
@@ -558,7 +559,7 @@ export function getDashboardStats({ today = localCalendarDate(), pipelinePages =
 					title: row.job_title,
 					company: row.company_name,
 					date: row[column],
-					comment: column === 'follow_up_date' ? row.follow_up_comment : null,
+					comment: null,
 					stage: row.stage_name
 				}));
 		const attention = section(

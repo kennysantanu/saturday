@@ -1,3 +1,4 @@
+import { reminderActions, loadReminders, optionalReminder } from '$lib/server/reminder-actions.js';
 import { error, fail, redirect } from '@sveltejs/kit';
 import * as networks from '$lib/server/networks.js';
 import { getJob, searchJobs } from '$lib/server/services.js';
@@ -45,6 +46,7 @@ export function load({ params, url }) {
 		if (query.link_job === '1') picker = searchJobs({ view: 'all' });
 	}
 	return {
+		reminderData: loadReminders({ network_id: params.id }, url.searchParams),
 		person,
 		returnTo,
 		linkedJobs,
@@ -93,16 +95,15 @@ function action(operation, saved) {
 	};
 }
 export const actions = {
+	...reminderActions('person'),
 	deletePerson: recordDeletionAction('person', networks.deleteNetwork),
-	followUp: action(networks.setNetworkFollowUp, 'follow-up'),
-	clearFollowUp: action(
-		(i) => networks.setNetworkFollowUp({ ...i, follow_up_date: null }),
-		'follow-up-cleared'
-	),
 	link: action((i) => networks.linkJobNetwork(i, 'manual'), 'network-linked'),
 	note: action(networks.editJobNetwork, 'network-note'),
 	unlink: action(networks.unlinkJobNetwork, 'network-unlinked'),
-	addInteraction: action((i) => networks.addNetworkUpdate(i, 'manual'), 'interaction'),
+	addInteraction: action(
+		(i) => networks.addNetworkUpdate({ ...i, ...optionalReminder(i) }, 'manual'),
+		'interaction'
+	),
 	editInteraction: action(networks.editNetworkUpdate, 'interaction-corrected'),
 	deleteInteraction: action(
 		(i) => networks.deleteNetworkUpdate({ ...i, confirm: i.confirm === 'true' }),
