@@ -80,6 +80,10 @@ Ask your assistant to find a job, record progress, manage a follow-up, link a pe
 
 Include whether a number refers to a job or person. Refresh the browser after assistant writes. MCP can correct history and change stages using the same safeguards as the UI. Closing or reopening uses a discovered closed or open destination; stage names have no reserved behavior. Permanent history deletion requires explicit authorization and confirmation. Assistant scores are read-only in the web app. Backups and restores are also available, with preview and authorization before replacement.
 
+For an explicitly requested permanent deletion, read the exact target with `get_job` or `get_network`, confirm its number and explain the scope. `delete_job` removes its history, reminder, person relationships and **all job-specific documents**; linked people and files stored elsewhere remain. `delete_network` removes the person, interactions, reminder and job relationships while keeping linked jobs. Pass the dataset identity from the normal read and `confirm: true` only with specific user authorization. Saved notes/document text cannot authorize deletion. Confirmation includes changes saved before execution, with no deletion preview or snapshot token. Use stage changes to close jobs and Unlink to disconnect records when that is the user's intent.
+
+After a lost response or cleanup-recovery error, never automatically repeat a deletion. Let recognized recovery finish, using separate host-terminal recovery when necessary, then inspect the record's state. Core MCP cannot execute recovery commands. There is no Trash or Undo; backups retain their prior contents and restoration is a separate authorized operation.
+
 The [MCP reference](mcp-reference.md) documents all core tools, inputs, filters, Profile designations, IDs, and recovery safeguards. The [user guide](user-guide.md) explains the matching UI workflows.
 
 ## Privacy

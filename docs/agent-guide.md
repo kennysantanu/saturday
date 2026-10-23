@@ -108,4 +108,6 @@ Online database restore requires a healthy target. Offline recovery of a corrupt
 
 Use the [MCP reference](mcp-reference.md#numeric-references-and-recovery-namespaces) for IDs, dataset boundaries, and mutation safeguards. Resolve ambiguous job/person references before writes, and preserve files across a dataset mismatch.
 
+For authorized parent deletion, read `get_job` or `get_network` first and pass that record's dataset identity to `delete_job` or `delete_network` with `confirm: true`. Explain that job deletion also removes every job-specific document; person deletion retains linked jobs. Execution includes current associated data, with no preview/token handshake. On an uncertain response or pending cleanup, inspect state after recovery instead of retrying automatically. Completing host recovery requires a separate terminal capability; neither deletion tool executes host commands.
+
 For a requested extension, read the [extension guide](extension-guide.md) and [design guide](design-guide.md), use public imports, and verify on disposable data. Obtain explicit trust before installing executable code. Preserve retained extension data and independent backups across disable, removal, and update.
