@@ -8,6 +8,7 @@ import {
 import { startingStage, stageById, readWorkflow } from './workflow.js';
 import { PIPELINE_PAGE_SIZE, pipelinePage } from '../job-pipeline.js';
 import { inTransaction, withDatabase, reserveJobFileIds } from './database.js';
+export { deleteJob } from './job-deletion.js';
 import {
 	jobSearchSchema,
 	parseRecordId,
@@ -188,9 +189,13 @@ export function setJobStarred(id, starred) {
 export function getJob(id) {
 	id = parseRecordId(id, 'job_id');
 	return withDatabase((db) => {
+		db.exec('BEGIN');
 		const row = getJobRow(db, id);
 		if (!row) return null;
-		return jobFromRow(row, readUpdates(db, id));
+		return {
+			...jobFromRow(row, readUpdates(db, id)),
+			dataset_id: db.prepare('SELECT dataset_id FROM app_metadata WHERE id=1').get().dataset_id
+		};
 	});
 }
 

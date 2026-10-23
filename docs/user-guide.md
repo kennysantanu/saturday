@@ -70,13 +70,24 @@ From the job chooser, **Add person** opens the normal form and returns to the ch
 
 **Schedule follow-up** creates one date/comment for that person. Once scheduled, **Edit follow-up** opens the same dialog with **Clear follow-up** inside. Jobs uses the same labels and arrangement. Overdue means before today; Upcoming means after today, using the host computer's local calendar. These reminders appear in Network, independently of job reminders. There are no notifications or recurring reminders.
 
-**Interactions** is optional. Add a completed interaction with its date and **Interaction note**; backdated entries are supported, future dates belong in Follow-up. **Edit interaction** opens the saved date/note, with **Delete interaction** inside and confirmation before permanent removal. Cancelling deletion keeps the editor and unsaved note. Recording an interaction never clears a reminder. History sorts by date, then recording order; paginated history and linked jobs have independent pages. “Last recorded interaction” summarizes notes on file, including unanswered outreach; “None recorded” does not prove you have never contacted someone. Permanent person deletion is outside this version.
+**Interactions** is optional. Add a completed interaction with its date and **Interaction note**; backdated entries are supported, future dates belong in Follow-up. **Edit interaction** opens the saved date/note, with **Delete interaction** inside and confirmation before permanent removal. Cancelling deletion keeps the editor and unsaved note. Recording an interaction never clears a reminder. History sorts by date, then recording order; paginated history and linked jobs have independent pages. “Last recorded interaction” summarizes notes on file, including unanswered outreach; “None recorded” does not prove you have never contacted someone.
 
 On job detail, **Link person** keeps search, person selection and the optional relationship note in one dialog. Search by name, role or organization, choose a person from the five results per page, then add a note if needed. You can select a different person directly without leaving the form. Cancel and Link person stay visible while results scroll. Confirm Link person to save; creating or selecting someone does not link them automatically. Unsaved selections/notes ask before dismissal, and failed saves keep the draft.
 
 Opening a person from filtered Network results preserves those filters and the list page through detail, Edit details, Save and Cancel. Opening from a job provides a Back to Job link retaining that job's original Dashboard/Jobs context. Independent linked-job and interaction pages survive editing. A direct person link returns to Network by default.
 
 Network follow-up and interaction dialogs, plus **Edit link note** on either side of a relationship, ask before discarding unsaved edits through Cancel, Close, Escape, or the backdrop. Failed saves keep the draft for correction or sign-in and retry.
+
+## Deleting jobs and people
+
+On job or person detail, open the **⋮ actions menu** and choose **Delete job** or **Delete person**. Review the named record and confirm, or Cancel. This is permanent; there is no Trash or Undo.
+
+- **Delete job** removes the job, its complete history, reminder, person relationships and all job-specific documents. Linked people, their interactions and documents stored elsewhere remain.
+- **Delete person** removes that person's interactions, reminder and job relationships. Linked jobs and their history/documents remain.
+
+The counts describe the last loaded state. Confirmation includes changes saved before deletion starts, so newly added history, relationships or job documents are included. Use **Unlink** to remove just one relationship, or **Change stage** to close an application while keeping its history and files.
+
+Successful deletion returns to your originating list or job and shows a confirmation. If job document cleanup is interrupted, Saturday finishes it during recovery before accepting conflicting data access. A recovery-required message means cleanup has not finished; do not submit another deletion. If reopening cannot finish it, use the [host recovery command](agent-guide.md#file-storage-and-recovery-commands). Existing backups retain their contents; restoring one is a separate operation that may replace newer changes.
 
 ## Documents and Profile
 

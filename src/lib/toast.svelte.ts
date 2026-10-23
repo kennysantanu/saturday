@@ -4,6 +4,10 @@
  * message and removes the parameter from the address.
  */
 export const SAVED_MESSAGES: Record<string, string> = {
+	'job-deleted': 'Job deleted.',
+	'person-deleted': 'Person deleted.',
+	'job-missing': 'Job no longer exists.',
+	'person-missing': 'Person no longer exists.',
 	access: 'Sign-in setting saved.',
 	restored: 'Backup restored.',
 	backup: 'Backup saved.',

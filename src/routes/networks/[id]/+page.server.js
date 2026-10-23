@@ -3,6 +3,7 @@ import * as networks from '$lib/server/networks.js';
 import { getJob, searchJobs } from '$lib/server/services.js';
 import { ServiceError, ValidationError, localCalendarDate } from '$lib/server/validation.js';
 import { networkReturn, networkDetailUrl } from '$lib/network-navigation.js';
+import { recordDeletionAction } from '$lib/server/record-deletion-actions.js';
 
 export function load({ params, url }) {
 	let person;
@@ -92,6 +93,7 @@ function action(operation, saved) {
 	};
 }
 export const actions = {
+	deletePerson: recordDeletionAction('person', networks.deleteNetwork),
 	followUp: action(networks.setNetworkFollowUp, 'follow-up'),
 	clearFollowUp: action(
 		(i) => networks.setNetworkFollowUp({ ...i, follow_up_date: null }),

@@ -10,7 +10,13 @@ export function load({ url }) {
 	try {
 		const filters = parseSchema(jobSearchSchema, { ...input, limit: 50 });
 		const result = searchJobs(filters);
-		const canonical = searchUrl(filters, result.page);
+		let canonical = searchUrl(filters, result.page);
+		const saved = url.searchParams.get('saved');
+		if (saved === 'job-deleted' || saved === 'job-missing') {
+			const target = new URL(canonical, url);
+			target.searchParams.set('saved', saved);
+			canonical = target.pathname + target.search;
+		}
 		if (`${url.pathname}${url.search}` !== canonical) redirect(303, canonical);
 		return {
 			...result,

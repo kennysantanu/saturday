@@ -32,6 +32,21 @@ export function parseRecordId(value, field = 'id') {
 	return parseSchema(z.object({ [field]: recordIdInputSchema }), { [field]: value })[field];
 }
 
+export const recordDeletionShape = {
+	dataset_id: z.uuid(),
+	confirm: z.literal(true)
+};
+export function parseRecordDeletion(input, field) {
+	return parseSchema(z.object({ [field]: recordIdInputSchema, ...recordDeletionShape }), input);
+}
+export function assertDeletionDataset(db, expected) {
+	if (db.prepare('SELECT dataset_id FROM app_metadata WHERE id=1').get().dataset_id !== expected)
+		throw new ServiceError(
+			'The database was replaced. Reload this record before deleting it.',
+			'DATASET_MISMATCH'
+		);
+}
+
 const optionalText = (max, label) =>
 	z
 		.preprocess(

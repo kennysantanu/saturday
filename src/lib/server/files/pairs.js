@@ -5,7 +5,7 @@ import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 import { randomUUID } from 'node:crypto';
 import { join, resolve, sep } from 'node:path';
-import { openDatabase, withDatabaseRecovery } from '../database.js';
+import { openDatabase, withDatabaseRecovery, assertDatabaseAvailable } from '../database.js';
 import {
 	createBackup,
 	completeBackupPair,
@@ -56,6 +56,7 @@ export async function createBackupPair({
 	let capture, database;
 	try {
 		db?.exec('BEGIN IMMEDIATE');
+		assertDatabaseAvailable();
 		const result = await withFileLock(async (m) => {
 			assertDataset(m);
 			database = createBackup();

@@ -1,6 +1,7 @@
 import { listWorkflowStages } from './workflow.js';
 import { getInstallation } from './installation.js';
 import { openDatabase } from './database.js';
+import { recoverJobDeletion } from './job-deletion.js';
 import { withServerActivity } from './server-lifecycle.js';
 import { createReadStream } from 'node:fs';
 import { extensionRegistry } from './extensions.generated.js';
@@ -824,6 +825,7 @@ async function refreshExtensionTools() {
 		refreshingExtensions = false;
 	}
 }
+await recoverJobDeletion();
 try {
 	await registerExtensionRuntime();
 } catch (e) {

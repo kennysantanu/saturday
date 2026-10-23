@@ -16,6 +16,8 @@ import {
 } from '$lib/server/services.js';
 import { listWorkflowStages } from '$lib/server/workflow.js';
 import { todayIso } from '$lib/format.js';
+import { deleteJob } from '$lib/server/services.js';
+import { recordDeletionAction } from '$lib/server/record-deletion-actions.js';
 
 function formValues(formData) {
 	return Object.fromEntries(
@@ -169,6 +171,7 @@ function historyAction(mode) {
 	};
 }
 export const actions = {
+	deleteJob: recordDeletionAction('job', deleteJob),
 	changeStage: historyAction('changeStage'),
 	addHistory: historyAction('addHistory'),
 	editHistory: historyAction('editHistory'),

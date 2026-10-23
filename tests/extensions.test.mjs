@@ -1,3 +1,5 @@
+import { deleteJob } from '../src/lib/server/services.js';
+import { createNetwork, deleteNetwork } from '../src/lib/server/networks.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -18,6 +20,7 @@ test('portable extension lifecycle, shared services, retained data and guarded r
 	process.env.SATURDAY_EXTENSION_STATE_PATH = join(scratch, 'state');
 	process.env.SATURDAY_EXTENSIONS_PATH = join(scratch, 'code');
 	process.env.SATURDAY_DB_PATH = join(scratch, 'core.sqlite');
+	process.env.SATURDAY_FILES_PATH = join(scratch, 'files');
 	const app = join(scratch, 'app');
 	await fs.mkdir(app);
 	await fs.symlink(resolve('node_modules'), join(app, 'node_modules'), 'dir');
@@ -246,6 +249,14 @@ test('portable extension lifecycle, shared services, retained data and guarded r
 			assert.equal(ref.dataset_id, dataset);
 			assert.equal(ctx.core.jobs.resolve(ref).id, job.id);
 			assert.equal(ctx.core.jobs.resolve({ ...ref, dataset_id: 'foreign' }), null);
+			const removed = createJob({ job_title: 'Remove reference', company_name: 'Example' });
+			const person = createNetwork({ name: 'Remove reference' });
+			const jobRef = ctx.core.jobs.reference(removed),
+				personRef = ctx.core.networks.reference(person);
+			await deleteJob({ job_id: removed.id, dataset_id: dataset, confirm: true });
+			deleteNetwork({ network_id: person.id, dataset_id: dataset, confirm: true });
+			assert.equal(ctx.core.jobs.resolve(jobRef), null);
+			assert.equal(ctx.core.networks.resolve(personRef), null);
 		});
 		await uninstallExtension(entry.id);
 		assert.equal((await extensions.extensionCatalog()).installed.length, 0);

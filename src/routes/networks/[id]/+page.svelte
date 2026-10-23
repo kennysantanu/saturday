@@ -1,4 +1,5 @@
 <script lang="ts">
+	import RecordDeleteAction from '$lib/components/app/record-delete-action.svelte';
 	import { tick } from 'svelte';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { page } from '$app/state';
@@ -133,7 +134,19 @@
 		{#snippet actions()}<Button
 				href={`/networks/${person.id}/edit?${new URLSearchParams({ return_to: networkDetailUrl(person.id, data.returnTo, page.url.searchParams) })}`}
 				variant="outline"><Pencil data-icon="inline-start" />Edit details</Button
-			>{/snippet}
+			>
+			{#key person.id + person.dataset_id}
+				<RecordDeleteAction
+					kind="person"
+					id={person.id}
+					datasetId={person.dataset_id}
+					name={person.name}
+					counts={{ history: data.history.total, relationships: data.linkedJobs.total }}
+					action={formAction('deletePerson')}
+					disabled={followOpen || interactionOpen || noteOpen || pickerOpen}
+				/>
+			{/key}
+		{/snippet}
 	</PageHeader>
 	{#if data.missingJob}<Notice title="Person saved"
 			>The originating job is no longer available. This person is saved in Network.</Notice

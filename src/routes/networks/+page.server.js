@@ -18,6 +18,8 @@ export function load({ url }) {
 			)
 				params.set(key, filters[key].trim());
 		if (page > 1) params.set('page', String(page));
+		const saved = url.searchParams.get('saved');
+		if (saved === 'person-deleted' || saved === 'person-missing') params.set('saved', saved);
 		return '/networks' + (params.size ? '?' + params : '');
 	}
 	try {

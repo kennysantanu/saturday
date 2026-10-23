@@ -64,9 +64,15 @@ function fail(code, message) {
 export function publicBackupError(error) {
 	if (error instanceof BackupError) return { code: error.code, message: error.message };
 	if (
-		['VALIDATION', 'BUSY', 'CONFIRMATION', 'NOT_FOUND', 'INTEGRITY', 'DATASET_MISMATCH'].includes(
-			error?.code
-		)
+		[
+			'VALIDATION',
+			'BUSY',
+			'CONFIRMATION',
+			'NOT_FOUND',
+			'INTEGRITY',
+			'DATASET_MISMATCH',
+			'RECOVERY_REQUIRED'
+		].includes(error?.code)
 	)
 		return { code: error.code, message: error.message };
 	if (error?.code === 'FORMAT') return { code: 'unsupported_file_format', message: error.message };
@@ -805,6 +811,7 @@ export async function restoreDatabaseWithFiles(restoreId, fileOperation) {
 	try {
 		validate(stage);
 		db.exec('BEGIN IMMEDIATE');
+		assertDatabaseAvailable();
 		validate(db);
 		assertFileStorageCompatible();
 		if (fingerprint(db) !== record.fingerprint)

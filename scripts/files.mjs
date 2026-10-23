@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { createWriteStream } from 'node:fs';
 import { assertManifestCompatibility } from '../src/lib/server/compatibility.js';
+import { recoverJobDeletion } from '../src/lib/server/job-deletion.js';
 import {
 	filePaths,
 	fs,
@@ -30,8 +31,12 @@ import {
 const [command, ...args] = process.argv.slice(2);
 const value = (flag) => args[args.indexOf(flag) + 1];
 try {
+	const recovery = await recoverJobDeletion();
 	let result;
 	switch (command) {
+		case 'recover-job-deletion':
+			result = recovery;
+			break;
 		case 'backup':
 			result = await createFileBackup();
 			break;
@@ -119,7 +124,7 @@ try {
 		}
 		default:
 			throw new Error(
-				'Usage: npm run files -- backup|list|import <zip>|export <id> <path>|prepare <id> [--replace]|restore <preview> --confirm|pair|prepare-pair <file-id>|restore-pair <preview> --confirm|recover <zip> --confirm|recover-pair --confirm'
+				'Usage: npm run files -- backup|list|import <zip>|export <id> <path>|prepare <id> [--replace]|restore <preview> --confirm|pair|prepare-pair <file-id>|restore-pair <preview> --confirm|recover <zip> --confirm|recover-pair --confirm|recover-job-deletion'
 			);
 	}
 	console.log(JSON.stringify({ ok: true, ...result }, null, 2));
