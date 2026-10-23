@@ -9,10 +9,12 @@
 	let {
 		open = $bindable(false),
 		guard,
+		onclosed,
 		children
 	}: {
 		open?: boolean;
 		guard: UnsavedChanges;
+		onclosed?: () => void;
 		children: Snippet<[() => void]>;
 	} = $props();
 	let discardOpen = $state(false);
@@ -30,6 +32,9 @@
 </script>
 
 <Dialog.Root
+	onOpenChangeComplete={(next) => {
+		if (!next) onclosed?.();
+	}}
 	bind:open={
 		() => open,
 		(next) => {

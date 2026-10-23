@@ -1,3 +1,4 @@
+import { createReminder, listReminders } from '../src/lib/server/reminders.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -268,9 +269,21 @@ test('production stage/history actions, result round trips and read-only overvie
 		await page.setViewport({ width: 1280, height: 960 });
 		await page.goto(base + detail, { waitUntil: 'networkidle0' });
 		const button = (text) => page.click(`button::-p-text(${text})`);
-		const settle = () => page.waitForNetworkIdle({ idleTime: 300 });
+		const settle = async () => {
+			await page.waitForNetworkIdle({ idleTime: 300 });
+			await page.evaluate(async () => {
+				await Promise.all(
+					document
+						.getAnimations()
+						.filter((a) => a.effect?.getComputedTiming().endTime !== Infinity)
+						.map((a) => a.finished.catch(() => {}))
+				);
+			});
+		};
 		const saveDialog = async () => {
-			await page.click('#job-update-form button[type="submit"]:not([formaction])');
+			await page.click(
+				'#job-update-form button[type="submit"]:not([formaction]), #reminder-editor button[type="submit"]:not([formaction])'
+			);
 			await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
 			await settle();
 			await settle();
@@ -344,22 +357,25 @@ test('production stage/history actions, result round trips and read-only overvie
 			})
 		);
 		const stackedActions = () =>
-			page.$eval('#job-update-form [data-slot="dialog-footer"]', (el) => {
-				const buttons = [...el.querySelectorAll('button')];
-				const rects = buttons.map((button) => button.getBoundingClientRect());
-				return (
-					buttons.length === 3 &&
-					rects.every(
-						(r, i) =>
-							Math.abs(r.left - rects[0].left) < 1 &&
-							Math.abs(r.width - rects[0].width) < 1 &&
-							r.left >= 0 &&
-							r.right <= innerWidth &&
-							r.height >= 44 &&
-							(i === 0 || r.bottom <= rects[i - 1].top)
-					)
-				);
-			});
+			page.$eval(
+				'#job-update-form [data-slot="dialog-footer"], #reminder-editor [data-slot="dialog-footer"]',
+				(el) => {
+					const buttons = [...el.querySelectorAll('button')];
+					const rects = buttons.map((button) => button.getBoundingClientRect());
+					return (
+						buttons.length === 3 &&
+						rects.every(
+							(r, i) =>
+								Math.abs(r.left - rects[0].left) < 1 &&
+								Math.abs(r.width - rects[0].width) < 1 &&
+								r.left >= 0 &&
+								r.right <= innerWidth &&
+								r.height >= 44 &&
+								(i === 0 || r.bottom <= rects[i - 1].top)
+						)
+					);
+				}
+			);
 		await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
 		assert(
 			await page.$eval(
@@ -376,14 +392,18 @@ test('production stage/history actions, result round trips and read-only overvie
 		await page.setViewport({ width: 768, height: 960 });
 		await settle();
 		assert(
-			await page.$eval('#job-update-form [data-slot="dialog-footer"]', (el) => {
-				const buttons = [...el.querySelectorAll('button')];
-				return buttons.every(
-					(button) =>
-						Math.abs(button.getBoundingClientRect().top - buttons[0].getBoundingClientRect().top) <
-						1
-				);
-			})
+			await page.$eval(
+				'#job-update-form [data-slot="dialog-footer"], #reminder-editor [data-slot="dialog-footer"]',
+				(el) => {
+					const buttons = [...el.querySelectorAll('button')];
+					return buttons.every(
+						(button) =>
+							Math.abs(
+								button.getBoundingClientRect().top - buttons[0].getBoundingClientRect().top
+							) < 1
+					);
+				}
+			)
 		);
 		await page.setViewport({ width: 320, height: 900 });
 		await settle();
@@ -396,28 +416,28 @@ test('production stage/history actions, result round trips and read-only overvie
 		await settle();
 		assert(!getJob(job.id).updates.some((entry) => entry.id === browserEntry.id));
 		assert.equal(getJob(job.id).currentStageId, interview.id);
-		await button('Schedule follow-up');
-		await page.waitForSelector('#follow_up_date');
-		await page.locator('#follow_up_date').fill('2099-01-01');
-		await page.type('#follow_up_comment', 'Phone follow-up');
+		await button('Add reminder');
+		await page.waitForSelector('#reminder-date');
+		await page.locator('#reminder-date').fill('2099-01-01');
+		await page.type('#reminder-note', 'Phone follow-up');
 		await saveDialog();
-		assert.equal(getJob(job.id).followUpComment, 'Phone follow-up');
+		assert.equal(listReminders({ job_id: job.id }).reminders[0].note, 'Phone follow-up');
 		assert.equal(await page.$('button::-p-text(Clear follow-up)'), null);
-		await button('Edit follow-up');
-		await page.waitForSelector('#follow_up_comment');
+		await button('Edit reminder');
+		await page.waitForSelector('#reminder-note');
 		await settle();
 		assert(await stackedActions());
 		await page.screenshot({ path: '/tmp/saturday-follow-up-actions-phone.png' });
-		assert.equal(await page.$eval('#follow_up_comment', (el) => el.value), 'Phone follow-up');
+		assert.equal(await page.$eval('#reminder-note', (el) => el.value), 'Phone follow-up');
 		const historyCount = getJob(job.id).updates.length;
-		// Clearing ignores invalid draft values and retains the original return context.
-		await page.locator('#follow_up_comment').fill('Unsaved comment to discard');
-		await page.locator('#follow_up_date').fill('');
-		await page.click('#job-update-form button[formaction*="clearFollowUp"]');
+		// Confirmed deletion ignores invalid draft values and retains the original return context.
+		await page.locator('#reminder-note').fill('Unsaved comment to discard');
+		await page.locator('#reminder-date').fill('');
+		await page.locator('#reminder-editor button::-p-text(Delete reminder)').click();
+		await page.locator('[role=dialog] button[formaction*="reminderDelete"]').click();
 		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
 		await settle();
-		assert.equal(getJob(job.id).followUpDate, null);
-		assert.equal(getJob(job.id).followUpComment, null);
+		assert.equal(getJob(job.id).nextReminder, null);
 		assert.equal(getJob(job.id).updates.length, historyCount);
 		assert.equal(new URL(page.url()).searchParams.get('return_to'), returnTo);
 		assert.equal(await page.$('button::-p-text(Clear follow-up)'), null);
@@ -456,7 +476,9 @@ test('production stage/history actions, result round trips and read-only overvie
 		await page.type('#history-note', 'Failed save draft');
 		await page.locator('#history-date').fill('');
 		await page.$eval('#job-update-form', (el) => (el.noValidate = true));
-		await page.click('#job-update-form button[type="submit"]:not([formaction])');
+		await page.click(
+			'#job-update-form button[type="submit"]:not([formaction]), #reminder-editor button[type="submit"]:not([formaction])'
+		);
 		await page.waitForSelector('#history-date[aria-invalid="true"]');
 		await settle();
 		assert.equal(await page.$eval('#history-note', (el) => el.value), 'Failed save draft');
@@ -491,7 +513,9 @@ test('production stage/history actions, result round trips and read-only overvie
 			} else void request.continue();
 		};
 		page.on('request', intercept);
-		await page.click('#job-update-form button[type="submit"]:not([formaction])');
+		await page.click(
+			'#job-update-form button[type="submit"]:not([formaction]), #reminder-editor button[type="submit"]:not([formaction])'
+		);
 		await page.waitForFunction(() => document.body.innerText.includes('Session expired'));
 		await page.waitForSelector('#job-update-form:not([aria-busy="true"])');
 		assert.equal(await page.$eval('#history-note', (el) => el.value), 'Keep my short note');
@@ -572,31 +596,31 @@ test('production stage/history actions, result round trips and read-only overvie
 			listNetworkUpdates({ network_id: person.id }).updates[0].note,
 			'Interaction validation draft'
 		);
-		await button('Schedule follow-up');
-		await page.waitForSelector('#follow_up_comment');
-		await page.locator('#follow_up_date').fill('2099-01-01');
-		await page.type('#follow_up_comment', 'Unsaved follow-up');
-		await keepDraft('#follow_up_comment', 'Unsaved follow-up', () =>
+		await button('Add reminder');
+		await page.waitForSelector('#reminder-note');
+		await page.locator('#reminder-date').fill('2099-01-01');
+		await page.type('#reminder-note', 'Unsaved follow-up');
+		await keepDraft('#reminder-note', 'Unsaved follow-up', () =>
 			page.click('[data-slot="dialog-close"]')
 		);
-		await page.click('#network-follow-up button[type="submit"]');
+		await page.click('#reminder-editor button[type="submit"]');
 		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
 		await settle();
-		assert.equal(getNetwork(person.id).follow_up_comment, 'Unsaved follow-up');
+		assert.equal(listReminders({ network_id: person.id }).reminders[0].note, 'Unsaved follow-up');
 		// Existing reminder and interaction removal use the same editor pattern as Jobs.
 		assert.equal(await page.$('main form[action*="clearFollowUp"]'), null);
-		await button('Edit follow-up');
-		await page.waitForSelector('#network-follow-up');
-		await page.locator('#follow_up_comment').fill('Reminder edit');
-		await page.click('#network-follow-up button[type="submit"]:not([formaction])');
+		await button('Edit reminder');
+		await page.waitForSelector('#reminder-editor');
+		await page.locator('#reminder-note').fill('Reminder edit');
+		await page.click('#reminder-editor button[type="submit"]:not([formaction])');
 		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
-		assert.equal(getNetwork(person.id).follow_up_comment, 'Reminder edit');
-		await button('Edit follow-up');
-		await page.waitForSelector('#network-follow-up');
-		await page.click('#network-follow-up button[formaction*="clearFollowUp"]');
+		assert.equal(listReminders({ network_id: person.id }).reminders[0].note, 'Reminder edit');
+		await button('Edit reminder');
+		await page.waitForSelector('#reminder-editor');
+		await page.locator('#reminder-editor button::-p-text(Delete reminder)').click();
+		await page.locator('[role=dialog] button[formaction*="reminderDelete"]').click();
 		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
-		assert.equal(getNetwork(person.id).follow_up_date, null);
-		assert.equal(getNetwork(person.id).follow_up_comment, null);
+		assert.equal(getNetwork(person.id).next_reminder_at, null);
 		await button('Edit interaction');
 		await page.waitForSelector('#interaction_note');
 		await page.locator('#interaction_note').fill('Keep this interaction draft');
@@ -743,7 +767,9 @@ test('production stage/history actions, result round trips and read-only overvie
 		await page.type('#move-note', 'Keep this stage-change draft');
 		const previousPlacement = getJob(job.id).currentStageId;
 		archiveWorkflowStage(retiring.id);
-		await page.click('#job-update-form button[type="submit"]:not([formaction])');
+		await page.click(
+			'#job-update-form button[type="submit"]:not([formaction]), #reminder-editor button[type="submit"]:not([formaction])'
+		);
 		await page.waitForSelector('#move-stage[aria-invalid="true"]');
 		await settle();
 		assert.equal(await page.$eval('#move-note', (el) => el.value), 'Keep this stage-change draft');
@@ -816,9 +842,12 @@ test('production stage/history actions, result round trips and read-only overvie
 			job_title: 'A long engineering role title that wraps on a narrow phone',
 			company_name: 'Example company',
 			location: 'Remote',
-			job_description: 'Description content. '.repeat(80) + 'Description end marker',
-			follow_up_date: '2020-01-01',
-			follow_up_comment: 'Follow up with the recruiter.'
+			job_description: 'Description content. '.repeat(80) + 'Description end marker'
+		});
+		createReminder({
+			job_id: layoutJob.id,
+			scheduled_at: '2020-01-01T00:00',
+			note: 'Follow up with the recruiter.'
 		});
 		for (let i = 0; i < 8; i++)
 			addJobUpdate({
@@ -838,11 +867,11 @@ test('production stage/history actions, result round trips and read-only overvie
 		assert.equal(await page.$('.job-score'), null);
 		assert.equal(await page.$eval('#job-information', (el) => el.open), false);
 		const order = await page.$$eval(
-			'#job-follow-up, #job-information, #job-history, #job-documents, #job-network, #job-description',
+			'#reminders, #job-information, #job-history, #job-documents, #job-network, #job-description',
 			(elements) => elements.map((el) => el.id)
 		);
 		assert.deepEqual(order, [
-			'job-follow-up',
+			'reminders',
 			'job-information',
 			'job-history',
 			'job-documents',
@@ -945,7 +974,7 @@ test('production stage/history actions, result round trips and read-only overvie
 		assert(
 			await page.evaluate(
 				() =>
-					document.querySelector('#job-follow-up').getBoundingClientRect().right <
+					document.querySelector('#reminders').getBoundingClientRect().right <
 					document.querySelector('#job-history').getBoundingClientRect().left
 			)
 		);

@@ -1,3 +1,4 @@
+import { localScheduleNow } from '$lib/server/reminders.js';
 import { redirect } from '@sveltejs/kit';
 import { listNetworks } from '$lib/server/networks.js';
 import { ValidationError, localCalendarDate } from '$lib/server/validation.js';
@@ -30,6 +31,7 @@ export function load({ url }) {
 			filters,
 			errors: {},
 			today: localCalendarDate(),
+			now: localScheduleNow(),
 			previous: result.page > 1 ? href(result.page - 1) : null,
 			next: result.page < result.totalPages ? href(result.page + 1) : null,
 			filtered: !!Object.keys(filters).filter((key) => key !== 'page' && key !== 'sort').length
@@ -44,6 +46,7 @@ export function load({ url }) {
 			filters,
 			errors: e.fieldErrors,
 			today: localCalendarDate(),
+			now: localScheduleNow(),
 			previous: null,
 			next: null,
 			filtered: true

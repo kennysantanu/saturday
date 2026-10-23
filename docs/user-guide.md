@@ -5,7 +5,7 @@ Saturday keeps your job records and documents on your computer. Use the web app 
 ## Add and find jobs
 
 1. Open **Dashboard** or **Jobs** and choose **Add job**.
-2. Enter a **Job title** and **Company**. The main form also has an optional posting link, description, notes, and a star checkbox. Under **More details**, you can add employment type, work arrangement, location, compensation, source, an application deadline, and a follow-up date/comment.
+2. Enter a **Job title** and **Company**. The main form also has an optional posting link, description, notes, and a star checkbox. Under **More details**, you can add employment type, work arrangement, location, compensation, source, an application deadline. Add reminders from job detail after saving.
 3. Save the job to open its detail page. Use **Edit** there to correct its information later.
 
 **Jobs** starts with Active jobs. Activity also offers Closed and All. Open a row for job details; the list has no inline stage actions. Every new job starts in the first available open stage and receives an initial milestone.
@@ -14,7 +14,7 @@ Use **Search jobs** to match title, company or location. Advanced filters retain
 
 **Current stage** selects where a job is now. **Milestone history** selects jobs with a recorded milestone, including scheduled milestones. Selecting either forces Activity to All so closed jobs are not hidden. Removing the last stage filter returns to Active. Names can change without breaking saved stage links.
 
-Sort by recently updated/created, highest score, earliest follow-up or deadline. Missing scores/dates sort last; scores allow decimals and zero without a fixed scale. Jobs shows matching counts and 50 results per page. Apply/filter/sort changes reset paging; URLs, chips and detail return links preserve other applied choices. Dates and inclusive ranges use the server computer's local calendar.
+Sort by recently updated/created, highest score, earliest reminder or deadline. Missing scores/dates sort last; scores allow decimals and zero without a fixed scale. Jobs shows matching counts and 50 results per page. Apply/filter/sort changes reset paging; URLs, chips and detail return links preserve other applied choices. Dates and inclusive ranges use the server computer's local calendar.
 
 ## Record progress and notes
 
@@ -48,13 +48,17 @@ Below the board, **Notifications** appears on the left and **Milestone history**
 
 **Milestone history** counts distinct jobs with each milestone across active and closed jobs, including scheduled milestones. Counts overlap; repeat milestones count a job once. Count links open the matching Jobs history filter, separately from current-stage filters.
 
-Under **Notifications**, **Needs attention** lists open-job follow-ups and application deadlines. **Coming up** shows future history on open jobs. Closing a job retains its follow-up but hides it from these queues; moving back to an open stage makes it eligible again. Dashboard uses saved stage names and ordering. Archived milestone counts remain available under **Archived milestones**; archived stages have no board columns.
+Under **Notifications**, **Needs attention** lists active reminders for jobs and people, including closed jobs, alongside open-job application deadlines. **Coming up** shows future history on open jobs. Dashboard uses saved stage names and ordering. Archived milestone counts remain available under **Archived milestones**; archived stages have no board columns.
 
-Job detail puts compact Follow-up and Job details on the left at desktop widths, followed in reading order by History, Documents, Network and Job description on the right. On phones they stack in that order, with Job details initially collapsed. History initially shows five recent and three upcoming entries; Show more reveals the rest. Documents initially shows three files, with Show more for the loaded preview and Manage documents for the complete list. Long notes/descriptions have Show more/Show less disclosures; these preserve the full content and work without JavaScript.
+Job detail puts compact Reminders and Job details on the left at desktop widths, followed in reading order by History, Documents, Network and Job description on the right. On phones they stack in that order, with Job details initially collapsed. History initially shows five recent and three upcoming entries; Show more reveals the rest. Documents initially shows three files, with Show more for the loaded preview and Manage documents for the complete list. Long notes/descriptions have Show more/Show less disclosures; these preserve the full content and work without JavaScript.
 
-## Follow-ups, starred jobs, and assessments
+## Reminders, starred jobs, and assessments
 
-Use **Star** on a job to mark it for attention; starred jobs show a star in lists. In the **Follow-up** card, **Schedule follow-up** or **Edit follow-up** opens a dialog for one date and an optional comment. In that dialog, **Clear follow-up** removes the reminder. This does not add history or change the job status. Dashboard shows active-job follow-ups, earliest first, including overdue dates, alongside upcoming application deadlines. Closed jobs keep their follow-up but hide it from Dashboard until reopened. Dates use the server computer's local calendar.
+Use **Star** on a job to mark it for attention; starred jobs show a star in lists. In **Reminders**, choose **Add reminder** and enter a date, time and optional note. Each job or person can have multiple reminders. Time visibly defaults to **00:00** in the form; cards hide that time and show only the date. Other times remain visible. Schedules stay exactly as entered across devices and travel, without timezone conversion. Midnight means the beginning of the selected day, so a midnight reminder becomes overdue as that day starts. Today and overdue calculations use the server computer's local clock and refresh with the page.
+
+Active cards offer **Dismiss reminder** and **Edit reminder**. Dismissal keeps the reminder under **Past reminders**; it does not claim an appointment happened or add history. Past cards offer only **Edit reminder**. Both editors contain confirmed **Delete reminder**, **Cancel** and **Save reminder**. An **Active** checkbox can restore a dismissed reminder; editing its note or schedule alone keeps it inactive and preserves its dismissal date. An unchanged old schedule can immediately be overdue when restored. Reminder lists have independent five-item pages; past reminders are inside a disclosure.
+
+**Change stage**, **Add history** and **Add interaction** can include an optional **Add reminder** section. Both records save together, then remain independent. Reminder notes start from the activity note and can be changed separately. Appointment details/outcomes belong in history or interactions. Adding activity, deleting history, unlinking a person or closing a job never automatically dismisses reminders. Closed-job reminders remain on Dashboard. Reminders do not send notifications or recur.
 
 **Assistant assessment** appears as a Score button in the metadata row after the current stage when a score exists. Select it to open a popup with the full score and notes managed through MCP. Missing scores are hidden. You can read both in the UI but cannot edit them there. There is no fixed scoring scale; ask your assistant to use a consistent scale and explain its criteria. An empty score means unscored; zero is a valid score.
 
@@ -62,28 +66,28 @@ Use **Star** on a job to mark it for attention; starred jobs show a star in list
 
 Open **Network → Add person**. Name is required; role, organization, phone, email, profile/website and general Notes are optional. Save, then use **Edit details** for corrections. Duplicate names/emails are allowed; Saturday does not merge people automatically.
 
-Use separate **Name**, **Role**, and **Organization** filters, optionally choose Follow-up and Sort, then **Apply filters**. Every supplied field must match; text uses literal contains matching, including `%`, `_` and backslash. Filters/pages live in the URL for refresh, sharing and Back/Forward. Clear filters shows everyone. Lists have 50 people per page; sorts are Name, Earliest follow-up, and Latest recorded interaction. Missing dates sort last.
+Use separate **Name**, **Role**, and **Organization** filters, optionally choose Reminder and Sort, then **Apply filters**. Every supplied field must match; text uses literal contains matching, including `%`, `_` and backslash. Filters/pages live in the URL for refresh, sharing and Back/Forward. Clear filters shows everyone. Lists have 50 people per page; sorts are Name, Earliest reminder, and Latest recorded interaction. Missing dates sort last.
 
 On a person's page, **Link to job** searches existing jobs (including closed jobs). On a job, its **Network → Link person** chooser searches existing people by name/role/organization. Select a record, optionally enter a **Relationship note**, and explicitly confirm the link. A person can link to many jobs and a job to many people. **Edit link note** and **Unlink** work from either side. Unlink keeps both records and their history. Person **Notes** are general context; **Relationship note** applies only to that job.
 
 From the job chooser, **Add person** opens the normal form and returns to the chooser with the saved person selected. Confirm **Link person** to create the relationship; saving alone does not link. Cancel returns to the job. If the job is unavailable, the person can still be saved in Network.
 
-**Schedule follow-up** creates one date/comment for that person. Once scheduled, **Edit follow-up** opens the same dialog with **Clear follow-up** inside. Jobs uses the same labels and arrangement. Overdue means before today; Upcoming means after today, using the host computer's local calendar. These reminders appear in Network, independently of job reminders. There are no notifications or recurring reminders.
+People use the same **Reminders** card and editor as jobs. A reminder belongs to exactly one job or person. For application-specific contact, attach it to the job; for general networking, attach it to the person. List summaries show the earliest active reminder. Reminder filters match any active reminder; Upcoming includes later today, Today matches the calendar date, and Overdue compares the saved schedule with the server's current local date/time.
 
-**Interactions** is optional. Add a completed interaction with its date and **Interaction note**; backdated entries are supported, future dates belong in Follow-up. **Edit interaction** opens the saved date/note, with **Delete interaction** inside and confirmation before permanent removal. Cancelling deletion keeps the editor and unsaved note. Recording an interaction never clears a reminder. History sorts by date, then recording order; paginated history and linked jobs have independent pages. “Last recorded interaction” summarizes notes on file, including unanswered outreach; “None recorded” does not prove you have never contacted someone.
+**Interactions** is optional. Add a completed interaction with its date and **Interaction note**; backdated entries are supported, future contact belongs in Reminders. **Edit interaction** opens the saved date/note, with **Delete interaction** inside and confirmation before permanent removal. Cancelling deletion keeps the editor and unsaved note. Recording an interaction never clears a reminder. History sorts by date, then recording order; paginated history and linked jobs have independent pages. “Last recorded interaction” summarizes notes on file, including unanswered outreach; “None recorded” does not prove you have never contacted someone.
 
 On job detail, **Link person** keeps search, person selection and the optional relationship note in one dialog. Search by name, role or organization, choose a person from the five results per page, then add a note if needed. You can select a different person directly without leaving the form. Cancel and Link person stay visible while results scroll. Confirm Link person to save; creating or selecting someone does not link them automatically. Unsaved selections/notes ask before dismissal, and failed saves keep the draft.
 
 Opening a person from filtered Network results preserves those filters and the list page through detail, Edit details, Save and Cancel. Opening from a job provides a Back to Job link retaining that job's original Dashboard/Jobs context. Independent linked-job and interaction pages survive editing. A direct person link returns to Network by default.
 
-Network follow-up and interaction dialogs, plus **Edit link note** on either side of a relationship, ask before discarding unsaved edits through Cancel, Close, Escape, or the backdrop. Failed saves keep the draft for correction or sign-in and retry.
+Reminder and Network interaction dialogs, plus **Edit link note** on either side of a relationship, ask before discarding unsaved edits through Cancel, Close, Escape, or the backdrop. Failed saves keep the draft for correction or sign-in and retry.
 
 ## Deleting jobs and people
 
 On job or person detail, open the **⋮ actions menu** and choose **Delete job** or **Delete person**. Review the named record and confirm, or Cancel. This is permanent; there is no Trash or Undo.
 
-- **Delete job** removes the job, its complete history, reminder, person relationships and all job-specific documents. Linked people, their interactions and documents stored elsewhere remain.
-- **Delete person** removes that person's interactions, reminder and job relationships. Linked jobs and their history/documents remain.
+- **Delete job** removes the job, its complete history, reminders, person relationships and all job-specific documents. Linked people, their interactions and documents stored elsewhere remain.
+- **Delete person** removes that person's interactions, reminders and job relationships. Linked jobs and their history/documents remain.
 
 Your connected assistant can also delete a specific job or person through MCP with the same scope and recovery behavior. It must read the record, explain what will be removed and obtain your explicit authorization. A request to close a job or unlink someone does not authorize permanent deletion.
 
@@ -132,7 +136,7 @@ In **Settings → Backup and restore**, choose what to include, then **Back up n
 | Contents                     | Saves                                                                     | Download                    |
 | ---------------------------- | ------------------------------------------------------------------------- | --------------------------- |
 | Database and files (default) | Core records, reusable documents, Profile selections, and job attachments | One importable combined ZIP |
-| Database only                | Jobs, people, relationships, follow-ups, and both histories               | SQLite backup               |
+| Database only                | Jobs, people, relationships, reminders, and both histories                | SQLite backup               |
 | Files only                   | File manifest, Profile selections, reusable documents, and attachments    | File ZIP                    |
 
 Core backups exclude extension databases. Backups contain private information and are unencrypted. They are kept until you delete them; there is no automatic schedule or retention policy. Download copies to another drive to protect against disk failure.

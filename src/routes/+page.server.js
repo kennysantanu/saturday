@@ -1,3 +1,4 @@
+import { localScheduleNow } from '$lib/server/reminders.js';
 import { getDashboardStats } from '$lib/server/services.js';
 import { todayIso } from '$lib/format.js';
 
@@ -9,5 +10,5 @@ export function load({ url }) {
 			.map(([key, value]) => [key.slice('pipeline_page_'.length), value])
 	);
 	const dashboard = getDashboardStats({ today, pipelinePages });
-	return { ...dashboard, today };
+	return { ...dashboard, today, now: localScheduleNow() };
 }

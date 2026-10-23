@@ -18,9 +18,7 @@
 		'location',
 		'compensation',
 		'source',
-		'application_deadline',
-		'follow_up_date',
-		'follow_up_comment'
+		'application_deadline'
 	];
 </script>
 

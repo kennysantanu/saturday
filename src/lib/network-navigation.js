@@ -27,6 +27,7 @@ function localUrl(value) {
 export function networkReturn(value) {
 	const url = localUrl(value);
 	if (!url) return '/networks';
+	if (url.pathname === '/') return jobReturn(value);
 	if (url.pathname === '/networks') url.searchParams.delete('return_to');
 	else {
 		const match = /^\/jobs\/([1-9]\d*)$/.exec(url.pathname);
@@ -40,7 +41,7 @@ export function networkReturn(value) {
 
 export function networkDetailUrl(id, returnTo, pages = new URLSearchParams(), saved) {
 	const query = new URLSearchParams({ return_to: networkReturn(returnTo) });
-	for (const key of ['jobs_page', 'updates_page']) {
+	for (const key of ['jobs_page', 'updates_page', 'reminders_page', 'past_reminders_page']) {
 		const value = pages.get(key);
 		if (/^[1-9]\d*$/.test(value ?? '') && Number.isSafeInteger(Number(value)))
 			query.set(key, value);

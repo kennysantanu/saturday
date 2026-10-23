@@ -1,3 +1,4 @@
+import { listReminders } from '../src/lib/server/reminders.js';
 import * as networks from '../src/lib/server/networks.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -165,9 +166,9 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		assert.ok(peopleList.includes(`Person number ${personId}`));
 		const personDetail = await (await fetch(`${base}/networks/${personId}`)).text();
 		assert.ok(personDetail.includes(`Record number ${personId}`));
-		const follow = await postJob(`/networks/${personId}?/followUp`, {
-			follow_up_date: '2000-01-01',
-			follow_up_comment: 'Check in'
+		const follow = await postJob(`/networks/${personId}?/reminderCreate`, {
+			reminder_date: '2000-01-01',
+			reminder_note: 'Check in'
 		});
 		assert.equal(follow.type, 'redirect');
 		assert.equal(
@@ -266,7 +267,7 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		}
 		const newPage = await (await fetch(`${base}/jobs/new`)).text();
 		assert.ok(newPage.includes('name="work_arrangement"'));
-		assert.ok(newPage.includes('name="follow_up_comment"'));
+		assert.ok(!newPage.includes('name="follow_up_comment"'));
 		assert.ok(!newPage.includes('name="score"'));
 		const newJob = await postJob('/jobs/new', {
 			job_title: 'UI details',
@@ -277,14 +278,16 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 			compensation: '$100/hour',
 			source: 'Referral',
 			application_deadline: '2026-11-01',
-			follow_up_date: '2026-10-01',
-			follow_up_comment: 'Send email',
 			is_starred: '1',
 			score: '999',
 			score_comment: 'Forged'
 		});
 		assert.equal(newJob.type, 'redirect');
 		const newId = newJob.location.split('/').at(-1).split('?')[0];
+		await postJob(`/jobs/${newId}?/reminderCreate`, {
+			reminder_date: '2026-10-01',
+			reminder_note: 'Send email'
+		});
 		assert.equal(getJob(newId).location, 'Seattle');
 		assert.equal(getJob(newId).score, null);
 		setJobScore(newId, { score: 8.5, score_comment: 'Strong relevant skills' });
@@ -321,7 +324,7 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		assert.ok(invalidSearch.includes('aria-invalid="true"'));
 		assert.ok(invalidSearch.includes('open'));
 		const dashboard = await (await fetch(base)).text();
-		assert.ok(dashboard.includes('Follow-ups'));
+		assert.ok(dashboard.includes('Reminders'));
 		assert.ok(dashboard.includes('Send email'));
 		assert.ok(dashboard.includes('Overdue'));
 		const edited = await postJob(`/jobs/${newId}/edit`, {
@@ -335,7 +338,7 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		assert.equal(edited.type, 'redirect');
 		assert.equal(getJob(newId).score, 8.5);
 		assert.equal(getJob(newId).scoreComment, 'Strong relevant skills');
-		assert.equal(getJob(newId).followUpComment, 'Send email');
+		assert.equal(listReminders({ job_id: Number(newId) }).reminders[0].note, 'Send email');
 		const invalidJob = await postJob(`/jobs/${newId}/edit`, {
 			job_title: 'Title',
 			company_name: 'Example',
@@ -345,17 +348,25 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		assert.equal(getJob(newId).location, 'Portland');
 		assert.equal(
 			(
-				await postJob(`/jobs/${newId}?/followUp`, {
-					follow_up_date: '2026-12-01',
-					follow_up_comment: 'New reminder'
+				await postJob(`/jobs/${newId}?/reminderCreate`, {
+					reminder_date: '2026-12-01',
+					reminder_note: 'New reminder'
 				})
 			).type,
 			'redirect'
 		);
-		assert.equal(getJob(newId).followUpComment, 'New reminder');
-		assert.equal((await postJob(`/jobs/${newId}?/clearFollowUp`, {})).type, 'redirect');
-		assert.equal(getJob(newId).followUpDate, null);
-		assert.equal(getJob(newId).followUpComment, null);
+		assert(
+			listReminders({ job_id: Number(newId) }).reminders.some((r) => r.note === 'New reminder')
+		);
+		const lastReminder = listReminders({ job_id: Number(newId) }).reminders.find(
+			(r) => r.note === 'New reminder'
+		);
+		assert.equal(
+			(await postJob(`/jobs/${newId}?/reminderDismiss`, { reminder_id: String(lastReminder.id) }))
+				.type,
+			'redirect'
+		);
+		assert.equal(listReminders({ job_id: Number(newId), view: 'inactive' }).total, 1);
 		assert.ok((await (await fetch(`${base}/documents`)).text()).includes('/profile'));
 		assert.ok((await (await fetch(`${base}/profile`)).text()).includes('Cover letter template'));
 		const createdDocument = await postJob('/documents/new?/save', {

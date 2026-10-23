@@ -1,6 +1,7 @@
 <script lang="ts">
 	import CalendarDays from '@lucide/svelte/icons/calendar-days';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import ReminderBadge from './reminder-badge.svelte';
 	import DueBadge from './due-badge.svelte';
 
 	/** A dated item on the Dashboard that links to its job. */
@@ -10,6 +11,8 @@
 		subtitle,
 		comment,
 		date,
+		schedule,
+		now,
 		today
 	}: {
 		href: string;
@@ -17,6 +20,8 @@
 		subtitle: string;
 		comment?: string | null;
 		date: string;
+		schedule?: string;
+		now?: string;
 		today: string;
 	} = $props();
 </script>
@@ -31,7 +36,10 @@
 		{/if}
 	</div>
 	<div class="list-row-status">
-		<DueBadge {date} {today} />
+		{#if schedule}<ReminderBadge {schedule} now={now ?? ''} />{:else}<DueBadge
+				{date}
+				{today}
+			/>{/if}
 	</div>
 	<ChevronRight
 		class="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"

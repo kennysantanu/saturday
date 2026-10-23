@@ -217,7 +217,8 @@
 		updates: counts.update_count ?? 0,
 		people: counts.network_count ?? 0,
 		links: counts.network_link_count ?? 0,
-		interactions: counts.network_update_count ?? 0
+		interactions: counts.network_update_count ?? 0,
+		reminders: counts.reminder_count ?? 0
 	});
 	function databaseRows(
 		current: Record<string, number | undefined>,
@@ -230,7 +231,8 @@
 			{ label: 'Job updates', current: a.updates, incoming: b.updates },
 			{ label: 'People', current: a.people, incoming: b.people },
 			{ label: 'Relationships', current: a.links, incoming: b.links },
-			{ label: 'Interactions', current: a.interactions, incoming: b.interactions }
+			{ label: 'Interactions', current: a.interactions, incoming: b.interactions },
+			{ label: 'Reminders', current: a.reminders, incoming: b.reminders }
 		];
 	}
 	const backupRows = $derived(
@@ -737,7 +739,7 @@
 					<ConfirmDialog
 						bind:open={confirmRestore}
 						title="Replace current records?"
-						description="All current jobs, people, relationships and history will be replaced. A complete recovery backup will be kept."
+						description="All current jobs, people, relationships, reminders and history will be replaced. A complete recovery backup will be kept."
 						confirmLabel="Replace records"
 						formId="restore-backup-form"
 						destructive

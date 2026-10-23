@@ -33,7 +33,7 @@
 		<Notice tone="error" title="Check the highlighted fields" />
 	{/if}
 	<form method="POST" use:enhance={guard.enhance} oninput={guard.markDirty} class="space-y-6">
-		<PersonFields value={values} {errors} withFollowUp />
+		<PersonFields value={values} {errors} />
 		<div class="form-actions justify-end">
 			<Button href={back.href} variant="ghost" size="lg">Cancel</Button>
 			<Button type="submit" size="lg">Save person</Button>

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
-	import DueBadge from './due-badge.svelte';
+	import ReminderBadge from './reminder-badge.svelte';
 	import { formatDate, initialOf } from '$lib/format';
 
 	let {
@@ -9,18 +9,20 @@
 		name,
 		role,
 		organization,
-		followUpDate,
+		nextReminder,
 		latestInteractionDate,
-		today
+		today,
+		now
 	}: {
 		href: string;
 		recordNumber: number;
 		name: string;
 		role?: string | null;
 		organization?: string | null;
-		followUpDate?: string | null;
+		nextReminder?: string | null;
 		latestInteractionDate?: string | null;
 		today: string;
+		now?: string;
 	} = $props();
 </script>
 
@@ -41,10 +43,15 @@
 		{/if}
 	</div>
 	<div class="list-row-status">
-		{#if followUpDate}
-			<span><span class="sr-only">Follow-up: </span><DueBadge date={followUpDate} {today} /></span>
+		{#if nextReminder}
+			<span
+				><span class="sr-only">Reminder: </span><ReminderBadge
+					schedule={nextReminder}
+					now={now ?? today + 'T00:00'}
+				/></span
+			>
 		{:else}
-			<span class="meta-text text-muted-foreground">No follow-up scheduled</span>
+			<span class="meta-text text-muted-foreground">No active reminders</span>
 		{/if}
 		<span class="meta-text text-muted-foreground"
 			>Last contact: {latestInteractionDate

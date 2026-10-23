@@ -161,29 +161,6 @@
 					/>
 				{/snippet}
 			</Field>
-			<Field id="follow_up_date" label="Follow-up date" error={errors.follow_up_date}>
-				{#snippet control(attrs)}
-					<Input {...attrs} name="follow_up_date" type="date" value={text('follow_up_date')} />
-				{/snippet}
-			</Field>
-			<div class="sm:col-span-2">
-				<Field
-					id="follow_up_comment"
-					label="Follow-up comment"
-					error={errors.follow_up_comment}
-					hint="Set a follow-up date to add a comment. Clear the date to remove the follow-up."
-				>
-					{#snippet control(attrs)}
-						<Textarea
-							{...attrs}
-							name="follow_up_comment"
-							rows={3}
-							maxlength={10000}
-							value={text('follow_up_comment')}
-						/>
-					{/snippet}
-				</Field>
-			</div>
 		</div>
 	</div>
 </details>

@@ -110,7 +110,7 @@
 		}
 	] as const);
 	const dateGroups = [
-		{ key: 'follow_up', label: 'Follow-up date' },
+		{ key: 'follow_up', label: 'Reminder date' },
 		{ key: 'deadline', label: 'Application deadline' }
 	] as const;
 </script>
@@ -417,6 +417,7 @@
 							company={job.company}
 							status={job.status}
 							latestUpdate={job.latestUpdate}
+							nextReminder={job.nextReminder}
 							isStarred={job.isStarred}
 							score={job.score}
 						/>{/each}

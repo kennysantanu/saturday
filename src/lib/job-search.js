@@ -7,7 +7,7 @@ export const sortOptions = [
 	{ value: 'updated', label: 'Recently updated' },
 	{ value: 'created', label: 'Recently created' },
 	{ value: 'score', label: 'Highest score' },
-	{ value: 'follow_up', label: 'Earliest follow-up' },
+	{ value: 'follow_up', label: 'Earliest reminder' },
 	{ value: 'deadline', label: 'Earliest deadline' }
 ];
 export const dateModes = ['any', 'unset', 'set', 'overdue', 'today', 'upcoming', 'range'];
@@ -90,7 +90,7 @@ export function filterChips(values, stages = []) {
 		work_arrangement: 'Work arrangement',
 		employment_type: 'Employment type',
 		created_via: 'Created via',
-		follow_up: 'Follow-up',
+		follow_up: 'Reminder',
 		deadline: 'Deadline',
 		score: 'Score',
 		score_min: 'Minimum score',
@@ -99,8 +99,8 @@ export function filterChips(values, stages = []) {
 		created_to: 'Created to',
 		updated_from: 'Updated from',
 		updated_to: 'Updated to',
-		follow_up_from: 'Follow-up from',
-		follow_up_to: 'Follow-up to',
+		follow_up_from: 'Reminder from',
+		follow_up_to: 'Reminder to',
 		deadline_from: 'Deadline from',
 		deadline_to: 'Deadline to'
 	};

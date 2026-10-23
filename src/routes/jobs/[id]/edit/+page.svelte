@@ -25,9 +25,7 @@
 		location: values.location ?? job.location,
 		compensation: values.compensation ?? job.compensation,
 		source: values.source ?? job.source,
-		application_deadline: values.application_deadline ?? job.applicationDeadline,
-		follow_up_date: values.follow_up_date ?? job.followUpDate,
-		follow_up_comment: values.follow_up_comment ?? job.followUpComment
+		application_deadline: values.application_deadline ?? job.applicationDeadline
 	});
 	const starred = $derived(
 		values.is_starred !== undefined ? values.is_starred === '1' : Boolean(job.isStarred)

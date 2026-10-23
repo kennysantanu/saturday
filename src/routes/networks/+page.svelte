@@ -44,7 +44,7 @@
 		if (followUp && followUp !== 'all')
 			list.push({
 				key: 'follow_up',
-				label: `Follow-up: ${followUpLabels[followUp] ?? followUp}`,
+				label: `Reminder: ${followUpLabels[followUp] ?? followUp}`,
 				href: without('follow_up')
 			});
 		return list;
@@ -91,7 +91,7 @@
 			</Field>
 		</div>
 		<div class="grid gap-5 sm:grid-cols-2">
-			<Field id="follow_up" label="Follow-up" error={data.errors.follow_up}>
+			<Field id="follow_up" label="Reminder" error={data.errors.follow_up}>
 				{#snippet control(attrs)}<NativeSelect
 						{...attrs}
 						name="follow_up"
@@ -111,7 +111,7 @@
 						value={data.filters.sort ?? 'name'}
 					>
 						<option value="name">Name</option>
-						<option value="follow_up">Earliest follow-up</option>
+						<option value="follow_up">Earliest reminder</option>
 						<option value="latest_interaction">Latest recorded interaction</option>
 					</NativeSelect>{/snippet}
 			</Field>
@@ -136,7 +136,8 @@
 						name={person.name}
 						role={person.role}
 						organization={person.organization}
-						followUpDate={person.follow_up_date}
+						nextReminder={person.next_reminder_at}
+						now={data.now}
 						latestInteractionDate={person.latest_interaction_date}
 						today={data.today}
 					/>

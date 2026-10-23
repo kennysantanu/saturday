@@ -17,7 +17,7 @@ For an isolated source workspace, set absolute `SATURDAY_DB_PATH`, `SATURDAY_FIL
 
 Development remains unversioned until `0.1.0`: leave placeholder package/lockfile versions unchanged and do not create numbered beta releases. Breaking development APIs/storage may require an explicitly authorized reset; startup and setup must never reset data silently. Retain compatible backups and their source/build when testing upgrades.
 
-Dashboard, Jobs, Network, Documents/Profile, backups, local MCP, extensions, managed installers, and manual update/repair/uninstall are implemented. Implementation does not establish platform certification. The current development database format is `saturday.database.workflow`, schema 1. Older numeric-format databases/backups reject unchanged; use disposable storage for development.
+Dashboard, Jobs, Network, Documents/Profile, backups, local MCP, extensions, managed installers, and manual update/repair/uninstall are implemented. Implementation does not establish platform certification. The current development database format is `saturday.database.workflow`, schema 2. Schema 1 workflow databases and backups migrate their saved follow-ups into shared reminders; older numeric-format databases/backups reject unchanged; use disposable storage for development.
 
 After `0.1.0`, released storage baselines are immutable and supported data changes use migrations independently of application version numbers.
 
@@ -73,26 +73,26 @@ For the optional large-archive case, run `node --max-old-space-size=128 --test t
 
 ## Source map
 
-| Location                                                          | Responsibility                                                                    |
-| ----------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `src/routes/`                                                     | SvelteKit pages, form actions, HTTP endpoints, and layout                         |
-| `src/lib/components/app/`                                         | Shared app UI patterns                                                            |
-| `src/lib/components/ui/`                                          | UI primitives                                                                     |
-| `src/lib/job-fields.js`, `src/lib/job-search.js`                  | Job field registry and browser-safe search/URL choices                            |
-| `src/lib/server/services.js`, `networks.js`, `validation.js`      | Record services, queries, and validation                                          |
-| `src/lib/server/workflow.js`                                      | Workflow configuration, starting-stage selection, ordering, and usage guards      |
-| `src/lib/server/access-settings.js`, `access-auth.js`             | Private access preferences, password verification, and browser sessions           |
-| `src/lib/server/database.js`, `migrations.js`, `compatibility.js` | SQLite access, schema, and supported formats                                      |
-| `src/lib/server/backups.js`, `src/lib/server/files/`              | Database/file backups, documents, PDF, journals, and coordinated recovery         |
-| `src/lib/server/mcp-server.js`                                    | Core tool schemas and adapters; extension tool registration                       |
-| `src/lib/server/installation.js`                                  | Shared descriptor, paths, setup helpers, client configuration, and OS integration |
-| `src/lib/server/server-lifecycle.js`                              | Owned UI supervisor, readiness, and lifecycle admission                           |
-| `src/lib/server/installation-operations.js`                       | Update selection, external controller, publication, repair, and uninstall         |
-| `src/lib/server/extensions.js`, `src/lib/extension-ui.js`         | Extension runtime/storage services and public browser exports                     |
-| `scripts/`                                                        | Setup/build/run, installer, backup/recovery, and extension commands               |
-| `tests/`                                                          | Service, process, CLI, MCP, HTTP, browser, and UI-convention checks               |
-| `examples/extensions/interview-practice/`                         | Portable extension example                                                        |
-| `docs/`                                                           | User, assistant, and contributor guides                                           |
+| Location                                                                     | Responsibility                                                                    |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `src/routes/`                                                                | SvelteKit pages, form actions, HTTP endpoints, and layout                         |
+| `src/lib/components/app/`                                                    | Shared app UI patterns                                                            |
+| `src/lib/components/ui/`                                                     | UI primitives                                                                     |
+| `src/lib/job-fields.js`, `src/lib/job-search.js`                             | Job field registry and browser-safe search/URL choices                            |
+| `src/lib/server/services.js`, `networks.js`, `reminders.js`, `validation.js` | Record services, queries, and validation                                          |
+| `src/lib/server/workflow.js`                                                 | Workflow configuration, starting-stage selection, ordering, and usage guards      |
+| `src/lib/server/access-settings.js`, `access-auth.js`                        | Private access preferences, password verification, and browser sessions           |
+| `src/lib/server/database.js`, `migrations.js`, `compatibility.js`            | SQLite access, schema, and supported formats                                      |
+| `src/lib/server/backups.js`, `src/lib/server/files/`                         | Database/file backups, documents, PDF, journals, and coordinated recovery         |
+| `src/lib/server/mcp-server.js`                                               | Core tool schemas and adapters; extension tool registration                       |
+| `src/lib/server/installation.js`                                             | Shared descriptor, paths, setup helpers, client configuration, and OS integration |
+| `src/lib/server/server-lifecycle.js`                                         | Owned UI supervisor, readiness, and lifecycle admission                           |
+| `src/lib/server/installation-operations.js`                                  | Update selection, external controller, publication, repair, and uninstall         |
+| `src/lib/server/extensions.js`, `src/lib/extension-ui.js`                    | Extension runtime/storage services and public browser exports                     |
+| `scripts/`                                                                   | Setup/build/run, installer, backup/recovery, and extension commands               |
+| `tests/`                                                                     | Service, process, CLI, MCP, HTTP, browser, and UI-convention checks               |
+| `examples/extensions/interview-practice/`                                    | Portable extension example                                                        |
+| `docs/`                                                                      | User, assistant, and contributor guides                                           |
 
 ## Local workflow and access verification — 2026-10-21
 
@@ -116,7 +116,7 @@ Regression entry points are `tests/workflow.test.mjs`, `tests/workflow.integrati
 
 | Store              | Current contract                                                                                     |
 | ------------------ | ---------------------------------------------------------------------------------------------------- |
-| Database           | `saturday.database.workflow`, schema 1; `app_metadata` holds the dataset UUID                        |
+| Database           | `saturday.database.workflow`, schema 2; `app_metadata` holds the dataset UUID                        |
 | Files              | `saturday.files.numeric`, manifest 2; supported version 1 upgrades while retaining original metadata |
 | Coordinated backup | `saturday.backup-pair.numeric`, version 1; validates both actual artifacts and their shared dataset  |
 | Installation       | `saturday.installation`, version 1; installation ID is distinct from dataset ID                      |
@@ -135,7 +135,7 @@ For a new stored field, update the registry, migration, relevant forms, backup v
 
 Search uses bound literal-contains queries, whitelisted sorts, stable ties, read snapshots for counts/pages, and batched related records. Filters combine with AND across categories and OR within categories. UI Jobs defaults to Active; MCP defaults to All. Historical steps include inactive jobs. Dates use the host's local calendar. Filter additions must update validation, URL/chips, controls, service predicates, MCP documentation, and meaningful tests.
 
-Network follows the same validation/query conventions. General notes, relationship notes, and interaction notes are distinct. Link/unlink and interactions do not change job status/history or parent detail timestamps. Interaction dates cannot be future dates; follow-ups are independent and are not cleared by interactions. Scope updates by both person and update ID.
+Network follows the same validation/query conventions. General notes, relationship notes, and interaction notes are distinct. Link/unlink and interactions do not change job status/history or parent detail timestamps. Interaction dates cannot be future dates; reminders are independent and are not dismissed by interactions. Scope updates by both person and update ID.
 
 ### Workflow stages and history
 
