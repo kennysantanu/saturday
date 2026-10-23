@@ -538,7 +538,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			score_comment: 'Initial fit'
 		});
 		assert.equal(job.id, 1);
-		assert.equal(listing.tools.length, 47);
+		assert.equal(listing.tools.length, 49);
 		for (const name of [
 			'list_networks',
 			'get_network',

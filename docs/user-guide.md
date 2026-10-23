@@ -85,6 +85,8 @@ On job or person detail, open the **⋮ actions menu** and choose **Delete job**
 - **Delete job** removes the job, its complete history, reminder, person relationships and all job-specific documents. Linked people, their interactions and documents stored elsewhere remain.
 - **Delete person** removes that person's interactions, reminder and job relationships. Linked jobs and their history/documents remain.
 
+Your connected assistant can also delete a specific job or person through MCP with the same scope and recovery behavior. It must read the record, explain what will be removed and obtain your explicit authorization. A request to close a job or unlink someone does not authorize permanent deletion.
+
 The counts describe the last loaded state. Confirmation includes changes saved before deletion starts, so newly added history, relationships or job documents are included. Use **Unlink** to remove just one relationship, or **Change stage** to close an application while keeping its history and files.
 
 Successful deletion returns to your originating list or job and shows a confirmation. If job document cleanup is interrupted, Saturday finishes it during recovery before accepting conflicting data access. A recovery-required message means cleanup has not finished; do not submit another deletion. If reopening cannot finish it, use the [host recovery command](agent-guide.md#file-storage-and-recovery-commands). Existing backups retain their contents; restoring one is a separate operation that may replace newer changes.
