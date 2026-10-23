@@ -1,3 +1,4 @@
+import { recoverJobDeletion } from '../src/lib/server/job-deletion.js';
 import { parseArgs } from 'node:util';
 import { resolve } from 'node:path';
 import {
@@ -9,6 +10,7 @@ import {
 } from '../src/lib/server/backups.js';
 const jsonOutput = process.argv.includes('--json');
 try {
+	await recoverJobDeletion();
 	const { values, positionals } = parseArgs({
 		options: {
 			inspect: { type: 'boolean' },

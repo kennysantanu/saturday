@@ -23,8 +23,62 @@ import {
 	UPLOAD_LIMIT,
 	TEXT_LIMIT,
 	verifiedPath,
+	regularPath,
 	LocalFileStore
 } from './store.js';
+
+// Internal bulk helpers: callers own the file lock and coordinate the database outcome.
+export async function inspectJobDeletionDocuments(m, jobId, recorded = null) {
+	const prefix = `jobs/${jobId}/`;
+	const documents = m.documents.filter((d) => d.key.startsWith(prefix));
+	const expected = recorded ?? documents;
+	for (const d of documents)
+		if (!expected.some((item) => item.id === d.id && item.key === d.key))
+			reject(
+				'RECOVERY_REQUIRED',
+				'Job document identity changed during deletion. Preserve the recovery intent.'
+			);
+	const known = new Set(expected.map((d) => d.key));
+	for await (const key of new LocalFileStore().list(prefix.slice(0, -1)))
+		if (!known.has(key))
+			reject(
+				'INTEGRITY',
+				'Unregistered job file found. Use offline file recovery before deleting this job.'
+			);
+	return documents.map(({ id, key }) => ({ id, key }));
+}
+
+export async function removeJobDeletionDocuments(m, jobId, documents) {
+	await inspectJobDeletionDocuments(m, jobId, documents);
+	const ids = new Set(documents.map((d) => d.id));
+	if (
+		m.documents.some(
+			(d) => ids.has(d.id) && !documents.some((item) => item.id === d.id && item.key === d.key)
+		)
+	)
+		reject(
+			'RECOVERY_REQUIRED',
+			'A deletion document belongs to another scope. Preserve the recovery intent.'
+		);
+	if (documents.length) {
+		m.documents = m.documents.filter((d) => !ids.has(d.id));
+		await commitManifest(
+			m,
+			documents.map(({ key }) => ({ key, remove: true }))
+		);
+	}
+	const directory = await verifiedJobDirectory(jobId);
+	try {
+		await fs.rmdir(directory);
+	} catch (error) {
+		if (error.code !== 'ENOENT') throw error;
+	}
+}
+
+async function verifiedJobDirectory(jobId) {
+	// Reuse the adapter's path checks, including an empty/missing scope and its parents.
+	return regularPath(filePaths().root, `jobs/${jobId}`, true);
+}
 
 function textBytes(name, content) {
 	if (typeof name !== 'string') reject('VALIDATION', 'Enter a filename.');

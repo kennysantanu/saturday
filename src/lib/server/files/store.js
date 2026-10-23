@@ -13,10 +13,16 @@ import { randomUUID, createHash } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { getProjectRoot, withDatabase, databaseIdentity } from '../database.js';
+import {
+	getProjectRoot,
+	withDatabase,
+	databaseIdentity,
+	jobFileParentExists
+} from '../database.js';
 import { parseRecordId, recordIdInputSchema } from '../validation.js';
 import { fileType, documentDesignations } from '../../file-types.js';
 import { storageCompatibility, assertManifestCompatibility } from '../compatibility.js';
+import { assertJobDeletionAvailable } from '../job-deletion-state.js';
 
 export const UPLOAD_LIMIT = 25 * 1024 * 1024;
 export const TEXT_LIMIT = 1024 * 1024;
@@ -37,7 +43,8 @@ export class FileError extends Error {
 }
 
 export function publicFileError(e) {
-	if (e?.code === 'BUSY') return { code: 'BUSY', message: e.message };
+	if (e?.code === 'BUSY' || e?.code === 'RECOVERY_REQUIRED')
+		return { code: 'BUSY', message: e.message };
 	if (e?.code === 'FORMAT' || String(e?.message).includes('Unsupported database schema'))
 		return { code: 'FORMAT', message: e.message };
 	return e instanceof FileError
@@ -81,7 +88,7 @@ export function scopePrefix(scope = 'documents', checkJob = true, manifest) {
 	if (!parsed.success) reject('VALIDATION', 'Choose documents or a positive numeric job ID.');
 	scope = parsed.data;
 	if (checkJob) assertDataset(manifest ?? fileSession.getStore()?.manifest);
-	if (checkJob && !withDatabase((db) => db.prepare('SELECT id FROM jobs WHERE id=?').get(scope)))
+	if (checkJob && !jobFileParentExists(scope))
 		reject('NOT_FOUND', 'Job not found. Use Settings to recover unmatched attachments.');
 	return `jobs/${scope}`;
 }
@@ -326,6 +333,7 @@ export async function acquireDirectoryLock(lock, options) {
 }
 export async function withFileLock(operation, { initialize = true, allowSession = false } = {}) {
 	return withServerActivity(async () => {
+		assertJobDeletionAvailable();
 		assertInstallationStorage({ allowFileRecovery: !initialize || allowSession });
 		const p = filePaths();
 		for (const path of [p.root, p.state, p.backups]) {
@@ -340,6 +348,7 @@ export async function withFileLock(operation, { initialize = true, allowSession 
 		await fs.mkdir(p.state, { recursive: true, mode: 0o700 });
 		const release = await acquireDirectoryLock(join(p.state, 'lock'));
 		try {
+			assertJobDeletionAvailable();
 			if (!allowSession) {
 				try {
 					await fs.access(join(p.state, 'pair-session.json'));

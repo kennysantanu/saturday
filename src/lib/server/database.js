@@ -6,6 +6,7 @@ import { assertManifestCompatibility } from './compatibility.js';
 import { ServiceError } from './validation.js';
 import { dirname, resolve, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { assertJobDeletionAvailable } from './job-deletion-state.js';
 
 export function getProjectRoot() {
 	return getInstallation().code_root;
@@ -23,6 +24,7 @@ export function withDatabaseRecovery(operation) {
 	}
 }
 export function assertDatabaseAvailable() {
+	assertJobDeletionAvailable();
 	if (!recoveringFiles && existsSync(join(getInstallation().files_state, 'pair-session.json')))
 		throw Object.assign(
 			new Error(
@@ -79,6 +81,7 @@ export function withDatabase(callback) {
 // Inspect an existing database without initializing or migrating it. File backups
 // can still operate when the database is absent; a new file store binds explicitly.
 export function databaseIdentity() {
+	assertJobDeletionAvailable();
 	if (!existsSync(getDatabasePath())) return null;
 	const db = new DatabaseSync(getDatabasePath(), { readOnly: true, allowExtension: false });
 	try {
@@ -86,6 +89,19 @@ export function databaseIdentity() {
 		const identity = db.prepare('SELECT format, dataset_id FROM app_metadata WHERE id=1').get();
 		if (!identity) throw new Error('Unsupported database schema. Restart with a compatible build.');
 		return identity;
+	} finally {
+		db.close();
+	}
+}
+
+// File writers already own the file lock. Parent validation must remain read-only:
+// migrating on this connection would invert the database-gate -> file-lock order.
+export function jobFileParentExists(id) {
+	assertDatabaseAvailable();
+	const db = new DatabaseSync(getDatabasePath(), { readOnly: true, allowExtension: false });
+	try {
+		assertMigrationHistory(db);
+		return !!db.prepare('SELECT id FROM jobs WHERE id=?').get(id);
 	} finally {
 		db.close();
 	}
@@ -141,6 +157,7 @@ export function inTransaction(db, callback, { checkFiles = true } = {}) {
 	return withServerActivity(() => {
 		db.exec('BEGIN IMMEDIATE');
 		try {
+			assertDatabaseAvailable();
 			assertMigrationHistory(db);
 			if (checkFiles) assertFileStorageCompatible();
 			const result = callback();

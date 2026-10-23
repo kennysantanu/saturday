@@ -94,6 +94,14 @@ npm run files -- recover ./known-good.zip --confirm
 
 Recovery validates the archive and retains the damaged tree in private sibling recovery directories. Inspect returned paths and recovered contents before restarting or deleting recovery copies. For an interrupted coordinated restore, stop all processes and run `npm run files -- recover-pair --confirm`. Never remove the blocking marker to bypass recovery.
 
+For interrupted job document deletion, reopening Saturday normally completes cleanup. If it remains blocked, stop other web/MCP processes and run:
+
+```sh
+npm run files -- recover-job-deletion
+```
+
+Use the same installation descriptor as the app. This resumes only the previously confirmed deletion: if its database transaction did not commit, documents stay intact; after commit, remaining job documents are removed. It does not start a new deletion or restore records. Keep `job-deletion.json` and any file journal until recovery succeeds. An unsupported/foreign journal or storage error requires the matching build and storage repair; never delete markers to bypass the block. After recovery, check whether the record exists before retrying an uncertain request.
+
 Online database restore requires a healthy target. Offline recovery of a corrupt database requires stopping web/MCP and preserving the original database and SQLite sidecars. Newer schemas/manifests require a compatible application; never alter migration records or dataset IDs to bypass validation.
 
 ## Record identity and extensions

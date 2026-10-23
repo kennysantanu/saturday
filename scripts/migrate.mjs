@@ -1,6 +1,8 @@
+import { recoverJobDeletion } from '../src/lib/server/job-deletion.js';
 import { migrateDatabase } from '../src/lib/server/database.js';
 
 try {
+	await recoverJobDeletion();
 	const result = migrateDatabase();
 	console.log(`Saturday database is ready (schema ${result.version}).`);
 	console.log(`Database: ${result.path}`);

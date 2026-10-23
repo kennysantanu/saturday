@@ -16,6 +16,7 @@ import {
 	networkUpdateSearchSchema,
 	localCalendarDate
 } from './validation.js';
+import { parseRecordDeletion, assertDeletionDataset } from './validation.js';
 
 const summary = `SELECT n.*, (SELECT MAX(interaction_date) FROM network_updates u WHERE u.network_id=n.id) AS latest_interaction_date, (SELECT COUNT(*) FROM network_updates u WHERE u.network_id=n.id) AS interaction_count FROM networks n`;
 const missing = (label) => {
@@ -126,7 +127,22 @@ export function listNetworks(input = {}) {
 	});
 }
 export function getNetwork(id) {
-	return read((db) => person(db, id));
+	return read((db) => ({
+		...person(db, id),
+		dataset_id: db.prepare('SELECT dataset_id FROM app_metadata WHERE id=1').get().dataset_id
+	}));
+}
+
+export function deleteNetwork(input) {
+	const values = parseRecordDeletion(input, 'network_id');
+	return write((db) => {
+		assertDeletionDataset(db, values.dataset_id);
+		person(db, values.network_id);
+		db.prepare('DELETE FROM network_updates WHERE network_id=?').run(values.network_id);
+		db.prepare('DELETE FROM job_networks WHERE network_id=?').run(values.network_id);
+		db.prepare('DELETE FROM networks WHERE id=?').run(values.network_id);
+		return { network_id: values.network_id, deleted: true };
+	});
 }
 export function createNetwork(input, createdVia = 'manual') {
 	const values = parseSchema(networkInputSchema, input),

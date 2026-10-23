@@ -1,3 +1,4 @@
+import { recoverJobDeletion } from '../src/lib/server/job-deletion.js';
 import { parseArgs } from 'node:util';
 import { resolve } from 'node:path';
 import { createReadStream } from 'node:fs';
@@ -12,6 +13,7 @@ import { publicBackupError, getBackupFile } from '../src/lib/server/backups.js';
 import { getFileBackup } from '../src/lib/server/files/backups.js';
 const jsonOutput = process.argv.includes('--json');
 try {
+	await recoverJobDeletion();
 	const { values, positionals } = parseArgs({
 		options: {
 			output: { type: 'string' },

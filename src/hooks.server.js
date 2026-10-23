@@ -11,10 +11,20 @@ import {
 import { validLogin } from '$lib/server/access-auth.js';
 import { registerExtensionRuntime } from '$lib/server/extensions.js';
 import { allowedRequestHost } from '$lib/server/access-network.js';
+import { recoverJobDeletion } from '$lib/server/job-deletion.js';
+import {
+	assertJobDeletionAvailable,
+	jobDeletionRecoveryMessage
+} from '$lib/server/job-deletion-state.js';
 let runtimeUnavailable = false;
 // Record web startup even before the first request. Stale PID leases are reclaimed offline.
 export async function init() {
 	if (building) return;
+	try {
+		await recoverJobDeletion();
+	} catch {
+		console.error(jobDeletionRecoveryMessage);
+	}
 	try {
 		await initializeAccessSettings();
 	} catch {
@@ -116,6 +126,15 @@ export async function handle({ event, resolve }) {
 				'cache-control': 'no-store'
 			}
 		});
+	try {
+		assertJobDeletionAvailable();
+	} catch {
+		if (!publicRoute && path !== '/auth/activity')
+			return new Response(jobDeletionRecoveryMessage, {
+				status: 503,
+				headers: { 'cache-control': 'no-store' }
+			});
+	}
 	if (process.env.SATURDAY_SERVER_TOKEN && local && authenticated && event.request.method === 'GET')
 		event.cookies.set(accessCookieName('control'), process.env.SATURDAY_SERVER_TOKEN, {
 			path: '/',

@@ -19,14 +19,30 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 
 	/** Overflow menu for secondary actions. Destructive items are tinted and sit last. */
-	let { label, items }: { label: string; items: MenuItem[] } = $props();
+	let {
+		label,
+		items,
+		disabled = false,
+		ref = $bindable(null)
+	}: {
+		label: string;
+		items: MenuItem[];
+		disabled?: boolean;
+		ref?: HTMLButtonElement | null;
+	} = $props();
 </script>
 
 <DropdownMenu.Root>
 	<DropdownMenu.Trigger>
 		{#snippet child({ props })}
-			<Button {...props} variant="ghost" size="icon" aria-label={label} title={label}
-				><EllipsisVertical aria-hidden="true" /></Button
+			<Button
+				bind:ref
+				{...props}
+				{disabled}
+				variant="ghost"
+				size="icon"
+				aria-label={label}
+				title={label}><EllipsisVertical aria-hidden="true" /></Button
 			>
 		{/snippet}
 	</DropdownMenu.Trigger>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import RecordDeleteAction from '$lib/components/app/record-delete-action.svelte';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { page } from '$app/state';
 	import { networkDetailUrl } from '$lib/network-navigation.js';
@@ -83,7 +84,7 @@
 			)
 		)
 			return;
-		editorFailure = form;
+		editorFailure = { ...form, values: form.values ?? {}, errors: form.errors ?? {} };
 		editor = {
 			mode:
 				form.action === 'changeStage'
@@ -238,6 +239,21 @@
 					><Plus data-icon="inline-start" />Add history</Button
 				>
 				<Button onclick={() => openEditor('move')}>Change stage</Button>
+				{#key job.id + job.dataset_id}
+					<RecordDeleteAction
+						kind="job"
+						id={job.id}
+						datasetId={job.dataset_id}
+						name={`${job.title} at ${job.company}`}
+						counts={{
+							history: updates.length,
+							relationships: data.people.total,
+							documents: data.documentsError ? null : data.documentCount
+						}}
+						action={formAction('deleteJob')}
+						disabled={!!editor || networkNoteOpen || !!data.personPicker || scoreOpen}
+					/>
+				{/key}
 			{/snippet}
 		</PageHeader>
 
