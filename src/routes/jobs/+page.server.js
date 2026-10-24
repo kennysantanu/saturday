@@ -1,3 +1,4 @@
+import { tagPickerData } from '$lib/server/tag-forms.js';
 import { listWorkflowStages } from '$lib/server/workflow.js';
 import { redirect } from '@sveltejs/kit';
 import { searchJobs, ValidationError } from '$lib/server/services.js';
@@ -10,6 +11,7 @@ export function load({ url }) {
 	try {
 		const filters = parseSchema(jobSearchSchema, { ...input, limit: 50 });
 		const result = searchJobs(filters);
+		const tagOptions = tagPickerData('job', filters.tag_ids);
 		let canonical = searchUrl(filters, result.page);
 		const saved = url.searchParams.get('saved');
 		if (saved === 'job-deleted' || saved === 'job-missing') {
@@ -20,10 +22,11 @@ export function load({ url }) {
 		if (`${url.pathname}${url.search}` !== canonical) redirect(303, canonical);
 		return {
 			...result,
+			tagOptions,
 			stages,
 			filters,
 			errors: {},
-			chips: filterChips(filters, stages),
+			chips: filterChips(filters, stages, tagOptions.selectedTags),
 			previous: result.page > 1 ? searchUrl(filters, result.page - 1) : null,
 			next: result.page < result.totalPages ? searchUrl(filters, result.page + 1) : null
 		};
@@ -31,6 +34,7 @@ export function load({ url }) {
 		if (!(error instanceof ValidationError)) throw error;
 		return {
 			stages,
+			tagOptions: tagPickerData('job'),
 			jobs: [],
 			total: 0,
 			totalJobs: 0,

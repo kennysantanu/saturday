@@ -223,6 +223,12 @@ test('job and person reminder UI supports fixed schedules, dismissal, past editi
 		assert.equal(reminders.listReminders({ job_id: j.id, view: 'inactive' }).total, 0);
 		await settle();
 		step = 'combined job history';
+		// Parent metadata and reminder removal can leave this action underneath sticky navigation.
+		// Put the actual target in clear view before a pointer click.
+		await page.$eval('button::-p-text(Add history)', (button) =>
+			button.scrollIntoView({ block: 'center' })
+		);
+		await settle();
 		await button('Add history');
 		await page.waitForSelector('#history-note');
 		await page.type('#history-note', 'History with reminder');

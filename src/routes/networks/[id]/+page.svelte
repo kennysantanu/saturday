@@ -1,4 +1,5 @@
 <script lang="ts">
+	import RecordTags from '$lib/components/app/record-tags.svelte';
 	import RemindersSection from '$lib/components/app/reminders-section.svelte';
 	import ActivityReminderFields from '$lib/components/app/activity-reminder-fields.svelte';
 	import type { ReminderDraft } from '$lib/reminders';
@@ -164,6 +165,7 @@
 			{/key}
 		{/snippet}
 	</PageHeader>
+	<RecordTags collection="person" ownerId={person.id} initial={data.tagOptions} />
 	{#if data.missingJob}<Notice title="Person saved"
 			>The originating job is no longer available. This person is saved in Network.</Notice
 		>{/if}

@@ -1,3 +1,4 @@
+import { tagPickerData } from '$lib/server/tag-forms.js';
 import { localScheduleNow } from '$lib/server/reminders.js';
 import { redirect } from '@sveltejs/kit';
 import { listNetworks } from '$lib/server/networks.js';
@@ -9,6 +10,7 @@ export function load({ url }) {
 			.filter((key) => url.searchParams.has(key))
 			.map((key) => [key, url.searchParams.get(key)])
 	);
+	filters.tag_ids = url.searchParams.getAll('tag_ids');
 	function href(page) {
 		const params = new URLSearchParams();
 		for (const key of ['name', 'role', 'organization', 'follow_up', 'sort'])
@@ -18,6 +20,7 @@ export function load({ url }) {
 				!(key === 'sort' && filters[key] === 'name')
 			)
 				params.set(key, filters[key].trim());
+		for (const id of filters.tag_ids) params.append('tag_ids', id);
 		if (page > 1) params.set('page', String(page));
 		const saved = url.searchParams.get('saved');
 		if (saved === 'person-deleted' || saved === 'person-missing') params.set('saved', saved);
@@ -28,17 +31,22 @@ export function load({ url }) {
 		if (url.pathname + url.search !== href(result.page)) redirect(303, href(result.page));
 		return {
 			...result,
+			tagOptions: tagPickerData('person', filters.tag_ids),
 			filters,
 			errors: {},
 			today: localCalendarDate(),
 			now: localScheduleNow(),
 			previous: result.page > 1 ? href(result.page - 1) : null,
 			next: result.page < result.totalPages ? href(result.page + 1) : null,
-			filtered: !!Object.keys(filters).filter((key) => key !== 'page' && key !== 'sort').length
+			filtered: !!Object.keys(filters).filter(
+				(key) =>
+					key !== 'page' && key !== 'sort' && (key !== 'tag_ids' || filters.tag_ids.length > 0)
+			).length
 		};
 	} catch (e) {
 		if (!(e instanceof ValidationError)) throw e;
 		return {
+			tagOptions: tagPickerData('person'),
 			networks: [],
 			total: 0,
 			page: 1,

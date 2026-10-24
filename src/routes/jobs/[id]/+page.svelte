@@ -1,4 +1,5 @@
 <script lang="ts">
+	import RecordTags from '$lib/components/app/record-tags.svelte';
 	import RemindersSection from '$lib/components/app/reminders-section.svelte';
 	import RecordDeleteAction from '$lib/components/app/record-delete-action.svelte';
 	import type { SubmitFunction } from '@sveltejs/kit';
@@ -246,6 +247,7 @@
 				{/key}
 			{/snippet}
 		</PageHeader>
+		<RecordTags collection="job" ownerId={job.id} initial={data.tagOptions} />
 
 		{#if data.outsideResults}<Notice title="This job is outside the original results"
 				>Its current details no longer match those filters. <a

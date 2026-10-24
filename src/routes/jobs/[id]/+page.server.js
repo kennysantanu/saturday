@@ -1,3 +1,4 @@
+import { tagPickerData } from '$lib/server/tag-forms.js';
 import { reminderActions, loadReminders, optionalReminder } from '$lib/server/reminder-actions.js';
 import { searchFromUrl } from '$lib/job-search.js';
 import { jobReturn, jobDetailUrl } from '$lib/job-navigation.js';
@@ -101,6 +102,10 @@ export async function load({ params, url }) {
 		}
 	}
 	return {
+		tagOptions: tagPickerData(
+			'job',
+			job.tags.map((tag) => tag.id)
+		),
 		reminderData: loadReminders({ job_id: params.id }, url.searchParams),
 		job,
 		outsideResults,

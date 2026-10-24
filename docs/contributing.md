@@ -17,7 +17,7 @@ For an isolated source workspace, set absolute `SATURDAY_DB_PATH`, `SATURDAY_FIL
 
 Development remains unversioned until `0.1.0`: leave placeholder package/lockfile versions unchanged and do not create numbered beta releases. Breaking development APIs/storage may require an explicitly authorized reset; startup and setup must never reset data silently. Retain compatible backups and their source/build when testing upgrades.
 
-Dashboard, Jobs, Network, Documents/Profile, backups, local MCP, extensions, managed installers, and manual update/repair/uninstall are implemented. Implementation does not establish platform certification. The current development database format is `saturday.database.workflow`, schema 2. Schema 1 workflow databases and backups migrate their saved follow-ups into shared reminders; older numeric-format databases/backups reject unchanged; use disposable storage for development.
+Dashboard, Jobs, Network, Documents/Profile, backups, local MCP, extensions, managed installers, and manual update/repair/uninstall are implemented. Implementation does not establish platform certification. The current development database format is `saturday.database.workflow`, schema 3. Schema 1 workflow databases and backups migrate their saved follow-ups into shared reminders; schemas 1–2 upgrade with empty independent tag collections; older numeric-format databases/backups reject unchanged; use disposable storage for development.
 
 After `0.1.0`, released storage baselines are immutable and supported data changes use migrations independently of application version numbers.
 
@@ -116,14 +116,14 @@ Regression entry points are `tests/workflow.test.mjs`, `tests/workflow.integrati
 
 | Store              | Current contract                                                                                     |
 | ------------------ | ---------------------------------------------------------------------------------------------------- |
-| Database           | `saturday.database.workflow`, schema 2; `app_metadata` holds the dataset UUID                        |
+| Database           | `saturday.database.workflow`, schema 3; `app_metadata` holds the dataset UUID                        |
 | Files              | `saturday.files.numeric`, manifest 2; supported version 1 upgrades while retaining original metadata |
 | Coordinated backup | `saturday.backup-pair.numeric`, version 1; validates both actual artifacts and their shared dataset  |
 | Installation       | `saturday.installation`, version 1; installation ID is distinct from dataset ID                      |
 
 Earlier `saturday.database.numeric` and UUID-era databases/backups, plus unbound file formats/pairs, are unsupported and reject unchanged. Supported manifest version 1 is already dataset-bound; its upgrade to version 2 adds Profile designations and preserves the existing Master CV. Never alter migration records or dataset IDs to bypass compatibility checks.
 
-Jobs, people, and both histories use independent positive safe integer IDs. Same-dataset restores retain the higher current/incoming allocator counters. IDs represented by same-dataset job-file folders are also reserved, preventing attachment reassignment after an older database restore. Restoring another dataset uses its identity/counters.
+Jobs, people, tag definitions and both histories use independent positive safe integer IDs. Same-dataset restores retain the higher current/incoming allocator counters. IDs represented by same-dataset job-file folders are also reserved, preventing attachment reassignment after an older database restore. Restoring another dataset uses its identity/counters.
 
 Database and files remain independent. Normal `jobs/<id>` access requires matching dataset identities; user documents and explicit recovery remain available across a mismatch. Add missing refuses cross-dataset merges into populated file collections; Replace installs the incoming collection. Either store can be restored first, with attachment access waiting for a match.
 
@@ -136,6 +136,12 @@ For a new stored field, update the registry, migration, relevant forms, backup v
 Search uses bound literal-contains queries, whitelisted sorts, stable ties, read snapshots for counts/pages, and batched related records. Filters combine with AND across categories and OR within categories. UI Jobs defaults to Active; MCP defaults to All. Historical steps include inactive jobs. Dates use the host's local calendar. Filter additions must update validation, URL/chips, controls, service predicates, MCP documentation, and meaningful tests.
 
 Network follows the same validation/query conventions. General notes, relationship notes, and interaction notes are distinct. Link/unlink and interactions do not change job status/history or parent detail timestamps. Interaction dates cannot be future dates; reminders are independent and are not dismissed by interactions. Scope updates by both person and update ID.
+
+### Tags
+
+`job_tags`/`network_tags` store independent definition collections; `job_tag_assignments`/`network_tag_assignments` join owners to definitions with unique pairs and reverse tag indexes. `tags.js` owns shared name normalization and color/contrast helpers; server tag services own validation, collection/owner scope and transactions. Names are unique canonical lowercase ASCII words joined with underscores; UI labels replace underscores with spaces. Store only the name and opaque six-digit hex color, without a separate name key or display field. Backup schema checks, fingerprints, counters and replacement ordering include all four tables.
+
+Merges retain the first ID, union assignments without duplicates and remove the second definition atomically. Definitions and assignments remain independent of job placement/history and person relationships. Assignment changes bump owner timestamps; definition-only edits do not. Parent forms distinguish omitted selections from explicitly empty selections. Tag picker creation is a separate request with parent-draft/pending guards. Regression entry points are `tests/tags.test.mjs` and `tests/tags.integration.mjs`.
 
 ### Workflow stages and history
 

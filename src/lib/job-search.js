@@ -77,9 +77,10 @@ export function searchUrl(values, page = 1) {
 	return `/jobs${params.size ? `?${params}` : ''}`;
 }
 
-export function filterChips(values, stages = []) {
+export function filterChips(values, stages = [], tags = []) {
 	const defaults = defaultJobFilters;
 	const labels = {
+		tag_ids: 'Tag',
 		query: 'Search jobs',
 		title: 'Title contains',
 		company: 'Company contains',
@@ -132,14 +133,25 @@ export function filterChips(values, stages = []) {
 				next[`${key}_to`] = '';
 			}
 			let name = selection;
-			if (key === 'current_stage' || key === 'milestone_stage')
+			if (key === 'tag_ids')
+				name =
+					tags.find((tag) => String(tag.id) === String(selection))?.display_name ??
+					`Unavailable tag #${selection}`;
+			else if (key === 'current_stage' || key === 'milestone_stage')
 				name = stages.find((stage) => String(stage.id) === String(selection))?.name ?? selection;
 			else if (selection === 'unset')
 				name = key === 'follow_up' ? 'Not scheduled' : 'Not specified';
 			else if (selection === 'not_starred') name = 'Not starred';
 			else if (key === 'follow_up' && selection === 'set') name = 'Scheduled';
 			else if (selection === 'set') name = 'Specified';
-			return { key: `${key}:${selection}`, label: `${label}: ${name}`, href: searchUrl(next) };
+			return {
+				key: `${key}:${selection}`,
+				label: `${label}: ${name}`,
+				href: searchUrl(next),
+				...(key === 'tag_ids'
+					? { color: tags.find((tag) => String(tag.id) === String(selection))?.color }
+					: {})
+			};
 		});
 	});
 }
