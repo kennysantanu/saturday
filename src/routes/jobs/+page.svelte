@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { validTagSelection } from '$lib/tags.js';
+	import TagPicker from '$lib/components/app/tag-picker.svelte';
 	import { onMount, tick, untrack } from 'svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Briefcase from '@lucide/svelte/icons/briefcase';
@@ -24,7 +26,9 @@
 
 	let { data } = $props();
 	// Draft controls change only on Apply; URL-backed data remains the applied result.
-	let values = $state(untrack(() => ({ ...data.filters })));
+	let values = $state(
+		untrack(() => ({ ...data.filters, tag_ids: validTagSelection(data.filters.tag_ids) }))
+	);
 	let hydrated = $state(false);
 	let hadHistorical = untrack(
 		() => data.filters.current_stage.length + data.filters.milestone_stage.length > 0
@@ -42,6 +46,7 @@
 	$effect(() => {
 		values = {
 			...data.filters,
+			tag_ids: validTagSelection(data.filters.tag_ids),
 			current_stage: data.filters.current_stage.map(String),
 			milestone_stage: data.filters.milestone_stage.map(String)
 		};
@@ -373,6 +378,14 @@
 				</div>
 			</details>
 		{/snippet}
+		<TagPicker
+			collection="job"
+			initial={data.tagOptions}
+			bind:selected={values.tag_ids}
+			allowCreate={false}
+			marker={false}
+			error={errors.tag_ids}
+		/>
 	</FilterBar>
 
 	<FilterChips chips={data.chips} />
@@ -411,6 +424,7 @@
 			{:else}
 				<Card.Root class="gap-0 divide-y divide-border p-0">
 					{#each data.jobs as job (job.id)}<JobRow
+							tags={job.tags}
 							recordNumber={job.id}
 							href={jobDetailUrl(job.id, page.url.pathname + page.url.search)}
 							title={job.title}

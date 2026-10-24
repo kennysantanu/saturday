@@ -42,7 +42,17 @@
 	{#if errors.form}<Notice tone="error" title="Changes were not saved">{errors.form}</Notice>{/if}
 
 	<form method="POST" use:enhance={guard.enhance} oninput={guard.markDirty} class="space-y-6">
-		<JobFields value={current} {starred} {errors} mode="edit" detailsOpen />
+		<JobFields
+			tagData={{
+				...data.tagOptions,
+				selectedTags: form?.tagSelection ?? data.tagOptions.selectedTags
+			}}
+			value={current}
+			{starred}
+			{errors}
+			mode="edit"
+			detailsOpen
+		/>
 		<div class="form-actions justify-end">
 			<Button
 				href={'/jobs/' + job.id + '?return_to=' + encodeURIComponent(data.returnTo)}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import TagCollectionSettings from '$lib/components/app/tag-collection-settings.svelte';
 	import ThemeSettings from '$lib/components/app/theme-settings.svelte';
 	import WorkflowSettings from '$lib/components/app/workflow-settings.svelte';
 	import { checkAuthResponse } from '$lib/auth-notice.svelte';
@@ -65,6 +66,7 @@
 		{ id: 'password', label: 'Password' },
 		{ id: 'lan', label: 'LAN access' },
 		{ id: 'workflow', label: 'Workflow' },
+		{ id: 'tags', label: 'Tags' },
 		{ id: 'backups', label: 'Backups' },
 		{ id: 'storage', label: 'Storage' },
 		{ id: 'assistant', label: 'Assistant' },
@@ -218,7 +220,10 @@
 		people: counts.network_count ?? 0,
 		links: counts.network_link_count ?? 0,
 		interactions: counts.network_update_count ?? 0,
-		reminders: counts.reminder_count ?? 0
+		reminders: counts.reminder_count ?? 0,
+		jobTags: counts.job_tag_count ?? 0,
+		peopleTags: counts.network_tag_count ?? 0,
+		tagLinks: (counts.job_tag_assignment_count ?? 0) + (counts.network_tag_assignment_count ?? 0)
 	});
 	function databaseRows(
 		current: Record<string, number | undefined>,
@@ -232,7 +237,10 @@
 			{ label: 'People', current: a.people, incoming: b.people },
 			{ label: 'Relationships', current: a.links, incoming: b.links },
 			{ label: 'Interactions', current: a.interactions, incoming: b.interactions },
-			{ label: 'Reminders', current: a.reminders, incoming: b.reminders }
+			{ label: 'Reminders', current: a.reminders, incoming: b.reminders },
+			{ label: 'Job tags', current: a.jobTags, incoming: b.jobTags },
+			{ label: 'People tags', current: a.peopleTags, incoming: b.peopleTags },
+			{ label: 'Tag assignments', current: a.tagLinks, incoming: b.tagLinks }
 		];
 	}
 	const backupRows = $derived(
@@ -590,6 +598,20 @@
 				unavailable={data.workflowError}
 				form={form ?? undefined}
 			/>
+			<SectionCard
+				id="tags"
+				title="Tags"
+				description="Organize jobs and people with separate colored tag collections."
+			>
+				{#if data.tagCollections}<div class="space-y-8">
+						<TagCollectionSettings
+							collection="job"
+							initial={data.tagCollections.job}
+						/><TagCollectionSettings collection="person" initial={data.tagCollections.person} />
+					</div>{:else}<Notice tone="error" title="Tags unavailable"
+						>Repair storage before editing tags.</Notice
+					>{/if}
+			</SectionCard>
 
 			<SectionCard
 				id="backups"
@@ -739,7 +761,7 @@
 					<ConfirmDialog
 						bind:open={confirmRestore}
 						title="Replace current records?"
-						description="All current jobs, people, relationships, reminders and history will be replaced. A complete recovery backup will be kept."
+						description="All current jobs, people, relationships, tags, reminders and history will be replaced. A complete recovery backup will be kept."
 						confirmLabel="Replace records"
 						formId="restore-backup-form"
 						destructive

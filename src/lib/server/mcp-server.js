@@ -147,9 +147,10 @@ server.registerTool(
 	},
 	async (input) => {
 		try {
-			const { jobs, total, page, limit, totalPages } = searchJobs(input);
+			const { jobs, total, page, limit, totalPages, unavailableTagIds } = searchJobs(input);
 			return toolResult({
 				jobs: jobs.map((job) => ({ ...jobForMcp(job, { list: true }), status: job.status.label })),
+				unavailableTagIds,
 				total,
 				page,
 				limit,

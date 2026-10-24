@@ -1,4 +1,7 @@
 <script lang="ts">
+	import TagPicker from './tag-picker.svelte';
+	import type { TagPickerData } from '$lib/tag-types';
+	import { untrack } from 'svelte';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import Field from './field.svelte';
 	import Checkbox from './checkbox.svelte';
@@ -16,15 +19,20 @@
 		starred,
 		errors,
 		mode,
-		detailsOpen
+		detailsOpen,
+		tagData
 	}: {
 		value: Record<string, string | null | undefined>;
 		starred: boolean;
 		errors: Record<string, string | undefined>;
 		mode: 'add' | 'edit';
 		detailsOpen: boolean;
+		tagData?: TagPickerData;
 	} = $props();
 	const text = (name: string) => value[name] ?? '';
+	let selectedTags = $state(
+		untrack(() => tagData?.selectedTags.map((tag) => String(tag.id)) ?? [])
+	);
 </script>
 
 <p class="text-sm text-muted-foreground">
@@ -89,6 +97,12 @@
 			checked={starred}
 			class="font-medium"
 		/>
+		{#if tagData}<TagPicker
+				collection="job"
+				initial={tagData}
+				bind:selected={selectedTags}
+				error={errors.tag_ids}
+			/>{/if}
 	</Card.Content>
 </Card.Root>
 

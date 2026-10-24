@@ -1,3 +1,4 @@
+import { tagPickerData, tagFormValues, tagFailureSelection } from '$lib/server/tag-forms.js';
 import { error, fail, redirect } from '@sveltejs/kit';
 import { getNetwork, editNetwork } from '$lib/server/networks.js';
 import { ValidationError, ServiceError } from '$lib/server/validation.js';
@@ -6,6 +7,10 @@ export function load({ params, url }) {
 	try {
 		return {
 			person: getNetwork(params.id),
+			tagOptions: tagPickerData(
+				'person',
+				getNetwork(params.id).tags.map((tag) => tag.id)
+			),
 			back: networkEditReturn(url.searchParams.get('return_to'), params.id)
 		};
 	} catch (e) {
@@ -15,17 +20,22 @@ export function load({ params, url }) {
 }
 export const actions = {
 	default: async ({ request, params, url }) => {
-		const values = Object.fromEntries(
-			Array.from((await request.formData()).entries(), ([key, value]) => [
-				key,
-				typeof value === 'string' ? value : ''
-			])
-		);
+		const values = tagFormValues(await request.formData());
 		try {
 			editNetwork(params.id, values);
 		} catch (e) {
-			if (e instanceof ValidationError) return fail(400, { errors: e.fieldErrors, values });
-			if (e instanceof ServiceError) return fail(400, { errors: { form: e.message }, values });
+			if (e instanceof ValidationError)
+				return fail(400, {
+					errors: e.fieldErrors,
+					tagSelection: tagFailureSelection('person', values),
+					values
+				});
+			if (e instanceof ServiceError)
+				return fail(400, {
+					errors: { form: e.message },
+					tagSelection: tagFailureSelection('person', values),
+					values
+				});
 			console.error('Could not edit person:', e);
 			return fail(500, {
 				errors: { form: 'Saturday could not save this person. Try again.' },

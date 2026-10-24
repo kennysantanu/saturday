@@ -82,12 +82,30 @@ Opening a person from filtered Network results preserves those filters and the l
 
 Reminder and Network interaction dialogs, plus **Edit link note** on either side of a relationship, ask before discarding unsaved edits through Cancel, Close, Escape, or the backdrop. Failed saves keep the draft for correction or sign-in and retry.
 
+## Tags
+
+Job tags and People tags are separate collections. Add tags while creating/editing a record, or choose **Edit tags** below its detail header. Search existing tags, select several, and save. Removing a selected chip removes only that assignment. Linking a person to a job keeps their tags independent.
+
+Names use letters and numbers with spaces between words. `Career faIR` is saved as `career_fair` and displayed as **career fair**. Underscores pasted into a name/search are treated as spaces. Names are limited to 50 characters after normalization; punctuation and non-ASCII letters are not supported. Names must be unique within their collection. Search ignores capitalization and treats spaces/underscores equally.
+
+Choose a custom color using the browser's native color picker or enter a six-digit hex value such as `#12abcd`. Saturday chooses readable text automatically. Tags sort alphabetically; selected tags appear first in pickers. Record lists show two tags and a count for the rest; open detail to see all. Dashboard pipeline cards remain compact.
+
+**Create a tag** inside a picker immediately saves its reusable name/color. The surrounding job/person is saved only when you submit its own form. Cancelling the editor leaves the new tag available. For a duplicate name, choose **Use existing tag**; its saved color is preserved. Without JavaScript, ordinary form submission supports the choices already shown; enhanced search, paging and inline creation require JavaScript.
+
+On Jobs or Network, select Tags and **Apply filters**. Any selected tag can match, while other filter categories must also match. Jobs keeps its Active/Closed/All selection. Applied chips remove individual filters. A deleted or merged-away tag in a bookmarked filter shows as unavailable and returns no matches until removed.
+
+Open **Settings → Tags** to create or edit definitions in either collection. Renaming or recoloring updates every display. **Delete tag**, inside its edit dialog, asks for confirmation and removes the definition and its assignments while keeping jobs and people. Unused tags remain available until deleted or merged.
+
+**Merge tags** combines exactly two tags from the same collection. Select First tag and Second tag, review the result name/color (defaulted from the first), and confirm **Merge tags**. Every record using either tag receives the result once. The first tag's ID survives and the second definition is removed; this has no Undo action. A name belonging to a third tag is rejected. For example, five jobs plus four jobs with two overlapping produces seven tagged jobs, with four assignment sets changed. Filters for the first ID continue to work; filters for the removed ID must be replaced.
+
+If another client deletes or merges a selected tag while you edit, your other draft values remain. Remove or replace the unavailable selection and retry. An expired login also keeps the draft; sign in in another tab and retry manually. Deleting a job/person removes its assignments and keeps reusable tag definitions. Database backups include tag definitions and assignments.
+
 ## Deleting jobs and people
 
 On job or person detail, open the **⋮ actions menu** and choose **Delete job** or **Delete person**. Review the named record and confirm, or Cancel. This is permanent; there is no Trash or Undo.
 
-- **Delete job** removes the job, its complete history, reminders, person relationships and all job-specific documents. Linked people, their interactions and documents stored elsewhere remain.
-- **Delete person** removes that person's interactions, reminders and job relationships. Linked jobs and their history/documents remain.
+- **Delete job** removes the job, its complete history, reminders, tag assignments, person relationships and all job-specific documents. Linked people, their interactions and documents stored elsewhere remain.
+- **Delete person** removes that person's interactions, reminders, tag assignments and job relationships. Linked jobs and their history/documents remain.
 
 Your connected assistant can also delete a specific job or person through MCP with the same scope and recovery behavior. It must read the record, explain what will be removed and obtain your explicit authorization. A request to close a job or unlink someone does not authorize permanent deletion.
 
@@ -133,11 +151,11 @@ Jobs and people show numbers such as **#123** in lists, headings, and relationsh
 
 In **Settings → Backup and restore**, choose what to include, then **Back up now**:
 
-| Contents                     | Saves                                                                     | Download                    |
-| ---------------------------- | ------------------------------------------------------------------------- | --------------------------- |
-| Database and files (default) | Core records, reusable documents, Profile selections, and job attachments | One importable combined ZIP |
-| Database only                | Jobs, people, relationships, reminders, and both histories                | SQLite backup               |
-| Files only                   | File manifest, Profile selections, reusable documents, and attachments    | File ZIP                    |
+| Contents                     | Saves                                                                            | Download                    |
+| ---------------------------- | -------------------------------------------------------------------------------- | --------------------------- |
+| Database and files (default) | Core records, reusable documents, Profile selections, and job attachments        | One importable combined ZIP |
+| Database only                | Jobs, people, relationships, tags and assignments, reminders, and both histories | SQLite backup               |
+| Files only                   | File manifest, Profile selections, reusable documents, and attachments           | File ZIP                    |
 
 Core backups exclude extension databases. Backups contain private information and are unencrypted. They are kept until you delete them; there is no automatic schedule or retention policy. Download copies to another drive to protect against disk failure.
 

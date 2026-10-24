@@ -1,9 +1,12 @@
 <script lang="ts">
+	import TagList from './tag-list.svelte';
+	import type { Tag } from '$lib/tag-types';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import ReminderBadge from './reminder-badge.svelte';
 	import { formatDate, initialOf } from '$lib/format';
 
 	let {
+		tags = [],
 		href,
 		recordNumber,
 		name,
@@ -14,6 +17,7 @@
 		today,
 		now
 	}: {
+		tags?: Tag[];
 		href: string;
 		recordNumber: number;
 		name: string;
@@ -41,6 +45,7 @@
 				{[role, organization].filter(Boolean).join(' · ')}
 			</p>
 		{/if}
+		<TagList {tags} />
 	</div>
 	<div class="list-row-status">
 		{#if nextReminder}

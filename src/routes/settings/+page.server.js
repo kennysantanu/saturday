@@ -1,3 +1,4 @@
+import { listTags } from '$lib/server/tags.js';
 import {
 	listWorkflowStages,
 	addWorkflowStage,
@@ -165,6 +166,9 @@ export async function load(event) {
 			'Workflow is unavailable. Repair storage before editing stages; diagnostics and recovery remain available.';
 	}
 	return {
+		tagCollections: workflowError
+			? null
+			: { job: listTags({ collection: 'job' }), person: listTags({ collection: 'person' }) },
 		access: event.locals.access,
 		workflowStages,
 		workflowError,

@@ -1,4 +1,7 @@
 <script lang="ts">
+	import TagPicker from './tag-picker.svelte';
+	import type { TagPickerData } from '$lib/tag-types';
+	import { untrack } from 'svelte';
 	import Field from './field.svelte';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -7,12 +10,17 @@
 	/** The fields shared by Add person and Edit person. Reminders are managed on person detail. */
 	let {
 		value,
+		tagData,
 		errors
 	}: {
 		value: Record<string, string | null | undefined>;
 		errors: Record<string, string | undefined>;
+		tagData?: TagPickerData;
 	} = $props();
 	const text = (name: string) => value[name] ?? '';
+	let selectedTags = $state(
+		untrack(() => tagData?.selectedTags.map((tag) => String(tag.id)) ?? [])
+	);
 </script>
 
 <p class="text-sm text-muted-foreground">
@@ -61,5 +69,11 @@
 				<Textarea {...attrs} name="notes" rows={5} maxlength={20000} value={text('notes')} />
 			{/snippet}
 		</Field>
+		{#if tagData}<TagPicker
+				collection="person"
+				initial={tagData}
+				bind:selected={selectedTags}
+				error={errors.tag_ids}
+			/>{/if}
 	</Card.Content>
 </Card.Root>

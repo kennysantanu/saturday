@@ -1,3 +1,4 @@
+import { tagPickerData } from '$lib/server/tag-forms.js';
 import { reminderActions, loadReminders, optionalReminder } from '$lib/server/reminder-actions.js';
 import { error, fail, redirect } from '@sveltejs/kit';
 import * as networks from '$lib/server/networks.js';
@@ -46,6 +47,10 @@ export function load({ params, url }) {
 		if (query.link_job === '1') picker = searchJobs({ view: 'all' });
 	}
 	return {
+		tagOptions: tagPickerData(
+			'person',
+			person.tags.map((tag) => tag.id)
+		),
 		reminderData: loadReminders({ network_id: params.id }, url.searchParams),
 		person,
 		returnTo,

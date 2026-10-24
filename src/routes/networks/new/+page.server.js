@@ -1,3 +1,4 @@
+import { tagPickerData, tagFormValues, tagFailureSelection } from '$lib/server/tag-forms.js';
 import { fail, redirect } from '@sveltejs/kit';
 import { createNetwork } from '$lib/server/networks.js';
 import { getJob } from '$lib/server/services.js';
@@ -16,6 +17,7 @@ export function load({ url }) {
 	const jobId = url.searchParams.get('job_id');
 	const job = findJob(jobId);
 	return {
+		tagOptions: tagPickerData('person'),
 		returnTo: jobReturn(url.searchParams.get('return_to')),
 		job: job ? { id: job.id, title: job.title, company: job.company } : null,
 		missingJob: !!jobId && !job
@@ -23,18 +25,23 @@ export function load({ url }) {
 }
 export const actions = {
 	default: async ({ request, url }) => {
-		const values = Object.fromEntries(
-			Array.from((await request.formData()).entries(), ([key, value]) => [
-				key,
-				typeof value === 'string' ? value : ''
-			])
-		);
+		const values = tagFormValues(await request.formData());
 		let person;
 		try {
 			person = createNetwork(values, 'manual');
 		} catch (e) {
-			if (e instanceof ValidationError) return fail(400, { errors: e.fieldErrors, values });
-			if (e instanceof ServiceError) return fail(400, { errors: { form: e.message }, values });
+			if (e instanceof ValidationError)
+				return fail(400, {
+					errors: e.fieldErrors,
+					tagSelection: tagFailureSelection('person', values),
+					values
+				});
+			if (e instanceof ServiceError)
+				return fail(400, {
+					errors: { form: e.message },
+					tagSelection: tagFailureSelection('person', values),
+					values
+				});
 			console.error('Could not save person:', e);
 			return fail(500, {
 				errors: { form: 'Saturday could not save this person. Try again.' },

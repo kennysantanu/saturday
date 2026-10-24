@@ -1,4 +1,6 @@
 <script lang="ts">
+	import TagList from './tag-list.svelte';
+	import type { Tag } from '$lib/tag-types';
 	import { formatReminder } from '$lib/format';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Star from '@lucide/svelte/icons/star';
@@ -7,6 +9,7 @@
 	import type { StatusInfo } from '$lib/status';
 
 	let {
+		tags = [],
 		href,
 		recordNumber,
 		title,
@@ -17,6 +20,7 @@
 		nextReminder = null,
 		score = null
 	}: {
+		tags?: Tag[];
 		href: string;
 		recordNumber: number;
 		title: string;
@@ -43,6 +47,7 @@
 			>
 		</p>
 		<p class="mt-1 text-sm text-muted-foreground">{company}</p>
+		<TagList {tags} />
 	</div>
 	<div class="list-row-status">
 		<StatusBadge {status} />

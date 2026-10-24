@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { validTagSelection } from '$lib/tags.js';
+	import { untrack } from 'svelte';
+	import TagPicker from '$lib/components/app/tag-picker.svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Users from '@lucide/svelte/icons/users';
 	import PageHeader from '$lib/components/app/page-header.svelte';
@@ -18,6 +21,10 @@
 	import { networkDetailUrl } from '$lib/network-navigation.js';
 	let { data } = $props();
 
+	let selectedTags = $state(untrack(() => validTagSelection(data.filters.tag_ids ?? [])));
+	$effect(() => {
+		selectedTags = validTagSelection(data.filters.tag_ids ?? []);
+	});
 	const followUpLabels: Record<string, string> = {
 		overdue: 'Overdue',
 		today: 'Today',
@@ -31,7 +38,7 @@
 			for (const key of ['page', ...keys]) query.delete(key);
 			return '/networks' + (query.size ? `?${query}` : '');
 		};
-		const list: { key: string; label: string; href: string }[] = [];
+		const list: { key: string; label: string; href: string; color?: string }[] = [];
 		for (const [key, label] of [
 			['name', 'Name contains'],
 			['role', 'Role contains'],
@@ -47,6 +54,19 @@
 				label: `Reminder: ${followUpLabels[followUp] ?? followUp}`,
 				href: without('follow_up')
 			});
+		for (const tag of data.tagOptions.selectedTags) {
+			const query = new URLSearchParams(page.url.searchParams);
+			query.delete('page');
+			query.delete('tag_ids');
+			for (const id of data.filters.tag_ids ?? [])
+				if (String(id) !== String(tag.id)) query.append('tag_ids', String(id));
+			list.push({
+				key: `tag_ids:${tag.id}`,
+				label: `Tag: ${tag.display_name}`,
+				href: '/networks' + (query.size ? '?' + query : ''),
+				color: tag.color
+			});
+		}
 		return list;
 	});
 </script>
@@ -116,6 +136,14 @@
 					</NativeSelect>{/snippet}
 			</Field>
 		</div>
+		<TagPicker
+			collection="person"
+			initial={data.tagOptions}
+			bind:selected={selectedTags}
+			allowCreate={false}
+			marker={false}
+			error={data.errors.tag_ids}
+		/>
 	</FilterBar>
 
 	<FilterChips {chips} />
@@ -131,6 +159,7 @@
 			<Card.Root class="gap-0 divide-y divide-border p-0">
 				{#each data.networks as person (person.id)}
 					<PersonRow
+						tags={person.tags}
 						recordNumber={person.id}
 						href={networkDetailUrl(person.id, page.url.pathname + page.url.search)}
 						name={person.name}

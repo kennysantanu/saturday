@@ -82,6 +82,28 @@ Backups are manual. `create_backup` accepts optional `contents: "database"|"file
 
 Restore tools accept managed backup IDs and return metadata rather than backup bytes. `export_backup` is an explicit path-based exception: supply a user-requested local `destination`. `import_backup_bundle({source: "/absolute/backup.zip"})` imports a local combined ZIP without restoring live data. Standalone SQLite/file archives can be imported through Settings or the CLI. Preview and authorize restoration separately. See [Backup and restore](user-guide.md#backup-and-restore) for privacy, limits, and recovery details.
 
+## Tags
+
+Tags use separate `collection: "job"` and `collection: "person"` namespaces. IDs are local to a collection; the same number can refer to different tags. Returned definitions include canonical `name`, derived `display_name`, hex `color` and timestamps. List results also include `usage_count`. IDs stay stable through rename/recolor; `display_name` is response data rather than another stored field.
+
+Names accept ASCII letters/digits with whitespace or underscores as word separators, normalize to lowercase underscore-separated words and allow at most 50 characters after normalization. `Career faIR` becomes `career_fair`, displayed as `career fair`. Reject punctuation/non-ASCII letters; no transliteration. Colors are opaque six-digit `#RRGGBB` values, returned lowercase; default `#64748b`. Never recolor or merge an existing tag implicitly after a duplicate create.
+
+| Tool         | Input and behavior                                                                                                                                                                                                                                            |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_tags`  | Collection; optional `query`, `page`, `limit` (default 20, maximum 100). Returns `tags`, counts and pagination. Search treats spaces/underscores equally, ignoring capitalization; unsupported-character queries return no matches with `invalid_query:true`. |
+| `create_tag` | Collection, `name`, optional `color`; creates a reusable definition without assigning it.                                                                                                                                                                     |
+| `edit_tag`   | Collection, `tag_id`, optional `name`/`color`; at least one field, omissions preserved. Updates every display; collisions reject.                                                                                                                             |
+| `delete_tag` | Collection, `tag_id`, `confirm:true`; permanently removes definition/assignments after explicit user authorization. Keeps parent records.                                                                                                                     |
+| `merge_tags` | Collection, ordered `first_tag_id`/`second_tag_id`, `confirm:true`, optional result `name`/`color` defaulting to the first. First ID survives; second is removed; references union without duplicates in one transaction.                                     |
+| `add_tag`    | Collection, `owner_id`, `tag_id`; idempotently assigns an existing tag without replacing other assignments.                                                                                                                                                   |
+| `remove_tag` | Collection, `owner_id`, `tag_id`; idempotently removes one assignment, retaining the definition.                                                                                                                                                              |
+
+Merge returns `tag`, `removed_tag_id`, `resulting_owner_count` (distinct union) and `changed_owner_count` (owners previously using the second tag). Merging into either source name is supported; a third tag's name rejects. Read current tags/usage and explain reference changes before authorized deletion/merge. `confirm:true` records authorization; it does not supply it. After an uncertain response inspect state before retrying; do not recreate a removed source or use an unrelated same-number tag in the other collection.
+
+Normal job/person reads expose assigned `tags`. `create_job`, `edit_job`, `create_network` and `edit_network` accept optional `tag_ids`. Omission preserves existing assignments; `[]` explicitly clears them. IDs must exist in that record's collection and saves are atomic. Prefer add/remove tools for a small change. `list_jobs` and `list_networks` accept `tag_ids`: OR within tags, AND with other filters, without duplicate records. Tag filters do not force jobs to All. Missing tag IDs return no matches with `unavailableTagIds`; rename preserves filters and merge preserves only the first ID. General job/person text queries do not search tag names.
+
+Parent deletion removes assignments while preserving reusable definitions. Definition-only edits do not change each parent's last-edited timestamp. Actual assignment changes do. Database backups/restores include both collections and their assignments.
+
 ## Reminders
 
 Reminders belong to exactly one owner: supply either `job_id` or `network_id`, never both. IDs are positive safe integers. Reminder operations return the reminder or pagination object directly; errors use the MCP error flag. No operation sends messages, changes placement, or records an appointment outcome.

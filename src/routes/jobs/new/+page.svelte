@@ -37,6 +37,10 @@
 
 	<form method="POST" use:enhance={guard.enhance} oninput={guard.markDirty} class="space-y-6">
 		<JobFields
+			tagData={{
+				...data.tagOptions,
+				selectedTags: form?.tagSelection ?? data.tagOptions.selectedTags
+			}}
 			value={values}
 			starred={values.is_starred === '1'}
 			{errors}
