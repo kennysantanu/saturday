@@ -129,12 +129,15 @@ const jobInputSchema = z.object(jobInputShape).superRefine((value, ctx) => {
 });
 // Wire schemas keep omitted keys omitted; services apply blank/null normalization and defaults.
 export function jobMcpInputShape({ partial = false, assessment = false } = {}) {
-	return Object.fromEntries(
-		[...editableJobFields, ...(assessment ? assessmentJobFields : [])].map((field) => {
-			const schema = jobFieldSchema(field, true);
-			return [field.name, partial || !field.required ? schema.optional() : schema];
-		})
-	);
+	return {
+		tag_ids: z.array(recordIdSchema).optional(),
+		...Object.fromEntries(
+			[...editableJobFields, ...(assessment ? assessmentJobFields : [])].map((field) => {
+				const schema = jobFieldSchema(field, true);
+				return [field.name, partial || !field.required ? schema.optional() : schema];
+			})
+		)
+	};
 }
 const updateSchema = z
 	.object({
@@ -209,7 +212,11 @@ const integer = (fallback, max) =>
 	);
 
 // The same names are used by URL controls, shared queries, and MCP.
+export const tagIdsSchema = z
+	.array(recordIdInputSchema)
+	.transform((values) => [...new Set(values)]);
 export const jobSearchShape = {
+	tag_ids: tagIdsSchema.default([]),
 	query: text,
 	title: text,
 	company: text,
@@ -312,6 +319,7 @@ export const networkPaginationShape = {
 	limit: integer(50, 100)
 };
 export const networkSearchShape = {
+	tag_ids: tagIdsSchema.default([]),
 	query: text,
 	name: text,
 	role: text,

@@ -1,3 +1,4 @@
+import { tagSummarySql, replaceTagAssignments, addTagFilter } from './tags.js';
 import { activityReminder, nextReminderSql, reminderFeed, localScheduleNow } from './reminders.js';
 import {
 	editableJobFields,
@@ -31,7 +32,7 @@ function shortDate(value) {
 		timeZone: 'UTC'
 	}).format(new Date(`${value}T00:00:00Z`));
 }
-const joinedJobs = `SELECT j.*, ${nextReminderSql('j', 'job_id')} AS next_reminder_at, s.name AS stage_name, s.is_closed AS stage_closed, s.is_archived AS stage_archived FROM jobs j JOIN workflow_stages s ON s.id=j.current_stage_id`;
+const joinedJobs = `SELECT j.*, ${tagSummarySql('job', 'j')} AS tags_json, ${nextReminderSql('j', 'job_id')} AS next_reminder_at, s.name AS stage_name, s.is_closed AS stage_closed, s.is_archived AS stage_archived FROM jobs j JOIN workflow_stages s ON s.id=j.current_stage_id`;
 function readUpdates(db, jobId) {
 	return db
 		.prepare(
@@ -57,6 +58,7 @@ function updateFromRow(row) {
 function jobFromRow(row, updates = []) {
 	return {
 		...jobFromStorage(row),
+		tags: JSON.parse(row.tags_json ?? '[]'),
 		nextReminder: row.next_reminder_at ?? null,
 		isActive: !row.stage_closed,
 		currentStage: {
@@ -132,6 +134,7 @@ export function createJob(input, createdVia = 'manual') {
 				},
 				createdVia
 			);
+			if (input.tag_ids !== undefined) replaceTagAssignments(db, 'job', id, input.tag_ids);
 			return jobFromRow(getJobRow(db, id), readUpdates(db, id));
 		})
 	);
@@ -162,7 +165,9 @@ export function editJob(id, input) {
 					merged[field.name] = null;
 			}
 			const values = parseJobInput(merged);
-			saveJobFields(db, id, values, editableJobFields);
+			if (editableJobFields.some((field) => input[field.name] !== undefined))
+				saveJobFields(db, id, values, editableJobFields);
+			if (input.tag_ids !== undefined) replaceTagAssignments(db, 'job', id, input.tag_ids);
 			return jobFromRow(getJobRow(db, id), readUpdates(db, id));
 		})
 	);
@@ -209,6 +214,7 @@ export function searchJobs(input = {}, { jobId } = {}) {
 		db.exec('BEGIN');
 		const clauses = [];
 		const args = [];
+		const unavailableTagIds = addTagFilter(db, 'job', 'j', filters.tag_ids, clauses, args);
 		if (jobId !== undefined) {
 			clauses.push('j.id=?');
 			args.push(parseRecordId(jobId, 'job_id'));
@@ -367,6 +373,7 @@ export function searchJobs(input = {}, { jobId } = {}) {
 				};
 			});
 		const result = {
+			unavailableTagIds,
 			jobs,
 			total,
 			page,

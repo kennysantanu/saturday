@@ -1,3 +1,4 @@
+import * as tags from './tags.js';
 import * as reminders from './reminders.js';
 import { listWorkflowStages } from './workflow.js';
 import { getInstallation } from './installation.js';
@@ -128,7 +129,8 @@ server.registerTool(
 				company: job.company,
 				status: job.status.label,
 				current_stage_id: job.currentStageId,
-				current_stage: job.currentStage
+				current_stage: job.currentStage,
+				tags: job.tags
 			});
 		} catch (error) {
 			return toolError(error);
@@ -411,6 +413,104 @@ for (const [name, description, inputSchema, operation, readOnly, destructive] of
 		}
 	);
 
+const tagScope = { collection: tags.tagCollectionSchema };
+const tagIdentity = { ...tagScope, tag_id: recordIdSchema };
+const tagOwner = { ...tagScope, owner_id: recordIdSchema };
+for (const [name, description, shape, operation, readOnly, destructive] of [
+	[
+		'list_tags',
+		'List job or person tags independently. Search ignores case and treats spaces and underscores equally. Names are canonical lowercase, display_name uses spaces. Paginated, with usage counts.',
+		{
+			...tagScope,
+			query: z.string().max(200).optional(),
+			page: z.number().int().positive().optional(),
+			limit: z.number().int().min(1).max(100).optional()
+		},
+		tags.listTags,
+		true,
+		false
+	],
+	[
+		'create_tag',
+		'Create a reusable tag in one collection. ASCII letters/numbers and spaces or underscores only; stored lowercase. Six-digit hex color. Inspect after uncertain writes; duplicates never recolor or merge.',
+		{ ...tagScope, ...tags.tagInputShape },
+		tags.createTag,
+		false,
+		false
+	],
+	[
+		'edit_tag',
+		'Rename or recolor a tag everywhere in its collection. Omitted fields are preserved. Does not merge collisions.',
+		{
+			...tagIdentity,
+			name: tags.tagInputShape.name.optional(),
+			color: tags.tagInputShape.color.optional()
+		},
+		tags.editTag,
+		false,
+		false
+	],
+	[
+		'delete_tag',
+		'Permanently delete a tag and all its assignments after explicit authorization. Keeps jobs and people. Read current definition and usage first.',
+		{ ...tagIdentity, confirm: z.literal(true) },
+		tags.deleteTag,
+		false,
+		true
+	],
+	[
+		'merge_tags',
+		'Merge exactly two tags within one collection after explicit authorization. First ID survives; union references once and remove second definition. Name/color default to first tag. Inspect state after uncertain response before retrying.',
+		{
+			...tagScope,
+			first_tag_id: recordIdSchema,
+			second_tag_id: recordIdSchema,
+			name: tags.tagInputShape.name.optional(),
+			color: tags.tagInputShape.color.optional(),
+			confirm: z.literal(true)
+		},
+		tags.mergeTags,
+		false,
+		true
+	],
+	[
+		'add_tag',
+		'Assign an existing tag to a saved owner in its collection. Idempotent; does not change other assignments.',
+		{ ...tagOwner, tag_id: recordIdSchema },
+		(input) => tags.changeTagAssignment(input, true),
+		false,
+		false
+	],
+	[
+		'remove_tag',
+		'Remove one tag assignment from an owner. Idempotent; keeps the reusable definition and other assignments.',
+		{ ...tagOwner, tag_id: recordIdSchema },
+		(input) => tags.changeTagAssignment(input, false),
+		false,
+		false
+	]
+])
+	server.registerTool(
+		name,
+		{
+			description,
+			inputSchema: z.object(shape),
+			annotations: {
+				readOnlyHint: readOnly,
+				destructiveHint: destructive,
+				idempotentHint: ['list_tags', 'add_tag', 'remove_tag', 'edit_tag'].includes(name),
+				openWorldHint: false
+			}
+		},
+		async (input) => {
+			try {
+				return toolResult(operation(input));
+			} catch (error) {
+				return toolError(error);
+			}
+		}
+	);
+
 // Backup tools intentionally accept managed IDs rather than arbitrary filesystem paths.
 const backupTools = [
 	[
@@ -654,12 +754,15 @@ const fileTools = [
 ];
 const networkIdentity = { network_id: recordIdSchema };
 const updateIdentity = { ...networkIdentity, update_id: recordIdSchema };
-const personPatch = Object.fromEntries(
-	Object.entries(networkInputShape).map(([key, value]) => [
-		key,
-		key === 'name' ? value.optional() : value.nullable().optional()
-	])
-);
+const personPatch = {
+	tag_ids: z.array(recordIdSchema).optional(),
+	...Object.fromEntries(
+		Object.entries(networkInputShape).map(([key, value]) => [
+			key,
+			key === 'name' ? value.optional() : value.nullable().optional()
+		])
+	)
+};
 const networkTools = [
 	[
 		'list_networks',

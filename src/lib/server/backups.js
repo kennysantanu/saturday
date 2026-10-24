@@ -1,3 +1,4 @@
+import { canonicalTagPattern, tagColorPattern } from '../tags.js';
 import { reminderInputShape } from './reminders.js';
 import { normalizeStageName } from './workflow.js';
 import { getInstallation } from './installation.js';
@@ -231,6 +232,14 @@ function columnsFor(db) {
 					]
 				}
 			: {}),
+		...(version >= 3
+			? {
+					job_tags: ['id', 'name', 'color', 'created_at', 'updated_at'],
+					network_tags: ['id', 'name', 'color', 'created_at', 'updated_at'],
+					job_tag_assignments: ['job_id', 'tag_id'],
+					network_tag_assignments: ['network_id', 'tag_id']
+				}
+			: {}),
 		network_updates: [
 			'id',
 			'network_id',
@@ -248,7 +257,9 @@ const allocatedTables = [
 	'job_updates',
 	'networks',
 	'network_updates',
-	'reminders'
+	'reminders',
+	'job_tags',
+	'network_tags'
 ];
 function allocatorState(db) {
 	const rows = db.prepare('SELECT name, seq FROM sqlite_sequence ORDER BY name').all();
@@ -265,7 +276,7 @@ function allocatorState(db) {
 	}
 	return Object.fromEntries(
 		allocatedTables
-			.filter((table) => table !== 'reminders' || databaseVersion(db) >= 2)
+			.filter((table) => Object.hasOwn(columnsFor(db), table))
 			.map((table) => {
 				const seq = rows.find((row) => row.name === table)?.seq ?? 0;
 				const maximum = db.prepare(`SELECT MAX(id) AS maximum FROM ${table}`).get().maximum ?? 0;
@@ -282,7 +293,7 @@ function dataset(db) {
 				table,
 				db
 					.prepare(
-						`SELECT ${fields.join(',')} FROM ${table} ORDER BY ${table === 'job_networks' ? 'job_id, network_id' : 'id'}`
+						`SELECT ${fields.join(',')} FROM ${table} ORDER BY ${table === 'job_networks' ? 'job_id, network_id' : table.endsWith('_tag_assignments') ? (table.startsWith('job') ? 'job_id,tag_id' : 'network_id,tag_id') : 'id'}`
 					)
 					.all()
 			])
@@ -319,7 +330,15 @@ function summary(db) {
 				network_count: 'networks',
 				network_link_count: 'job_networks',
 				network_update_count: 'network_updates',
-				...(databaseVersion(db) >= 2 ? { reminder_count: 'reminders' } : {})
+				...(databaseVersion(db) >= 2 ? { reminder_count: 'reminders' } : {}),
+				...(databaseVersion(db) >= 3
+					? {
+							job_tag_count: 'job_tags',
+							network_tag_count: 'network_tags',
+							job_tag_assignment_count: 'job_tag_assignments',
+							network_tag_assignment_count: 'network_tag_assignments'
+						}
+					: {})
 			}).map(([key, table]) => [
 				key,
 				Number(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n)
@@ -434,6 +453,26 @@ function validate(db) {
 				)
 					throw new Error('legacy reminder note');
 			}
+		for (const table of ['job_tags', 'network_tags'])
+			for (const row of data[table] ?? []) {
+				parseSchema(recordIdSchema, row.id);
+				if (
+					typeof row.name !== 'string' ||
+					row.name.length > 50 ||
+					!canonicalTagPattern.test(row.name) ||
+					typeof row.color !== 'string' ||
+					!tagColorPattern.test(row.color) ||
+					!['created_at', 'updated_at'].every(
+						(key) => typeof row[key] === 'string' && Number.isFinite(Date.parse(row[key]))
+					)
+				)
+					throw new Error('tag definition');
+			}
+		for (const table of ['job_tag_assignments', 'network_tag_assignments'])
+			for (const row of data[table] ?? []) {
+				parseSchema(recordIdSchema, row.tag_id);
+				parseSchema(recordIdSchema, row[table.startsWith('job') ? 'job_id' : 'network_id']);
+			}
 		for (const row of data.reminders ?? []) {
 			parseSchema(recordIdSchema, row.id);
 			parseSchema(z.object(reminderInputShape), row);
@@ -456,7 +495,18 @@ function validate(db) {
 			);
 		}
 		for (const row of Object.entries(data)
-			.filter(([table]) => !['app_metadata', '$sequence', 'workflow_stages'].includes(table))
+			.filter(
+				([table]) =>
+					![
+						'app_metadata',
+						'$sequence',
+						'workflow_stages',
+						'job_tags',
+						'network_tags',
+						'job_tag_assignments',
+						'network_tag_assignments'
+					].includes(table)
+			)
 			.flatMap(([, rows]) => rows)) {
 			if (
 				!['manual', 'mcp'].includes(row.created_via) ||
@@ -651,9 +701,7 @@ function insertData(db, data, preserveCounters = false) {
 	}
 	db.exec('DELETE FROM sqlite_sequence');
 	const sequence = db.prepare('INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)');
-	for (const table of allocatedTables.filter(
-		(table) => table !== 'reminders' || databaseVersion(db) >= 2
-	))
+	for (const table of allocatedTables.filter((table) => Object.hasOwn(columnsFor(db), table)))
 		sequence.run(table, Math.max(data.$sequence[table], previous[table] ?? 0));
 }
 function cleanup(now) {
@@ -706,7 +754,7 @@ export function prepareRestore(backupId, { now = Date.now() } = {}) {
 					incoming: incomingSummary,
 					requires_confirmation: true,
 					warning:
-						'Restoring replaces all current jobs, people, relationships, reminders and history. A complete recovery backup will be created first.' +
+						'Restoring replaces all current jobs, people, relationships, tags, reminders and history. A complete recovery backup will be created first.' +
 						(fileDatasetId() && fileDatasetId() !== incomingSummary.dataset_id
 							? ' Current job files belong to another dataset and will be blocked until matching files are restored. Matching folder numbers do not establish ownership.'
 							: '')
@@ -768,7 +816,7 @@ export function restoreBackup(restoreId, confirm, { now = Date.now(), beforeComm
 						fail('restore_stale', 'Current records changed after the preview. Prepare again.');
 					const recovery = snapshot('recovery', now);
 					db.exec(
-						'DELETE FROM reminders; DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs; DELETE FROM workflow_stages;'
+						'DELETE FROM job_tag_assignments; DELETE FROM network_tag_assignments; DELETE FROM job_tags; DELETE FROM network_tags; DELETE FROM reminders; DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs; DELETE FROM workflow_stages;'
 					);
 					insertData(db, incoming, true);
 					reserveJobFileIds(db);
@@ -877,7 +925,7 @@ export async function restoreDatabaseWithFiles(restoreId, fileOperation) {
 		const recovery = snapshot('recovery');
 		const files = await fileOperation(recovery, summary(stage));
 		db.exec(
-			'DELETE FROM reminders; DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs; DELETE FROM workflow_stages;'
+			'DELETE FROM job_tag_assignments; DELETE FROM network_tag_assignments; DELETE FROM job_tags; DELETE FROM network_tags; DELETE FROM reminders; DELETE FROM network_updates; DELETE FROM job_networks; DELETE FROM job_updates; DELETE FROM networks; DELETE FROM jobs; DELETE FROM workflow_stages;'
 		);
 		insertData(db, dataset(stage), true);
 		reserveJobFileIds(db);

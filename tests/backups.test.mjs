@@ -538,7 +538,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			score_comment: 'Initial fit'
 		});
 		assert.equal(job.id, 1);
-		assert.equal(listing.tools.length, 52);
+		assert.equal(listing.tools.length, 59);
 		for (const name of [
 			'list_networks',
 			'get_network',
@@ -865,7 +865,7 @@ test('an already-open connection rejects a schema changed by another process bef
 			[
 				'--input-type=module',
 				'-e',
-				`import { DatabaseSync } from 'node:sqlite'; const db=new DatabaseSync(process.env.SATURDAY_DB_PATH); db.exec("INSERT INTO schema_migrations VALUES(3,'future','2026-10-08')"); db.close();`
+				`import { DatabaseSync } from 'node:sqlite'; const db=new DatabaseSync(process.env.SATURDAY_DB_PATH); db.exec("INSERT INTO schema_migrations VALUES(${schemaVersion + 1},'future','2026-10-08')"); db.close();`
 			],
 			{ env: process.env, encoding: 'utf8' }
 		);
