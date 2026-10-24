@@ -238,6 +238,7 @@ export function jobForMcp(job, { list = false } = {}) {
 		is_active: job.isActive,
 		current_stage: job.currentStage,
 		next_reminder: job.nextReminder ?? null,
+		tags: job.tags ?? [],
 		...Object.fromEntries(
 			jobFields
 				.filter((field) => !list || field.list)

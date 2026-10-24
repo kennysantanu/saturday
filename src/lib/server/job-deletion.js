@@ -100,6 +100,7 @@ export async function deleteJob(input) {
 					};
 					delete intent.confirm;
 					await atomicJson(jobDeletionPath(), intent);
+					db.prepare('DELETE FROM job_tag_assignments WHERE job_id=?').run(values.job_id);
 					db.prepare('DELETE FROM reminders WHERE job_id=?').run(values.job_id);
 					db.prepare('DELETE FROM job_networks WHERE job_id=?').run(values.job_id);
 					db.prepare('DELETE FROM job_updates WHERE job_id=?').run(values.job_id);

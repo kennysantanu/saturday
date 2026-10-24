@@ -12,6 +12,7 @@ export const sortOptions = [
 ];
 export const dateModes = ['any', 'unset', 'set', 'overdue', 'today', 'upcoming', 'range'];
 export const defaultJobFilters = {
+	tag_ids: [],
 	query: '',
 	title: '',
 	company: '',
@@ -49,6 +50,7 @@ export function searchFromUrl(params) {
 			.map((key) => [
 				key,
 				[
+					'tag_ids',
 					'current_stage',
 					'milestone_stage',
 					'work_arrangement',

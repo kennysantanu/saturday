@@ -1,3 +1,4 @@
+import { tagSummarySql, replaceTagAssignments, addTagFilter } from './tags.js';
 import { activityReminder, nextReminderSql, localScheduleNow } from './reminders.js';
 import { z } from 'zod';
 import { withDatabase, inTransaction } from './database.js';
@@ -19,13 +20,17 @@ import {
 } from './validation.js';
 import { parseRecordDeletion, assertDeletionDataset } from './validation.js';
 
-const summary = `SELECT n.*, ${nextReminderSql('n', 'network_id')} AS next_reminder_at, (SELECT MAX(interaction_date) FROM network_updates u WHERE u.network_id=n.id) AS latest_interaction_date, (SELECT COUNT(*) FROM network_updates u WHERE u.network_id=n.id) AS interaction_count FROM networks n`;
+const summary = `SELECT n.*, ${tagSummarySql('person', 'n')} AS tags_json, ${nextReminderSql('n', 'network_id')} AS next_reminder_at, (SELECT MAX(interaction_date) FROM network_updates u WHERE u.network_id=n.id) AS latest_interaction_date, (SELECT COUNT(*) FROM network_updates u WHERE u.network_id=n.id) AS interaction_count FROM networks n`;
 const missing = (label) => {
 	throw new ServiceError(`${label} was not found.`, 'not_found');
 };
+function personRow(row) {
+	const { tags_json, ...rest } = row;
+	return { ...rest, tags: JSON.parse(tags_json ?? '[]') };
+}
 function person(db, id) {
 	id = parseRecordId(id, 'network_id');
-	return db.prepare(`${summary} WHERE n.id=?`).get(id) ?? missing('Person');
+	return personRow(db.prepare(`${summary} WHERE n.id=?`).get(id) ?? missing('Person'));
 }
 function parents(db, input) {
 	person(db, input.network_id);
@@ -95,6 +100,7 @@ export function listNetworks(input = {}) {
 			where.push('l.job_id=?');
 			args.push(filters.job_id);
 		}
+		const unavailableTagIds = addTagFilter(db, 'person', 'n', filters.tag_ids, where, args);
 		const upcoming = nextReminderSql('n', 'network_id');
 		if (filters.follow_up === 'not_scheduled') where.push(`${upcoming} IS NULL`);
 		else if (filters.follow_up !== 'all') {
@@ -128,7 +134,10 @@ export function listNetworks(input = {}) {
 			sort
 		);
 		return {
-			networks: filters.job_id ? rows.map((row) => relatedRow(row, 'person')) : rows,
+			networks: rows
+				.map(personRow)
+				.map((row) => (filters.job_id ? relatedRow(row, 'person') : row)),
+			unavailableTagIds,
 			...pagination
 		};
 	});
@@ -145,6 +154,7 @@ export function deleteNetwork(input) {
 	return write((db) => {
 		assertDeletionDataset(db, values.dataset_id);
 		person(db, values.network_id);
+		db.prepare('DELETE FROM network_tag_assignments WHERE network_id=?').run(values.network_id);
 		db.prepare('DELETE FROM reminders WHERE network_id=?').run(values.network_id);
 		db.prepare('DELETE FROM network_updates WHERE network_id=?').run(values.network_id);
 		db.prepare('DELETE FROM job_networks WHERE network_id=?').run(values.network_id);
@@ -162,6 +172,7 @@ export function createNetwork(input, createdVia = 'manual') {
 		const { lastInsertRowid: id } = db
 			.prepare(`INSERT INTO networks (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`)
 			.run(...Object.values(record));
+		if (input.tag_ids !== undefined) replaceTagAssignments(db, 'person', id, input.tag_ids);
 		return person(db, id);
 	});
 }
@@ -169,16 +180,19 @@ export function editNetwork(id, patch) {
 	const keys = Object.keys(networkInputShape).filter(
 		(key) => Object.hasOwn(patch, key) && patch[key] !== undefined
 	);
-	if (!keys.length) throw new ValidationError({ form: 'Supply at least one editable field.' });
+	if (!keys.length && patch.tag_ids === undefined)
+		throw new ValidationError({ form: 'Supply at least one editable field.' });
 	return write((db) => {
 		const previous = person(db, id),
 			merged = { ...previous, ...Object.fromEntries(keys.map((key) => [key, patch[key]])) };
 		const values = parseSchema(networkInputSchema, merged);
-		db.prepare(
-			`UPDATE networks SET ${Object.keys(values)
-				.map((key) => `${key}=?`)
-				.join(',')}, updated_at=? WHERE id=?`
-		).run(...Object.values(values), new Date().toISOString(), id);
+		if (keys.length)
+			db.prepare(
+				`UPDATE networks SET ${Object.keys(values)
+					.map((key) => `${key}=?`)
+					.join(',')}, updated_at=? WHERE id=?`
+			).run(...Object.values(values), new Date().toISOString(), id);
+		if (patch.tag_ids !== undefined) replaceTagAssignments(db, 'person', id, patch.tag_ids);
 		return person(db, id);
 	});
 }
@@ -191,13 +205,13 @@ export function listNetworkJobs(input) {
 		person(db, values.network_id);
 		const { rows, ...pagination } = pageRows(
 			db,
-			`SELECT j.*, (1-s.is_closed) AS is_active, s.name AS current_stage_name, l.network_id, ${linkColumns} FROM jobs j JOIN workflow_stages s ON s.id=j.current_stage_id JOIN job_networks l ON l.job_id=j.id WHERE l.network_id=?`,
+			`SELECT j.*, ${tagSummarySql('job', 'j')} AS tags_json, (1-s.is_closed) AS is_active, s.name AS current_stage_name, l.network_id, ${linkColumns} FROM jobs j JOIN workflow_stages s ON s.id=j.current_stage_id JOIN job_networks l ON l.job_id=j.id WHERE l.network_id=?`,
 			'SELECT COUNT(*) AS total FROM job_networks WHERE network_id=?',
 			[values.network_id],
 			values,
 			'j.updated_at DESC, j.id'
 		);
-		return { jobs: rows.map((row) => relatedRow(row, 'job')), ...pagination };
+		return { jobs: rows.map(personRow).map((row) => relatedRow(row, 'job')), ...pagination };
 	});
 }
 export function linkJobNetwork(input, createdVia = 'manual') {

@@ -150,6 +150,30 @@ ALTER TABLE jobs DROP COLUMN follow_up_date;
 ALTER TABLE networks DROP COLUMN follow_up_comment;
 ALTER TABLE networks DROP COLUMN follow_up_date;
 `
+	},
+	{
+		version: 3,
+		name: 'create_colored_tags',
+		sql: ['job', 'network']
+			.map((kind) => {
+				const owner = kind === 'job' ? 'jobs' : 'networks';
+				return `
+CREATE TABLE ${kind}_tags (
+ id INTEGER PRIMARY KEY AUTOINCREMENT CHECK(id BETWEEN 1 AND 9007199254740991),
+ name TEXT NOT NULL UNIQUE CHECK(length(name) BETWEEN 1 AND 50 AND name NOT GLOB '*[^a-z0-9_]*' AND substr(name,1,1)!='_' AND substr(name,-1,1)!='_' AND instr(name,'__')=0),
+ color TEXT NOT NULL DEFAULT '#64748b' CHECK(length(color)=7 AND substr(color,1,1)='#' AND substr(color,2) NOT GLOB '*[^a-f0-9]*'),
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);
+CREATE TABLE ${kind}_tag_assignments (
+ ${kind}_id INTEGER NOT NULL REFERENCES ${owner}(id) ON DELETE RESTRICT,
+ tag_id INTEGER NOT NULL REFERENCES ${kind}_tags(id) ON DELETE RESTRICT,
+ PRIMARY KEY(${kind}_id,tag_id)
+);
+CREATE INDEX ${kind}_tags_reverse ON ${kind}_tag_assignments(tag_id,${kind}_id);
+`;
+			})
+			.join('')
 	}
 ];
 
