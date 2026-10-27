@@ -17,6 +17,7 @@ export async function verifyJobCrud(application) {
 	assert.equal(job.company, 'Example');
 	assert.equal(job.postingUrl, null);
 	assert.equal(job.score, null);
+	assert.equal(job.createdVia, 'manual');
 	assert.equal(job.isStarred, true);
 	const edited = await application.editJob(job.id, { job_title: 'Senior Engineer' });
 	assert.equal(edited.title, 'Senior Engineer');

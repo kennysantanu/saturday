@@ -15,8 +15,6 @@ import { getInstallation } from './installation.js';
 import { openDatabase } from './database.js';
 import { buildInfo } from './compatibility.js';
 
-// Temporary persistence spelling; semantic actor is independent of assistant transport.
-const origin = (context) => (context.actor === 'assistant' ? 'mcp' : 'manual');
 const nodeContent = (stream) => (stream?.getReader ? Readable.fromWeb(stream) : stream);
 const webContent = (stream) =>
 	Readable.toWeb(stream, {
@@ -29,30 +27,30 @@ function publicStorageSummary({ root, ...summary }) {
 	return summary;
 }
 export const localOperations = {
-	createJob: (context, input) => jobs.createJob(input, origin(context)),
+	createJob: (context, input) => jobs.createJob(input, context.actor),
 	editJob: (context, id, input) => jobs.editJob(id, input),
 	setJobScore: (context, id, input) => jobs.setJobScore(id, input),
 	setJobStarred: (context, id, starred) => jobs.setJobStarred(id, starred),
 	getJob: (context, id) => jobs.getJob(id),
 	listJobs: (context, input = {}) => jobs.listJobs(input),
 	searchJobs: (context, input = {}, options = {}) => jobs.searchJobs(input, options),
-	addJobUpdate: (context, input) => jobs.addJobUpdate(input, origin(context)),
-	moveJobStage: (context, id, input) => jobs.moveJobStage(id, input, origin(context)),
+	addJobUpdate: (context, input) => jobs.addJobUpdate(input, context.actor),
+	moveJobStage: (context, id, input) => jobs.moveJobStage(id, input, context.actor),
 	correctJobUpdate: (context, id, correction = {}) => jobs.correctJobUpdate(id, correction),
 	getDashboardStats: (context, input = {}) => jobs.getDashboardStats(input),
 	deleteJob: (context, input) => jobs.deleteJob(input),
 	listNetworks: (context, input = {}) => people.listNetworks(input),
 	getNetwork: (context, id) => people.getNetwork(id),
 	deleteNetwork: (context, input) => people.deleteNetwork(input),
-	createNetwork: (context, input) => people.createNetwork(input, origin(context)),
+	createNetwork: (context, input) => people.createNetwork(input, context.actor),
 	editNetwork: (context, id, patch) => people.editNetwork(id, patch),
 	listNetworkJobs: (context, input) => people.listNetworkJobs(input),
-	linkJobNetwork: (context, input) => people.linkJobNetwork(input, origin(context)),
+	linkJobNetwork: (context, input) => people.linkJobNetwork(input, context.actor),
 	editJobNetwork: (context, input) => people.editJobNetwork(input),
 	unlinkJobNetwork: (context, input) => people.unlinkJobNetwork(input),
 	networkLinkIds: (context, input) => people.networkLinkIds(input),
 	listNetworkUpdates: (context, input) => people.listNetworkUpdates(input),
-	addNetworkUpdate: (context, input) => people.addNetworkUpdate(input, origin(context)),
+	addNetworkUpdate: (context, input) => people.addNetworkUpdate(input, context.actor),
 	editNetworkUpdate: (context, input) => people.editNetworkUpdate(input),
 	deleteNetworkUpdate: (context, input) => people.deleteNetworkUpdate(input),
 	listWorkflowStages: (context) => workflow.listWorkflowStages(),
@@ -64,7 +62,7 @@ export const localOperations = {
 		workflow.reorderWorkflowStage(id, direction, options),
 	archiveWorkflowStage: (context, id, options) => workflow.archiveWorkflowStage(id, options),
 	restoreWorkflowStage: (context, id) => workflow.restoreWorkflowStage(id),
-	createReminder: (context, input) => reminders.createReminder(input, origin(context)),
+	createReminder: (context, input) => reminders.createReminder(input, context.actor),
 	listReminders: (context, input) => reminders.listReminders(input),
 	editReminder: (context, input) => reminders.editReminder(input),
 	dismissReminder: (context, input) => reminders.dismissReminder(input),
@@ -79,13 +77,13 @@ export const localOperations = {
 	mergeTags: (context, input) => tags.mergeTags(input),
 	listDocuments: (context, input = {}) => documents.listDocuments(input),
 	getDocument: (context, input, options = {}) => documents.getDocument(input, options),
-	createDocument: (context, input) => documents.createDocument(input, origin(context)),
+	createDocument: (context, input) => documents.createDocument(input, context.actor),
 	editDocument: (context, input) => documents.editDocument(input),
-	copyDocument: (context, input) => documents.copyDocument(input, origin(context)),
+	copyDocument: (context, input) => documents.copyDocument(input, context.actor),
 	deleteDocument: (context, input) => documents.deleteDocument(input),
 	setMasterDocument: (context, input) => documents.setMasterDocument(input),
 	uploadDocument: (context, input) =>
-		documents.uploadDocument({ ...input, stream: nodeContent(input.stream) }, origin(context)),
+		documents.uploadDocument({ ...input, stream: nodeContent(input.stream) }, context.actor),
 	openDocument: async (context, input) => webDownload(await documents.openDocument(input)),
 	storageSummary: async (context) => publicStorageSummary(await documents.storageSummary()),
 	recoveryDocuments: (context, jobId) => documents.recoveryDocuments(jobId),
@@ -110,7 +108,7 @@ export const localOperations = {
 	downloadManualBackup: async (context, input) =>
 		webDownload(await pairs.downloadManualBackup(input)),
 	exportManualBackup: (context, input, destination) => pairs.exportManualBackup(input, destination),
-	generateDocumentPdf: (context, input) => pdf.generateDocumentPdf(input, origin(context)),
+	generateDocumentPdf: (context, input) => pdf.generateDocumentPdf(input, context.actor),
 	pdfReadiness: (context) => pdf.pdfReadiness(),
 	importBackupPath: (context, source) => pairs.importBackupBundle(createReadStream(source)),
 	getBackupMetadata: (context, id) => databaseBackups.getBackupFile(id).metadata,

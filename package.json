@@ -85,14 +85,14 @@
 		"node_minimum": "22.13.0",
 		"storage": {
 			"database": {
-				"format": "saturday.database.workflow",
+				"format": "saturday.database",
 				"minimumVersion": 1,
-				"currentVersion": 3
+				"currentVersion": 1
 			},
 			"manifest": {
-				"format": "saturday.files.numeric",
+				"format": "saturday.files",
 				"minimumVersion": 1,
-				"version": 2
+				"version": 1
 			}
 		}
 	}

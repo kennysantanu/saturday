@@ -15,6 +15,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:http';
 import { spawnSync } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
+import { storageCompatibility } from '../src/lib/server/compatibility.js';
 import {
 	assistantConfiguration,
 	configureAssistantJson,
@@ -67,16 +69,95 @@ test('source setup persists identity and shared paths, repeated setup preserves 
 	assert.equal(descriptor.database, env.SATURDAY_DB_PATH);
 	assert.equal(descriptor.files, env.SATURDAY_FILES_PATH);
 	assert.equal(descriptor.extension_state, env.SATURDAY_EXTENSION_STATE_PATH);
+	const db = new DatabaseSync(descriptor.database, { readOnly: true });
+	try {
+		assert.equal(storageCompatibility.database.currentVersion, 1);
+		assert.equal(storageCompatibility.manifest.version, 1);
+		const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+		assert.deepEqual(pkg.saturday.storage.database, storageCompatibility.database);
+		assert.deepEqual(pkg.saturday.storage.manifest, storageCompatibility.manifest);
+		assert.deepEqual(
+			db
+				.prepare('SELECT version,name FROM schema_migrations')
+				.all()
+				.map((r) => ({ ...r })),
+			[{ version: 1, name: 'create_initial_schema' }]
+		);
+		assert.deepEqual(
+			db
+				.prepare('SELECT name,is_closed FROM workflow_stages ORDER BY sort_order,id')
+				.all()
+				.map((r) => [r.name, r.is_closed]),
+			[
+				['New', 0],
+				['Applied', 0],
+				['Screening', 0],
+				['Interview', 0],
+				['Offer', 0],
+				['Accepted', 1],
+				['Rejected', 1],
+				['Dismissed', 1]
+			]
+		);
+		const tables = db
+			.prepare(
+				"SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+			)
+			.all()
+			.map((r) => r.name);
+		const emptyTables = [
+			'job_networks',
+			'job_tag_assignments',
+			'job_tags',
+			'job_updates',
+			'jobs',
+			'network_tag_assignments',
+			'network_tags',
+			'network_updates',
+			'networks',
+			'reminders'
+		];
+		assert.deepEqual(
+			tables,
+			[...emptyTables, 'app_metadata', 'schema_migrations', 'workflow_stages'].sort()
+		);
+		for (const table of emptyTables)
+			assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 0, table);
+		const metadata = db.prepare('SELECT * FROM app_metadata').all();
+		assert.equal(metadata.length, 1);
+		assert.equal(metadata[0].format, 'saturday.database');
+		const manifest = JSON.parse(readFileSync(join(descriptor.files, 'manifest.json')));
+		assert.equal(manifest.format, 'saturday.files');
+		assert.equal(manifest.format_version, 1);
+		assert.equal(manifest.dataset_id, metadata[0].dataset_id);
+		assert.deepEqual(manifest.documents, []);
+		assert.deepEqual(manifest.designations, {});
+	} finally {
+		db.close();
+	}
+
 	const child = spawnSync(
 		process.execPath,
 		[
 			'--input-type=module',
 			'-e',
-			"import {createJob} from './src/lib/server/services.js';console.log(JSON.stringify(createJob({job_title:'Keep',company_name:'Example'})));"
+			`import {createJob} from './src/lib/server/services.js';
+			import {createNetwork} from './src/lib/server/networks.js';
+			import {renameWorkflowStage,reorderWorkflowStage,archiveWorkflowStage,setWorkflowStageClosed,addWorkflowStage} from './src/lib/server/workflow.js';
+			const job = createJob({job_title:'Keep',company_name:'Example'});
+			const person = createNetwork({name:'Keep person'});
+			renameWorkflowStage(1,'Inbox');
+			reorderWorkflowStage(3,'up');
+			archiveWorkflowStage(8);
+			setWorkflowStageClosed(5,true);
+			addWorkflowStage({name:'Review'});
+			console.log(JSON.stringify({job,person}));`
 		],
 		{ env, encoding: 'utf8' }
 	);
 	assert.equal(child.status, 0, child.stderr);
+	assert.equal(JSON.parse(child.stdout).job.id, 1);
+	assert.equal(JSON.parse(child.stdout).person.id, 1);
 	const before = readFileSync(descriptor.database),
 		manifest = readFileSync(join(descriptor.files, 'manifest.json'));
 	result = setup();

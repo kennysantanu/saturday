@@ -15,7 +15,7 @@
 		isArchived?: boolean;
 		label: string;
 		note: string | null;
-		createdVia: 'manual' | 'mcp';
+		createdVia: 'manual' | 'assistant';
 	};
 	let {
 		entries,
@@ -48,7 +48,7 @@
 					<p class="flex items-center gap-1.5 text-sm text-muted-foreground">
 						<Calendar class="size-3.5 shrink-0" aria-hidden="true" />
 						{formatDate(entry.date)}
-						{#if entry.createdVia === 'mcp'}
+						{#if entry.createdVia === 'assistant'}
 							<span class="inline-flex items-center gap-1" title="Added by assistant">
 								<Bot class="size-3.5" aria-hidden="true" />
 								<span class="sr-only">Added by assistant</span>

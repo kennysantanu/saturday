@@ -31,7 +31,7 @@ The local `withDatabase` and `inTransaction` APIs are synchronous. They reject a
 
 ## Actor, permissions and assistant commands
 
-The execution actor is `manual` or `assistant`; it describes provenance, not authorization. The authenticated browser composition supplies manual context and the trusted local stdio composition supplies assistant context. The local storage adapter currently records these as `manual` and `mcp`, matching the installed schema and manifest.
+The execution actor is `manual` or `assistant`; it describes provenance, not authorization. The authenticated browser composition supplies manual context and the trusted local stdio composition supplies assistant context. Database records and document metadata persist the same `manual` and `assistant` values, independently of the assistant transport.
 
 Permissions are supplied separately by trusted composition code. Assessment writes, record/document deletion, Profile assignment, recovery writes and workflow configuration have explicit policies. A tool argument, form field, document or returned model message cannot grant these permissions by supplying an actor or permission list. Browser authentication stays in the web adapter. Local host controls additionally retain origin, session and local-browser ownership checks; no host-administration or password-recovery command is exposed in the assistant catalog.
 

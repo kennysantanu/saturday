@@ -61,12 +61,12 @@ test('name-only creation, strict validation, partial edits and optional clearing
 			email: 'Alex@Example.com',
 			notes: ' General '
 		},
-		'mcp'
+		'assistant'
 	);
 	assert.equal(person.name, 'Alex');
 	assert.equal(person.role, null);
 	assert.equal(person.email, 'Alex@Example.com');
-	assert.equal(person.created_via, 'mcp');
+	assert.equal(person.created_via, 'assistant');
 	assert.equal(person.latest_interaction_date, null);
 	assert.equal(person.interaction_count, 0);
 	const edited = n.editNetwork(person.id, { role: ' Recruiter ', email: '' });
@@ -196,12 +196,15 @@ test('many-to-many links are retry safe, scoped notes never change parents, inac
 	closeJob(other.id, '2026-01-01');
 	const beforeJob = getJob(j.id),
 		beforePerson = n.getNetwork(a.id);
-	const first = n.linkJobNetwork({ job_id: j.id, network_id: a.id, notes: ' Referrer ' }, 'mcp');
+	const first = n.linkJobNetwork(
+		{ job_id: j.id, network_id: a.id, notes: ' Referrer ' },
+		'assistant'
+	);
 	assert.equal(first.created, true);
 	const retry = n.linkJobNetwork({ job_id: j.id, network_id: a.id, notes: 'Do not overwrite' });
 	assert.equal(retry.created, false);
 	assert.equal(retry.notes, 'Referrer');
-	assert.equal(retry.created_via, 'mcp');
+	assert.equal(retry.created_via, 'assistant');
 	n.linkJobNetwork({ job_id: other.id, network_id: a.id });
 	n.linkJobNetwork({ job_id: j.id, network_id: c.id });
 	assert.equal(n.listNetworkJobs({ network_id: a.id }).total, 2);
@@ -234,7 +237,7 @@ test('optional interactions use actual date and insertion ties, support correcti
 		c = n.createNetwork({ name: 'Casey' });
 	const first = n.addNetworkUpdate(
 		{ network_id: a.id, interaction_date: '2000-01-02', note: 'Message sent' },
-		'mcp'
+		'assistant'
 	);
 	const tie = n.addNetworkUpdate({
 		network_id: a.id,
@@ -260,7 +263,7 @@ test('optional interactions use actual date and insertion ties, support correcti
 	);
 	assert.equal(
 		n.editNetworkUpdate({ network_id: a.id, update_id: first.id, note: 'Corrected' }).created_via,
-		'mcp'
+		'assistant'
 	);
 	notFound(() =>
 		n.editNetworkUpdate({ network_id: c.id, update_id: first.id, note: 'Wrong person' })
@@ -315,17 +318,17 @@ test('more than 100 interactions and linked jobs paginate without hidden caps', 
 });
 
 function populated() {
-	const person = n.createNetwork({ name: 'Alex', notes: 'General' }, 'mcp');
+	const person = n.createNetwork({ name: 'Alex', notes: 'General' }, 'assistant');
 	createReminder({ network_id: person.id, scheduled_at: '2099-01-01T00:00', note: 'Call' });
 	const j = job();
-	n.linkJobNetwork({ job_id: j.id, network_id: person.id, notes: 'Referrer' }, 'mcp');
+	n.linkJobNetwork({ job_id: j.id, network_id: person.id, notes: 'Referrer' }, 'assistant');
 	const entry = n.addNetworkUpdate(
 		{ network_id: person.id, interaction_date: '2000-01-01', note: 'Introduced' },
-		'mcp'
+		'assistant'
 	);
 	return { person, j, entry };
 }
-test('numeric baseline recovery preserves all identities, timestamps, notes, summaries and counts', () => {
+test('Baseline recovery preserves all identities, timestamps, notes, summaries and counts', () => {
 	const { person, j } = populated();
 	const before = contents();
 	const backup = b.createBackup();
@@ -450,7 +453,7 @@ test('concurrent link retries serialize into one relationship without overwritin
 		j = job();
 	const run = (notes) =>
 		new Promise((resolve, reject) => {
-			const code = `import {linkJobNetwork} from './src/lib/server/networks.js'; console.log(JSON.stringify(linkJobNetwork(${JSON.stringify({ job_id: j.id, network_id: person.id, notes })},'mcp')));`;
+			const code = `import {linkJobNetwork} from './src/lib/server/networks.js'; console.log(JSON.stringify(linkJobNetwork(${JSON.stringify({ job_id: j.id, network_id: person.id, notes })},'assistant')));`;
 			const child = spawn(process.execPath, ['--input-type=module', '-e', code], {
 				env: process.env,
 				stdio: ['ignore', 'pipe', 'pipe']

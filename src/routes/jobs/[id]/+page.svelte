@@ -47,7 +47,7 @@
 		stageId: number | null;
 		label: string;
 		note: string | null;
-		createdVia: 'manual' | 'mcp';
+		createdVia: 'manual' | 'assistant';
 	};
 
 	let { data, form } = $props();
@@ -206,7 +206,7 @@
 						><ChevronRight data-icon="inline-end" aria-hidden="true" />
 					</Button>
 				{/if}
-				{#if job.createdVia === 'mcp'}
+				{#if job.createdVia === 'assistant'}
 					<Badge variant="outline" class="gap-1 text-muted-foreground"
 						><Bot class="size-3.5" aria-hidden="true" />Added by assistant</Badge
 					>

@@ -16,16 +16,8 @@ export const storageCompatibility = Object.freeze({
 		minimumVersion: 1,
 		currentVersion: schemaVersion
 	}),
-	manifest: Object.freeze({ format: 'saturday.files.numeric', minimumVersion: 1, version: 2 }),
-	pair: Object.freeze({ format: 'saturday.backup-pair.numeric', version: 1 })
-});
-
-// Fresh development baselines; format versions remain independent of app releases.
-export const plannedBaseline = Object.freeze({
-	databaseFormat,
-	manifestFormat: storageCompatibility.manifest.format,
-	schemaVersion: 1,
-	manifestVersion: 1
+	manifest: Object.freeze({ format: 'saturday.files', minimumVersion: 1, version: 1 }),
+	pair: Object.freeze({ format: 'saturday.backup-pair', version: 1 })
 });
 
 export function assertManifestCompatibility(m) {
@@ -42,7 +34,7 @@ export function assertManifestCompatibility(m) {
 	)
 		throw Object.assign(
 			new Error(
-				'Unsupported file-store format, version or dataset identity. Restart with a compatible build or explicitly reset development data; files are never reset automatically.'
+				'Unsupported file-store format, version or dataset identity. Use a compatible version of Saturday. Existing files have not been changed.'
 			),
 			{ code: 'FORMAT' }
 		);

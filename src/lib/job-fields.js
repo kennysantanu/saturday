@@ -1,7 +1,7 @@
 // All stored job fields. Forms stay inline; immutable migrations remain the schema source.
-// Retired fields remain available only for historical schema inspection. `edit` controls input access.
-const historicalJobFields = [
-	{ name: 'id', key: 'id', type: 'id', label: 'Job ID', edit: 'system', since: 1, list: true },
+// `edit` controls input access.
+export const jobFields = [
+	{ name: 'id', key: 'id', type: 'id', label: 'Job ID', edit: 'system', list: true },
 	{
 		name: 'job_title',
 		key: 'title',
@@ -12,7 +12,6 @@ const historicalJobFields = [
 		requiredMessage: 'Enter a job title.',
 		max: 200,
 		edit: 'user',
-		since: 1,
 		list: true
 	},
 	{
@@ -25,7 +24,6 @@ const historicalJobFields = [
 		requiredMessage: 'Enter a company.',
 		max: 200,
 		edit: 'user',
-		since: 1,
 		list: true
 	},
 	{
@@ -34,8 +32,7 @@ const historicalJobFields = [
 		type: 'url',
 		label: 'Job posting link',
 		max: 2048,
-		edit: 'user',
-		since: 1
+		edit: 'user'
 	},
 	{
 		name: 'job_description',
@@ -43,8 +40,7 @@ const historicalJobFields = [
 		type: 'text',
 		label: 'Job description',
 		max: 50000,
-		edit: 'user',
-		since: 1
+		edit: 'user'
 	},
 	{
 		name: 'notes',
@@ -52,8 +48,7 @@ const historicalJobFields = [
 		type: 'text',
 		label: 'Job notes',
 		max: 10000,
-		edit: 'user',
-		since: 1
+		edit: 'user'
 	},
 	{
 		name: 'current_stage_id',
@@ -61,7 +56,6 @@ const historicalJobFields = [
 		type: 'id',
 		label: 'Current stage',
 		edit: 'system',
-		since: 1,
 		list: true
 	},
 	{
@@ -69,25 +63,22 @@ const historicalJobFields = [
 		key: 'createdVia',
 		type: 'enum',
 		label: 'Record origin',
-		options: ['manual', 'mcp'],
-		edit: 'system',
-		since: 1
+		options: ['manual', 'assistant'],
+		edit: 'system'
 	},
 	{
 		name: 'created_at',
 		key: 'createdAt',
 		type: 'timestamp',
 		label: 'Created at',
-		edit: 'system',
-		since: 1
+		edit: 'system'
 	},
 	{
 		name: 'updated_at',
 		key: 'updatedAt',
 		type: 'timestamp',
 		label: 'Updated at',
-		edit: 'system',
-		since: 1
+		edit: 'system'
 	},
 	{
 		name: 'location',
@@ -96,7 +87,6 @@ const historicalJobFields = [
 		label: 'Location',
 		max: 200,
 		edit: 'user',
-		since: 1,
 		info: true,
 		list: true
 	},
@@ -107,7 +97,6 @@ const historicalJobFields = [
 		label: 'Work arrangement',
 		options: ['remote', 'hybrid', 'on-site'],
 		edit: 'user',
-		since: 1,
 		info: true,
 		list: true
 	},
@@ -118,7 +107,6 @@ const historicalJobFields = [
 		label: 'Employment type',
 		options: ['full-time', 'part-time', 'contract', 'internship', 'temporary'],
 		edit: 'user',
-		since: 1,
 		info: true,
 		list: true
 	},
@@ -129,7 +117,6 @@ const historicalJobFields = [
 		label: 'Compensation',
 		max: 1000,
 		edit: 'user',
-		since: 1,
 		info: true,
 		list: true
 	},
@@ -140,7 +127,6 @@ const historicalJobFields = [
 		label: 'Source',
 		max: 200,
 		edit: 'user',
-		since: 1,
 		info: true,
 		list: true
 	},
@@ -151,32 +137,7 @@ const historicalJobFields = [
 		label: 'Application deadline',
 		max: 10,
 		edit: 'user',
-		since: 1,
 		info: true,
-		list: true
-	},
-	{
-		name: 'follow_up_date',
-		until: 1,
-		key: 'followUpDate',
-		type: 'date',
-		label: 'Follow-up date',
-		max: 10,
-		edit: 'user',
-		since: 1,
-		list: true
-	},
-	{
-		name: 'follow_up_comment',
-		until: 1,
-		key: 'followUpComment',
-		type: 'text',
-		label: 'Follow-up comment',
-		max: 10000,
-		requires: 'follow_up_date',
-		requiresMessage: 'Set a follow-up date to add a comment.',
-		edit: 'user',
-		since: 1,
 		list: true
 	},
 	{
@@ -186,7 +147,6 @@ const historicalJobFields = [
 		label: 'Starred',
 		default: false,
 		edit: 'user',
-		since: 1,
 		list: true
 	},
 	{
@@ -195,7 +155,6 @@ const historicalJobFields = [
 		type: 'number',
 		label: 'Assistant score',
 		edit: 'assistant',
-		since: 1,
 		list: true
 	},
 	{
@@ -205,18 +164,14 @@ const historicalJobFields = [
 		label: 'Score comment',
 		max: 10000,
 		edit: 'assistant',
-		since: 1,
 		list: true
 	}
 ];
-export const jobFields = historicalJobFields.filter((field) => !field.until);
 export const editableJobFields = jobFields.filter((field) => field.edit === 'user');
 export const assessmentJobFields = jobFields.filter((field) => field.edit === 'assistant');
 export const jobInfoFields = jobFields.filter((field) => field.info);
-export function jobColumns(version = 2) {
-	return historicalJobFields
-		.filter((field) => field.since <= version && (!field.until || version <= field.until))
-		.map((field) => field.name);
+export function jobColumns() {
+	return jobFields.map((field) => field.name);
 }
 export function jobFromStorage(row) {
 	return Object.fromEntries(

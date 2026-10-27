@@ -13,7 +13,6 @@ import {
 	withFileLock,
 	validateWholeStore,
 	validateManifest,
-	migrateManifest,
 	atomicJson,
 	digest,
 	validKey,
@@ -217,7 +216,7 @@ export async function extractArchive(path) {
 			});
 			zip.readEntry();
 		});
-		const m = migrateManifest(JSON.parse(await fs.readFile(join(stage, 'manifest.json'), 'utf8')));
+		const m = validateManifest(JSON.parse(await fs.readFile(join(stage, 'manifest.json'), 'utf8')));
 		if (seen.size !== m.documents.length + 1)
 			reject('FORMAT', 'Backup entries do not match manifest.');
 		for (const d of m.documents) {

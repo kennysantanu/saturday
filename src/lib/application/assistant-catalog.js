@@ -836,7 +836,7 @@ export function createAssistantCatalog(app, capabilities) {
 			name: 'create_network',
 			operation: 'createNetwork',
 			description:
-				'Create a person with MCP origin. Name required. No automatic links or interactions. After an uncertain response, inspect existing records instead of blindly creating duplicates.',
+				'Create a person with assistant origin. Name required. No automatic links or interactions. After an uncertain response, inspect existing records instead of blindly creating duplicates.',
 			inputSchema: z.object({ ...personPatch, name: networkInputShape.name }),
 			execute: async (i) => ({ network: await app.createNetwork(i) }),
 			annotations: {

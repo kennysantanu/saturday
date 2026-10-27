@@ -228,7 +228,7 @@ export const jobSearchShape = {
 	starred: z.enum(['all', 'starred', 'not_starred']).default('all'),
 	work_arrangement: multiple([...workOptions, 'unset']),
 	employment_type: multiple([...employmentOptions, 'unset']),
-	created_via: multiple(['manual', 'mcp']),
+	created_via: multiple(['manual', 'assistant']),
 	follow_up: z.enum(dateModes).default('any'),
 	follow_up_from: date,
 	follow_up_to: date,

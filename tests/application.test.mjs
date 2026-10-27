@@ -83,7 +83,7 @@ test('application operations await asynchronous implementations and preserve val
 
 test('actor labels and caller input cannot grant assessment, deletion or workflow permissions', async () => {
 	const input = { job_title: 'Engineer', company_name: 'Example' };
-	const job = await web.createJob(input, 'mcp');
+	const job = await web.createJob(input, 'assistant');
 	assert.equal(job.createdVia, 'manual');
 	assert.equal((await web.createJob({ ...input, score: 9, score_comment: 'Forged' })).score, null);
 	await assert.rejects(web.setJobScore(job.id, { score: 9 }), { code: 'forbidden' });
@@ -110,7 +110,7 @@ test('actor labels and caller input cannot grant assessment, deletion or workflo
 		score_comment: 'Relevant experience'
 	});
 	assert.equal(scored.score, 9);
-	assert.equal((await assistant.createJob(input)).createdVia, 'mcp');
+	assert.equal((await assistant.createJob(input)).createdVia, 'assistant');
 	assert.equal((await web.getJob(job.id)).scoreComment, 'Relevant experience');
 });
 
@@ -177,7 +177,7 @@ test('web and assistant catalog share atomic placement/history/reminder operatio
 	assert.equal(discovered.current_stage_id, current.currentStageId);
 	assert.equal(
 		discovered.updates.find((entry) => entry.stage_id === applied.id).created_via,
-		'mcp'
+		'assistant'
 	);
 	assert.deepEqual(JSON.parse(JSON.stringify(discovered)), discovered);
 });

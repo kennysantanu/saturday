@@ -36,10 +36,10 @@ afterEach(() => {
 	else process.env.SATURDAY_FILES_PATH = previousFiles;
 });
 const job = (fields = {}, origin = 'manual') => {
-	const { follow_up_date, ...details } = fields;
+	const { reminder_date, ...details } = fields;
 	const record = createJob({ job_title: 'Engineer', company_name: 'Acme', ...details }, origin);
-	if (follow_up_date)
-		createReminder({ job_id: record.id, scheduled_at: follow_up_date + 'T23:59' }, origin);
+	if (reminder_date)
+		createReminder({ job_id: record.id, scheduled_at: reminder_date + 'T23:59' }, origin);
 	return record;
 };
 const ids = (filters) => searchJobs(filters).jobs.map((job) => job.id);
@@ -55,7 +55,7 @@ test('literal contains searches use AND, categories use OR, and missing values r
 		is_starred: true
 	});
 	job({ company_name: 'Other', location: 'Seattle', work_arrangement: 'hybrid' });
-	const missing = job({ company_name: 'Missing' }, 'mcp');
+	const missing = job({ company_name: 'Missing' }, 'assistant');
 	assert.deepEqual(
 		ids({
 			title: 'engineer',
@@ -69,7 +69,7 @@ test('literal contains searches use AND, categories use OR, and missing values r
 		[target.id]
 	);
 	assert.deepEqual(
-		ids({ work_arrangement: ['unset'], employment_type: ['unset'], created_via: ['mcp'] }),
+		ids({ work_arrangement: ['unset'], employment_type: ['unset'], created_via: ['assistant'] }),
 		[missing.id]
 	);
 	assert.equal(searchJobs({ work_arrangement: ['unset', 'remote'] }).total, 2);
@@ -103,9 +103,9 @@ test('date presets and open inclusive ranges distinguish missing, overdue, today
 	earlier.setDate(now.getDate() - 1);
 	const later = new Date(now);
 	later.setDate(now.getDate() + 1);
-	const overdue = job({ follow_up_date: iso(earlier), application_deadline: iso(earlier) });
-	const due = job({ follow_up_date: today, application_deadline: today });
-	const upcoming = job({ follow_up_date: iso(later), application_deadline: iso(later) });
+	const overdue = job({ reminder_date: iso(earlier), application_deadline: iso(earlier) });
+	const due = job({ reminder_date: today, application_deadline: today });
+	const upcoming = job({ reminder_date: iso(later), application_deadline: iso(later) });
 	const missing = job();
 	for (const key of ['follow_up', 'deadline']) {
 		assert.deepEqual(ids({ [key]: 'overdue' }), [overdue.id]);
@@ -215,8 +215,8 @@ test('pagination counts and status filtering work beyond 100 records and use sta
 });
 
 test('sorts put missing dates last and validation rejects malformed filter values', () => {
-	const early = job({ follow_up_date: '2026-10-01', application_deadline: '2026-10-02' });
-	const late = job({ follow_up_date: '2026-10-03', application_deadline: '2026-10-04' });
+	const early = job({ reminder_date: '2026-10-01', application_deadline: '2026-10-02' });
+	const late = job({ reminder_date: '2026-10-03', application_deadline: '2026-10-04' });
 	const missing = job();
 	for (const sort of ['follow_up', 'deadline'])
 		assert.deepEqual(ids({ sort }), [early.id, late.id, missing.id]);

@@ -80,7 +80,8 @@ function getJobRow(db, id) {
 	return db.prepare(`${joinedJobs} WHERE j.id=?`).get(parseRecordId(id, 'job_id'));
 }
 function historyEntry(db, { job_id, stage_id, event_date, note }, createdVia) {
-	if (!['manual', 'mcp'].includes(createdVia)) throw new ServiceError('Unknown record source.');
+	if (!['manual', 'assistant'].includes(createdVia))
+		throw new ServiceError('Unknown record source.');
 	if (stage_id) stageById(db, stage_id);
 	const stamp = timestamp();
 	const { lastInsertRowid: id } = db
@@ -94,12 +95,13 @@ function historyEntry(db, { job_id, stage_id, event_date, note }, createdVia) {
 
 export function createJob(input, createdVia = 'manual') {
 	const values = parseJobInput(input);
-	if (!['manual', 'mcp'].includes(createdVia)) throw new ServiceError('Unknown record source.');
+	if (!['manual', 'assistant'].includes(createdVia))
+		throw new ServiceError('Unknown record source.');
 	return withDatabase((db) =>
 		inTransaction(db, () => {
 			const now = timestamp();
 			const assessment =
-				createdVia === 'mcp'
+				createdVia === 'assistant'
 					? parseAssessment({
 							...Object.fromEntries(assessmentJobFields.map((field) => [field.name, null])),
 							...input
@@ -174,7 +176,7 @@ export function editJob(id, input) {
 	);
 }
 
-// Assessment writes are exposed through MCP only; normal job editing never changes them.
+// Assessment writes require an authorized assistant context; normal job editing never changes them.
 export function setJobScore(id, input) {
 	id = parseRecordId(id, 'job_id');
 	const values = parseAssessment(input);
@@ -406,7 +408,8 @@ export function moveJobStage(id, input, createdVia = 'manual') {
 		throw new ValidationError({
 			event_date: 'A stage change takes effect now. Choose today or a past date.'
 		});
-	if (!['manual', 'mcp'].includes(createdVia)) throw new ServiceError('Unknown record source.');
+	if (!['manual', 'assistant'].includes(createdVia))
+		throw new ServiceError('Unknown record source.');
 	return withDatabase((db) =>
 		inTransaction(db, () => {
 			const job = getJobRow(db, id);

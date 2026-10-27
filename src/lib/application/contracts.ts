@@ -43,7 +43,7 @@ export type JobHistory = {
 	stageId: RecordId | null;
 	date: CalendarDate;
 	note: string | null;
-	createdVia: string;
+	createdVia: Actor;
 	createdAt: string;
 	updatedAt: string;
 	label: string;
@@ -60,7 +60,7 @@ export type Job = {
 	nextReminder: ReminderSchedule | null;
 	score: number | null;
 	scoreComment: string | null;
-	createdVia: string;
+	createdVia: Actor;
 	createdAt: string;
 	updatedAt: string;
 	dataset_id?: string;
@@ -73,7 +73,7 @@ export type DocumentMetadata = {
 	size: number;
 	sha256: string;
 	token: string;
-	created_via: string;
+	created_via: Actor;
 	created_at: string;
 	updated_at: string;
 	designations: string[];

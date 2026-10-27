@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-export const databaseFormat = 'saturday.database.workflow';
+export const databaseFormat = 'saturday.database';
 
 export const migrations = [
 	{
 		version: 1,
-		name: 'create_workflow_baseline',
-		sql: `
+		name: 'create_initial_schema',
+		sql:
+			`
 CREATE TABLE app_metadata (
  id INTEGER PRIMARY KEY CHECK (id = 1),
  format TEXT NOT NULL CHECK (format = '${databaseFormat}'),
@@ -49,7 +50,7 @@ CREATE TABLE jobs (
 
   current_stage_id INTEGER NOT NULL REFERENCES workflow_stages(id) ON DELETE RESTRICT,
 
-  created_via TEXT NOT NULL CHECK (created_via IN ('manual', 'mcp')),
+  created_via TEXT NOT NULL CHECK (created_via IN ('manual', 'assistant')),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   location TEXT,
@@ -58,16 +59,12 @@ CREATE TABLE jobs (
   compensation TEXT,
   source TEXT,
   application_deadline TEXT,
-  follow_up_date TEXT,
-  follow_up_comment TEXT CHECK (follow_up_comment IS NULL OR follow_up_date IS NOT NULL),
   is_starred INTEGER NOT NULL DEFAULT 0 CHECK (is_starred IN (0, 1)),
   score REAL,
   score_comment TEXT
 );
 
 CREATE INDEX jobs_current_stage ON jobs(current_stage_id, id);
-CREATE INDEX jobs_follow_up ON jobs(follow_up_date)
-  WHERE follow_up_date IS NOT NULL;
 CREATE INDEX jobs_application_deadline ON jobs(application_deadline)
   WHERE application_deadline IS NOT NULL;
 
@@ -78,7 +75,7 @@ CREATE TABLE job_updates (
   stage_id INTEGER REFERENCES workflow_stages(id) ON DELETE RESTRICT,
   event_date TEXT NOT NULL,
   note TEXT,
-  created_via TEXT NOT NULL CHECK (created_via IN ('manual', 'mcp')),
+  created_via TEXT NOT NULL CHECK (created_via IN ('manual', 'assistant')),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   CHECK (stage_id IS NOT NULL OR length(trim(COALESCE(note, ''))) > 0)
@@ -93,16 +90,14 @@ CREATE TABLE networks (
  id INTEGER PRIMARY KEY AUTOINCREMENT CHECK (id BETWEEN 1 AND 9007199254740991),
  name TEXT NOT NULL CHECK (length(trim(name)) > 0),
  role TEXT, organization TEXT, phone TEXT, email TEXT, link TEXT, notes TEXT,
- follow_up_date TEXT,
- follow_up_comment TEXT CHECK (follow_up_comment IS NULL OR follow_up_date IS NOT NULL),
- created_via TEXT NOT NULL CHECK (created_via IN ('manual', 'mcp')),
+ created_via TEXT NOT NULL CHECK (created_via IN ('manual', 'assistant')),
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE job_networks (
  job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE RESTRICT,
  network_id INTEGER NOT NULL REFERENCES networks(id) ON DELETE RESTRICT,
  notes TEXT,
- created_via TEXT NOT NULL CHECK (created_via IN ('manual', 'mcp')),
+ created_via TEXT NOT NULL CHECK (created_via IN ('manual', 'assistant')),
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
  PRIMARY KEY (job_id, network_id)
 );
@@ -112,17 +107,12 @@ CREATE TABLE network_updates (
  network_id INTEGER NOT NULL REFERENCES networks(id) ON DELETE RESTRICT,
  interaction_date TEXT NOT NULL,
  note TEXT NOT NULL CHECK (length(trim(note)) > 0),
- created_via TEXT NOT NULL CHECK (created_via IN ('manual', 'mcp')),
+ created_via TEXT NOT NULL CHECK (created_via IN ('manual', 'assistant')),
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE INDEX network_updates_timeline
  ON network_updates(network_id, interaction_date DESC, id DESC);
-`
-	},
-	{
-		version: 2,
-		name: 'create_shared_reminders',
-		sql: `
+
 CREATE TABLE reminders (
  id INTEGER PRIMARY KEY AUTOINCREMENT CHECK (id BETWEEN 1 AND 9007199254740991),
  job_id INTEGER REFERENCES jobs(id) ON DELETE RESTRICT,
@@ -131,7 +121,7 @@ CREATE TABLE reminders (
  scheduled_at TEXT NOT NULL,
  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
  dismissed_at TEXT,
- created_via TEXT NOT NULL CHECK (created_via IN ('manual','mcp')),
+ created_via TEXT NOT NULL CHECK (created_via IN ('manual','assistant')),
  created_at TEXT NOT NULL,
  updated_at TEXT NOT NULL,
  CHECK ((job_id IS NOT NULL) != (network_id IS NOT NULL)),
@@ -140,24 +130,11 @@ CREATE TABLE reminders (
 CREATE INDEX reminders_job ON reminders(job_id,is_active,scheduled_at,id);
 CREATE INDEX reminders_person ON reminders(network_id,is_active,scheduled_at,id);
 CREATE INDEX reminders_active ON reminders(is_active,scheduled_at,id);
-INSERT INTO reminders(job_id,note,scheduled_at,created_via,created_at,updated_at)
- SELECT id,follow_up_comment,follow_up_date || 'T00:00',created_via,created_at,updated_at FROM jobs WHERE follow_up_date IS NOT NULL;
-INSERT INTO reminders(network_id,note,scheduled_at,created_via,created_at,updated_at)
- SELECT id,follow_up_comment,follow_up_date || 'T00:00',created_via,created_at,updated_at FROM networks WHERE follow_up_date IS NOT NULL;
-DROP INDEX jobs_follow_up;
-ALTER TABLE jobs DROP COLUMN follow_up_comment;
-ALTER TABLE jobs DROP COLUMN follow_up_date;
-ALTER TABLE networks DROP COLUMN follow_up_comment;
-ALTER TABLE networks DROP COLUMN follow_up_date;
-`
-	},
-	{
-		version: 3,
-		name: 'create_colored_tags',
-		sql: ['job', 'network']
-			.map((kind) => {
-				const owner = kind === 'job' ? 'jobs' : 'networks';
-				return `
+` +
+			['job', 'network']
+				.map((kind) => {
+					const owner = kind === 'job' ? 'jobs' : 'networks';
+					return `
 CREATE TABLE ${kind}_tags (
  id INTEGER PRIMARY KEY AUTOINCREMENT CHECK(id BETWEEN 1 AND 9007199254740991),
  name TEXT NOT NULL UNIQUE CHECK(length(name) BETWEEN 1 AND 50 AND name NOT GLOB '*[^a-z0-9_]*' AND substr(name,1,1)!='_' AND substr(name,-1,1)!='_' AND instr(name,'__')=0),
@@ -172,8 +149,8 @@ CREATE TABLE ${kind}_tag_assignments (
 );
 CREATE INDEX ${kind}_tags_reverse ON ${kind}_tag_assignments(tag_id,${kind}_id);
 `;
-			})
-			.join('')
+				})
+				.join('')
 	}
 ];
 
@@ -183,7 +160,7 @@ const migrationTable = `CREATE TABLE IF NOT EXISTS schema_migrations (
 );`;
 const unsupported = () => {
 	throw new Error(
-		'Unsupported database schema. This development build requires the workflow baseline. Use a compatible build or explicitly reset development data; startup never resets it.'
+		'Unsupported database schema. Use a compatible version of Saturday. Existing data has not been changed.'
 	);
 };
 const signature = (db) =>

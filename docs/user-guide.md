@@ -171,7 +171,7 @@ Select a saved backup and choose **Preview restore** (or Restore from its histor
 
 Previews expire after ten minutes and become invalid on relevant changes. Each preview can be attempted once, including failed attempts. If a response is interrupted, inspect current data and recovery backups before preparing another restore. A corrupt active database requires offline recovery; the in-app workflow needs a healthy target.
 
-Only supported storage formats can be restored. Older UUID-era databases and unbound file backups are rejected without deletion or guessed conversion. Supported dataset-bound version-1 file manifests upgrade to the current format. Newer schemas require a compatible app. Same-dataset database restores preserve allocation counters so older backups do not reuse newer record numbers.
+Only supported storage formats can be restored. Unsupported database schemas, file manifests and backup formats are rejected without changing the source or live data; use a compatible app. Same-dataset database restores preserve allocation counters so older backups do not reuse newer record numbers.
 
 ### File backups and dataset mismatches
 

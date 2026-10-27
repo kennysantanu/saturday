@@ -17,7 +17,7 @@ For an isolated source workspace, set absolute `SATURDAY_DB_PATH`, `SATURDAY_FIL
 
 Development remains unversioned until `0.1.0`: leave placeholder package/lockfile versions unchanged and do not create numbered beta releases. Breaking development APIs/storage may require an explicitly authorized reset; startup and setup must never reset data silently. Retain compatible backups and their source/build when testing upgrades.
 
-Dashboard, Jobs, Network, Documents/Profile, backups, local MCP, extensions, managed installers, and manual update/repair/uninstall are implemented. Implementation does not establish platform certification. The current development database format is `saturday.database.workflow`, schema 3. Schema 1 workflow databases and backups migrate their saved follow-ups into shared reminders; schemas 1–2 upgrade with empty independent tag collections; older numeric-format databases/backups reject unchanged; use disposable storage for development.
+Dashboard, Jobs, Network, Documents/Profile, backups, local MCP, extensions, managed installers, and manual update/repair/uninstall are implemented. Implementation does not establish platform certification. The database format is `saturday.database`, schema 1, with workflow stages, jobs, people, histories, reminders and tags created together. File storage uses `saturday.files`, manifest 1, including all Profile slots. Incompatible stores reject unchanged; use disposable storage for development.
 
 After `0.1.0`, released storage baselines are immutable and supported data changes use migrations independently of application version numbers.
 
@@ -122,14 +122,14 @@ Regression entry points are `tests/workflow.test.mjs`, `tests/workflow.integrati
 
 `compatibility.js` and `migrations.js` define supported formats. Package `saturday.storage` metadata must agree with them. Exact schema/manifest validation is required in addition to version checks.
 
-| Store              | Current contract                                                                                     |
-| ------------------ | ---------------------------------------------------------------------------------------------------- |
-| Database           | `saturday.database.workflow`, schema 3; `app_metadata` holds the dataset UUID                        |
-| Files              | `saturday.files.numeric`, manifest 2; supported version 1 upgrades while retaining original metadata |
-| Coordinated backup | `saturday.backup-pair.numeric`, version 1; validates both actual artifacts and their shared dataset  |
-| Installation       | `saturday.installation`, version 1; installation ID is distinct from dataset ID                      |
+| Store              | Current contract                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| Database           | `saturday.database`, schema 1; `app_metadata` holds the dataset UUID                        |
+| Files              | `saturday.files`, manifest 1; dataset-bound documents and all Profile designations          |
+| Coordinated backup | `saturday.backup-pair`, version 1; validates both actual artifacts and their shared dataset |
+| Installation       | `saturday.installation`, version 1; installation ID is distinct from dataset ID             |
 
-Earlier `saturday.database.numeric` and UUID-era databases/backups, plus unbound file formats/pairs, are unsupported and reject unchanged. Supported manifest version 1 is already dataset-bound; its upgrade to version 2 adds Profile designations and preserves the existing Master CV. Never alter migration records or dataset IDs to bypass compatibility checks.
+Unsupported database schemas, file manifests and backup formats reject without changing the source or live data. Storage versions are independent of the package version. Never alter version records, format identifiers or dataset IDs to bypass compatibility checks.
 
 Jobs, people, tag definitions and both histories use independent positive safe integer IDs. Same-dataset restores retain the higher current/incoming allocator counters. IDs represented by same-dataset job-file folders are also reserved, preventing attachment reassignment after an older database restore. Restoring another dataset uses its identity/counters.
 
@@ -137,9 +137,9 @@ Database and files remain independent. Normal `jobs/<id>` access requires matchi
 
 ### Jobs and Network
 
-The job registry owns stored field names, UI/MCP mappings, types, limits, access, dependencies, and introduction versions. Validation, write adapters, MCP inputs, and backup columns derive from it. User edits cannot write assistant assessment fields; partial edits preserve omitted fields. Current placement is stored as `jobs.current_stage_id`; activity is derived from the referenced workflow stage. History is independent and does not move placement. Workflow stages are included in backup registries, fingerprints and replacement ordering. Stage changes and their milestones commit atomically; corrections cannot remove the sole milestone supporting current placement.
+The job registry owns stored field names, UI/MCP mappings, types, limits, access and dependencies. Validation, write adapters, MCP inputs, and backup columns derive from it. User edits cannot write assistant assessment fields; partial edits preserve omitted fields. Current placement is stored as `jobs.current_stage_id`; activity is derived from the referenced workflow stage. History is independent and does not move placement. Workflow stages are included in backup registries, fingerprints and replacement ordering. Stage changes and their milestones commit atomically; corrections cannot remove the sole milestone supporting current placement.
 
-For a new stored field, update the registry, migration, relevant forms, backup validation/fingerprint, and tests together. Keep existing names and historical `since` values stable. Freeze the released baseline and append migrations afterward; never migrate original backup files in place.
+For a new stored field, update the registry, migration, relevant forms, backup validation/fingerprint, and tests together. Keep released field names stable. Freeze the released baseline and append migrations afterward; never migrate original backup files in place.
 
 Search uses bound literal-contains queries, whitelisted sorts, stable ties, read snapshots for counts/pages, and batched related records. Filters combine with AND across categories and OR within categories. UI Jobs defaults to Active; MCP defaults to All. Historical steps include inactive jobs. Dates use the host's local calendar. Filter additions must update validation, URL/chips, controls, service predicates, MCP documentation, and meaningful tests.
 
@@ -173,7 +173,7 @@ Before the database commit, rollback leaves files untouched. After commit, clean
 
 ### Documents and recovery
 
-Use `files/` services for every file mutation; routes/tools must not write bytes or the manifest directly. Publication checks hashes/conflict tokens and journals changes. Version conversion runs under the file lock and preserves old metadata. Copies and PDFs get independent IDs; Profile designations refer to stable document IDs.
+Use `files/` services for every file mutation; routes/tools must not write bytes or the manifest directly. Publication checks hashes/conflict tokens and journals changes. Unsupported manifests are rejected before publication without rewriting metadata. Copies and PDFs get independent IDs; Profile designations refer to stable document IDs.
 
 Coordinated restore acquires the SQLite write gate before the file lock and persists cross-store recovery state. Interrupted sessions block normal access until offline recovery. Backups include creator-build and dataset metadata; fingerprints must include all stored fields. Previews expire, reject relevant changes, and are single-use. Preserve recovery copies after uncertain failures.
 

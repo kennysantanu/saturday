@@ -60,11 +60,11 @@ const details = {
 	application_deadline: '2026-11-01',
 	is_starred: true
 };
-test('UUID development baseline is rejected unchanged even when its version is 1', () => {
+test('Foreign schema is rejected unchanged even when its version is 1', () => {
 	const legacy = join(scratch, 'legacy.sqlite');
 	const db = new DatabaseSync(legacy);
 	db.exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);
- INSERT INTO schema_migrations VALUES (1, 'create_jobs_and_job_updates', '2026-10-01');
+ INSERT INTO schema_migrations VALUES (1, 'foreign_initial_schema', '2026-10-01');
  CREATE TABLE jobs (id TEXT PRIMARY KEY, job_title TEXT);
  INSERT INTO jobs VALUES ('old-id', 'Keep this');`);
 	db.close();
@@ -73,7 +73,7 @@ test('UUID development baseline is rejected unchanged even when its version is 1
 	assert.throws(() => migrateDatabase(), /Unsupported database schema/);
 	assert.deepEqual(readFileSync(legacy), before);
 });
-test('numeric baseline allocates records, retains dataset identity and never reuses deleted update IDs', () => {
+test('Initial baseline allocates records, retains dataset identity and never reuses deleted update IDs', () => {
 	const job = createJob(details);
 	assert.equal(job.id, 1);
 	assert.equal(createJob(details).id, 2);
@@ -88,7 +88,7 @@ test('numeric baseline allocates records, retains dataset identity and never reu
 			counters: db.prepare('SELECT * FROM sqlite_sequence ORDER BY name').all()
 		}));
 	const before = state();
-	assert.equal(before.metadata.format, 'saturday.database.workflow');
+	assert.equal(before.metadata.format, 'saturday.database');
 	assert.match(before.metadata.dataset_id, /^[a-f0-9-]{36}$/);
 	migrateDatabase();
 	assert.deepEqual(state(), before);
@@ -221,7 +221,7 @@ test('reminders sort earliest, retain closed jobs and dismiss without history', 
 	assert.equal(getDashboardStats({ today: '2026-12-01' }).deadlines.length, 0);
 });
 test('new backup roundtrip includes all details and assessment; detail changes invalidate preview', () => {
-	const job = createJob(details, 'mcp');
+	const job = createJob(details, 'assistant');
 	setJobScore(job.id, { score: 0, score_comment: 'Needs experience' });
 	const before = getJob(job.id);
 	const backup = createBackup();
@@ -236,11 +236,11 @@ test('new backup roundtrip includes all details and assessment; detail changes i
 	restoreBackup(preview.restore_id, true);
 	assert.deepEqual(getJob(job.id), before);
 });
-test('UUID backups are rejected without modifying their source or live records', () => {
+test('Foreign backups are rejected without modifying their source or live records', () => {
 	const legacy = join(scratch, 'legacy.sqlite');
 	const db = new DatabaseSync(legacy);
 	db.exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);
- INSERT INTO schema_migrations VALUES (1, 'create_jobs_and_job_updates', '2026-10-01');
+ INSERT INTO schema_migrations VALUES (1, 'foreign_initial_schema', '2026-10-01');
  CREATE TABLE jobs (id TEXT PRIMARY KEY); INSERT INTO jobs VALUES ('legacy');`);
 	db.close();
 	const bytes = readFileSync(legacy);
@@ -253,7 +253,7 @@ test('UUID backups are rejected without modifying their source or live records',
 	assert.equal(getJob(job.id).id, job.id);
 });
 
-test('complete field registry matches actual SQLite columns at each supported schema version', () => {
+test('complete field registry matches actual SQLite columns', () => {
 	for (let version = 1; version <= schemaVersion; version++) {
 		const db = new DatabaseSync(':memory:');
 		try {
@@ -262,13 +262,13 @@ test('complete field registry matches actual SQLite columns at each supported sc
 				.prepare('PRAGMA table_info(jobs)')
 				.all()
 				.map((column) => column.name);
-			assert.deepEqual(jobColumns(version), actual);
+			assert.deepEqual(jobColumns(), actual);
 		} finally {
 			db.close();
 		}
 	}
 });
-test('original and added fields share validation, mappings, and access rules', () => {
+test('job fields share validation, mappings, and access rules', () => {
 	const job = createJob({
 		...details,
 		posting_url: 'https://example.com/job',
@@ -276,7 +276,7 @@ test('original and added fields share validation, mappings, and access rules', (
 		notes: 'My notes',
 		id: 'forged',
 		is_active: false,
-		created_via: 'mcp'
+		created_via: 'assistant'
 	});
 	assert.notEqual(job.id, 'forged');
 	assert.equal(job.isActive, true);

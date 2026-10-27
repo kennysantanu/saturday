@@ -47,7 +47,7 @@ export function createStorageFixture() {
 					...fields,
 					id: nextId++,
 					current_stage_id: 1,
-					created_via: actor === 'assistant' ? 'mcp' : 'manual',
+					created_via: actor,
 					created_at: '2026-01-01T00:00:00.000Z',
 					updated_at: '2026-01-01T00:00:00.000Z'
 				};

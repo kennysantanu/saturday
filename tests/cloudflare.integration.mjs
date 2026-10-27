@@ -149,6 +149,7 @@ test(
 						'assistant'
 					);
 					assert.equal((await invoke('getJob', [created.id])).title, created.title);
+					assert.equal((await invoke('getJob', [created.id])).createdVia, 'assistant');
 					await request(
 						'/command',
 						{ name: 'edit_job', input: { job_id: created.id, notes: 'From assistant' } },

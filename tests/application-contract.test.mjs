@@ -59,7 +59,7 @@ test('browser operations and assistant commands share partial edits, nullable fi
 	assert.equal(current.notes, 'Keep');
 	assert.equal(current.location, 'Paris');
 	await call('edit_job', { job_id: job.id, location: null });
-	await web.editJob(job.id, { current_stage_id: 999, score: 999, created_via: 'mcp' });
+	await web.editJob(job.id, { current_stage_id: 999, score: 999, created_via: 'assistant' });
 	current = await web.getJob(job.id);
 	assert.equal(current.currentStageId, job.currentStageId);
 	assert.equal(current.createdVia, 'manual');

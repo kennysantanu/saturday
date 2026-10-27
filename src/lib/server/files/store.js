@@ -204,7 +204,7 @@ export function validateManifest(m) {
 			d.size < 0 ||
 			!/^([a-f0-9]{64})$/.test(d.sha256) ||
 			typeof d.token !== 'string' ||
-			!['manual', 'mcp'].includes(d.created_via) ||
+			!['manual', 'assistant'].includes(d.created_via) ||
 			!Number.isFinite(Date.parse(d.created_at)) ||
 			!Number.isFinite(Date.parse(d.updated_at))
 		)
@@ -217,7 +217,6 @@ export function validateManifest(m) {
 		const d = m.documents.find((d) => d.id === id);
 		if (
 			!definition ||
-			(m.format_version === 1 && key !== 'master_cv') ||
 			!d ||
 			!d.key.startsWith('documents/') ||
 			fileType(d.key).type !== definition.format ||
@@ -227,12 +226,6 @@ export function validateManifest(m) {
 	}
 
 	return m;
-}
-// Version 2 adds validated Profile designations; conversions preserve document identity.
-export function migrateManifest(input) {
-	const m = structuredClone(validateManifest(input));
-	m.format_version = storageCompatibility.manifest.version;
-	return validateManifest(m);
 }
 async function recover() {
 	const p = filePaths();
@@ -337,12 +330,6 @@ export async function withFileLock(operation, { initialize = true, allowSession 
 				await atomicJson(join(p.root, 'manifest.json'), m);
 			}
 			validateManifest(m);
-			if (m.format_version !== storageCompatibility.manifest.version) {
-				await atomicJson(join(p.state, 'manifest-v1.json'), m);
-				m = migrateManifest(m);
-				m.token = randomUUID();
-				await atomicJson(join(p.root, 'manifest.json'), m);
-			}
 			databaseIdentity();
 			return await fileSession.run({ manifest: structuredClone(m), hash: manifestHash(m) }, () =>
 				operation(m)

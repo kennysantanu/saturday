@@ -197,11 +197,11 @@ test('independent clients serialize moves without losing either milestone', asyn
 	assert.equal(saved.updates.length, 3);
 	for (const id of ids) assert(saved.updates.some((entry) => entry.stageId === id));
 });
-test('old numeric-baseline databases reject unchanged', () => {
+test('Foreign databases reject unchanged', () => {
 	const file = join(root, 'old.sqlite');
 	const db = new DatabaseSync(file);
 	db.exec(
-		"CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,name TEXT,applied_at TEXT);INSERT INTO schema_migrations VALUES(1,'create_numeric_id_baseline','2020');CREATE TABLE jobs(id INTEGER PRIMARY KEY);INSERT INTO jobs VALUES(7)"
+		"CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,name TEXT,applied_at TEXT);INSERT INTO schema_migrations VALUES(1,'foreign_initial_schema','2020');CREATE TABLE jobs(id INTEGER PRIMARY KEY);INSERT INTO jobs VALUES(7)"
 	);
 	db.close();
 	const bytes = readFileSync(file);
@@ -289,6 +289,8 @@ test('custom workflow restores into fresh and populated database/pair targets wi
 	const pairs = await import('../src/lib/server/files/pairs.js');
 	const { databaseIdentity } = await import('../src/lib/server/database.js');
 	const networks = await import('../src/lib/server/networks.js');
+	const reminders = await import('../src/lib/server/reminders.js');
+	const tags = await import('../src/lib/server/tags.js');
 	addWorkflowStage({ name: 'Technical review' });
 	const custom = stage('Technical review');
 	const original = job();
@@ -299,6 +301,25 @@ test('custom workflow restores into fresh and populated database/pair targets wi
 	addJobUpdate({ job_id: original.id, stage_id: stage('New').id, event_date: '2099-01-01' });
 	const person = networks.createNetwork({ name: 'Preserved contact' });
 	networks.linkJobNetwork({ job_id: original.id, network_id: person.id, notes: 'Referral' });
+	networks.addNetworkUpdate(
+		{ network_id: person.id, interaction_date: '2020-01-01', note: 'Introduction' },
+		'assistant'
+	);
+	const jobTag = tags.createTag({ collection: 'job', name: 'Priority', color: '#123456' });
+	const personTag = tags.createTag({ collection: 'person', name: 'Referral', color: '#abcdef' });
+	tags.setTagAssignments({ collection: 'job', owner_id: original.id, tag_ids: [jobTag.id] });
+	tags.setTagAssignments({ collection: 'person', owner_id: person.id, tag_ids: [personTag.id] });
+	const reminder = reminders.createReminder(
+		{ job_id: original.id, scheduled_at: '2099-01-01T00:00', note: 'Check in' },
+		'assistant'
+	);
+	reminders.dismissReminder({ job_id: original.id, reminder_id: reminder.id });
+	reminders.createReminder({ network_id: person.id, scheduled_at: '2099-01-02T11:30' }, 'manual');
+	const expectedPerson = networks.getNetwork(person.id);
+	const expectedInteractions = networks.listNetworkUpdates({ network_id: person.id });
+	const expectedJobReminders = reminders.listReminders({ job_id: original.id, view: 'all' });
+	const expectedPersonReminders = reminders.listReminders({ network_id: person.id, view: 'all' });
+
 	const profile = await documents.createDocument({
 		filename: 'profile.md',
 		content: '# Preserved profile'
@@ -377,7 +398,19 @@ test('custom workflow restores into fresh and populated database/pair targets wi
 			assert.equal(databaseIdentity().dataset_id, identity);
 			assert.deepEqual(listWorkflowStages(), expectedStages);
 			assert.deepEqual(getJob(original.id), expectedJob);
-			assert.equal(networks.getNetwork(person.id).name, 'Preserved contact');
+			assert.deepEqual(networks.getNetwork(person.id), expectedPerson);
+			assert.deepEqual(
+				networks.listNetworkUpdates({ network_id: person.id }),
+				expectedInteractions
+			);
+			assert.deepEqual(
+				reminders.listReminders({ job_id: original.id, view: 'all' }),
+				expectedJobReminders
+			);
+			assert.deepEqual(
+				reminders.listReminders({ network_id: person.id, view: 'all' }),
+				expectedPersonReminders
+			);
 			assert.equal(
 				networks.listNetworks({ job_id: original.id }).networks[0].job_link.notes,
 				'Referral'
