@@ -1,16 +1,15 @@
 import { tagPickerData } from '$lib/server/tag-forms.js';
 import { reminderActions, loadReminders, optionalReminder } from '$lib/server/reminder-actions.js';
 import { error, fail, redirect } from '@sveltejs/kit';
-import * as networks from '$lib/server/networks.js';
-import { getJob, searchJobs } from '$lib/server/services.js';
+import * as networks from '$lib/server/application.js';
+import { getJob, searchJobs } from '$lib/server/application.js';
 import { ServiceError, ValidationError, localCalendarDate } from '$lib/server/validation.js';
 import { networkReturn, networkDetailUrl } from '$lib/network-navigation.js';
 import { recordDeletionAction } from '$lib/server/record-deletion-actions.js';
-
-export function load({ params, url }) {
+export async function load({ params, url }) {
 	let person;
 	try {
-		person = networks.getNetwork(params.id);
+		person = await networks.getNetwork(params.id);
 	} catch (e) {
 		if (e instanceof ServiceError || e instanceof ValidationError) error(404, 'Person not found');
 		throw e;
@@ -20,7 +19,7 @@ export function load({ params, url }) {
 	let missingJob = query.missing_job === '1';
 	if (returnTo.startsWith('/jobs/')) {
 		try {
-			if (!getJob(new URL(returnTo, url).pathname.split('/')[2])) {
+			if (!(await getJob(new URL(returnTo, url).pathname.split('/')[2]))) {
 				returnTo = '/networks';
 				missingJob = true;
 			}
@@ -35,29 +34,36 @@ export function load({ params, url }) {
 		picker = null,
 		errors = {};
 	try {
-		linkedJobs = networks.listNetworkJobs({ network_id: params.id, page: query.jobs_page });
-		history = networks.listNetworkUpdates({ network_id: params.id, page: query.updates_page });
+		linkedJobs = await networks.listNetworkJobs({ network_id: params.id, page: query.jobs_page });
+		history = await networks.listNetworkUpdates({
+			network_id: params.id,
+			page: query.updates_page
+		});
 		if (query.link_job === '1')
-			picker = searchJobs({ view: 'all', query: query.job_query ?? '', page: query.picker_page });
+			picker = await searchJobs({
+				view: 'all',
+				query: query.job_query ?? '',
+				page: query.picker_page
+			});
 	} catch (e) {
 		if (!(e instanceof ValidationError)) throw e;
 		errors = e.fieldErrors;
-		linkedJobs ??= networks.listNetworkJobs({ network_id: params.id });
-		history ??= networks.listNetworkUpdates({ network_id: params.id });
-		if (query.link_job === '1') picker = searchJobs({ view: 'all' });
+		linkedJobs ??= await networks.listNetworkJobs({ network_id: params.id });
+		history ??= await networks.listNetworkUpdates({ network_id: params.id });
+		if (query.link_job === '1') picker = await searchJobs({ view: 'all' });
 	}
 	return {
-		tagOptions: tagPickerData(
+		tagOptions: await tagPickerData(
 			'person',
 			person.tags.map((tag) => tag.id)
 		),
-		reminderData: loadReminders({ network_id: params.id }, url.searchParams),
+		reminderData: await loadReminders({ network_id: params.id }, url.searchParams),
 		person,
 		returnTo,
 		linkedJobs,
 		history,
 		picker,
-		linkedIds: picker ? networks.networkLinkIds({ network_id: params.id }) : [],
+		linkedIds: picker ? await networks.networkLinkIds({ network_id: params.id }) : [],
 		query,
 		errors,
 		today: localCalendarDate(),
@@ -80,7 +86,7 @@ function action(operation, saved) {
 					? 'deleteInteraction'
 					: saved;
 		try {
-			operation({ ...values, network_id: params.id });
+			await operation({ ...values, network_id: params.id });
 		} catch (e) {
 			if (e instanceof ValidationError)
 				return fail(400, { action: actionName, errors: e.fieldErrors, values });
@@ -102,16 +108,16 @@ function action(operation, saved) {
 export const actions = {
 	...reminderActions('person'),
 	deletePerson: recordDeletionAction('person', networks.deleteNetwork),
-	link: action((i) => networks.linkJobNetwork(i, 'manual'), 'network-linked'),
+	link: action(async (i) => await networks.linkJobNetwork(i), 'network-linked'),
 	note: action(networks.editJobNetwork, 'network-note'),
 	unlink: action(networks.unlinkJobNetwork, 'network-unlinked'),
 	addInteraction: action(
-		(i) => networks.addNetworkUpdate({ ...i, ...optionalReminder(i) }, 'manual'),
+		async (i) => await networks.addNetworkUpdate({ ...i, ...optionalReminder(i) }),
 		'interaction'
 	),
 	editInteraction: action(networks.editNetworkUpdate, 'interaction-corrected'),
 	deleteInteraction: action(
-		(i) => networks.deleteNetworkUpdate({ ...i, confirm: i.confirm === 'true' }),
+		async (i) => await networks.deleteNetworkUpdate({ ...i, confirm: i.confirm === 'true' }),
 		'interaction-deleted'
 	)
 };

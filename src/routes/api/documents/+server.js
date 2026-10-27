@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { listDocuments } from '$lib/server/files/documents.js';
+import { listDocuments } from '$lib/server/application.js';
 export async function GET({ url }) {
 	try {
 		const result = await listDocuments({
@@ -8,7 +8,6 @@ export async function GET({ url }) {
 			editable_markdown: url.searchParams.get('markdown') === '1',
 			editable_format: url.searchParams.get('format') || undefined
 		});
-
 		return json(result, { headers: { 'cache-control': 'no-store' } });
 	} catch (e) {
 		return json({ error: e.code ? e.message : 'File store unavailable.' }, { status: 400 });

@@ -1,10 +1,9 @@
 import { tagPickerData } from '$lib/server/tag-forms.js';
-import { localScheduleNow } from '$lib/server/reminders.js';
+import { localScheduleNow } from '$lib/domain/reminders.js';
 import { redirect } from '@sveltejs/kit';
-import { listNetworks } from '$lib/server/networks.js';
+import { listNetworks } from '$lib/server/application.js';
 import { ValidationError, localCalendarDate } from '$lib/server/validation.js';
-
-export function load({ url }) {
+export async function load({ url }) {
 	const filters = Object.fromEntries(
 		['name', 'role', 'organization', 'follow_up', 'sort', 'page']
 			.filter((key) => url.searchParams.has(key))
@@ -27,11 +26,11 @@ export function load({ url }) {
 		return '/networks' + (params.size ? '?' + params : '');
 	}
 	try {
-		const result = listNetworks({ ...filters, limit: 50 });
+		const result = await listNetworks({ ...filters, limit: 50 });
 		if (url.pathname + url.search !== href(result.page)) redirect(303, href(result.page));
 		return {
 			...result,
-			tagOptions: tagPickerData('person', filters.tag_ids),
+			tagOptions: await tagPickerData('person', filters.tag_ids),
 			filters,
 			errors: {},
 			today: localCalendarDate(),
@@ -46,7 +45,7 @@ export function load({ url }) {
 	} catch (e) {
 		if (!(e instanceof ValidationError)) throw e;
 		return {
-			tagOptions: tagPickerData('person'),
+			tagOptions: await tagPickerData('person'),
 			networks: [],
 			total: 0,
 			page: 1,

@@ -1,11 +1,9 @@
 import { error } from '@sveltejs/kit';
-import { createReadStream } from 'node:fs';
-import { Readable } from 'node:stream';
-import { getFileBackup } from '$lib/server/files/backups.js';
+import { downloadFileBackup } from '$lib/server/application.js';
 export async function GET({ params }) {
 	try {
-		const { path, metadata } = await getFileBackup(params.backupId);
-		return new Response(Readable.toWeb(createReadStream(path)), {
+		const { stream, metadata } = await downloadFileBackup(params.backupId);
+		return new Response(stream, {
 			headers: {
 				'content-type': 'application/zip',
 				'content-length': String(metadata.bytes),

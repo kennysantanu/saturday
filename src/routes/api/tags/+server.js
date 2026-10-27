@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import * as tags from '$lib/server/tags.js';
+import * as tags from '$lib/server/application.js';
 import { sameOrigin } from '$lib/server/access-settings.js';
 import { ServiceError, ValidationError } from '$lib/server/validation.js';
 function failure(error) {
@@ -15,11 +15,11 @@ function failure(error) {
 	console.error('Tag request failed:', error);
 	return json({ error: 'Tags are unavailable. Try again.' }, { status: 500 });
 }
-export function GET({ url }) {
+export async function GET({ url }) {
 	try {
 		return json({
-			...tags.listTags(Object.fromEntries(url.searchParams)),
-			selectedTags: tags.getTagSelection({
+			...(await tags.listTags(Object.fromEntries(url.searchParams))),
+			selectedTags: await tags.getTagSelection({
 				collection: url.searchParams.get('collection'),
 				tag_ids: url.searchParams.getAll('selected')
 			})
@@ -42,7 +42,7 @@ export async function POST(event) {
 		const input = await event.request.json();
 		if (!input || typeof input !== 'object' || !Object.hasOwn(operations, input.action))
 			return json({ error: 'Unknown tag action.' }, { status: 400 });
-		return json(operations[input.action](input));
+		return json(await operations[input.action](input));
 	} catch (error) {
 		return failure(error);
 	}

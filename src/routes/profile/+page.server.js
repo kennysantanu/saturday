@@ -1,8 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { documentDesignations } from '$lib/file-types.js';
-import { listDocuments, getDocument, setMasterDocument } from '$lib/server/files/documents.js';
+import { listDocuments, getDocument, setMasterDocument } from '$lib/server/application.js';
 import { publicFileError } from '$lib/server/files/store.js';
-
 export async function load({ url }) {
 	try {
 		const catalog = await listDocuments();

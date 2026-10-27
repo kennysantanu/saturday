@@ -20,6 +20,7 @@
 	import { enhanceWithFocus, withPending, focusFirstError } from '$lib/forms';
 	import { formatDateTime } from '$lib/format';
 	import type { Reminder, ReminderPage, ReminderDraft } from '$lib/reminders';
+	import { reminderDraft } from '$lib/activity-drafts.js';
 	let {
 		data,
 		form,
@@ -64,11 +65,7 @@
 		selected = entry;
 		originalActive = entry?.is_active ?? true;
 		active = originalActive;
-		draft = {
-			reminder_date: entry?.scheduled_at.slice(0, 10) ?? today,
-			reminder_time: entry?.scheduled_at.slice(11, 16) ?? '00:00',
-			reminder_note: entry?.note ?? ''
-		};
+		draft = reminderDraft({ today, entry });
 		open = true;
 	}
 	$effect(() => {

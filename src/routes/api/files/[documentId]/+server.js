@@ -1,6 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { Readable } from 'node:stream';
-import { getDocument, openDocument } from '$lib/server/files/documents.js';
+import { getDocument, openDocument } from '$lib/server/application.js';
 export async function GET({ params, url, request }) {
 	try {
 		const scope = url.searchParams.get('scope') ?? 'documents';
@@ -29,7 +28,7 @@ export async function GET({ params, url, request }) {
 		}
 		const opened = await openDocument({ id: d.id, scope, range, token: d.token });
 		const inline = url.searchParams.get('preview') === '1' && d.format === 'pdf';
-		return new Response(Readable.toWeb(opened.stream), {
+		return new Response(opened.stream, {
 			status: range ? 206 : 200,
 			headers: {
 				'content-type': inline ? 'application/pdf' : 'application/octet-stream',

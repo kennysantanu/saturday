@@ -4,28 +4,21 @@ import {
 	editReminder,
 	dismissReminder,
 	deleteReminder,
-	listReminders,
-	localScheduleNow
-} from './reminders.js';
+	listReminders
+} from './application.js';
+import { localScheduleNow } from '../domain/reminders.js';
 import { ServiceError, ValidationError } from './validation.js';
+export { reminderFromForm, optionalReminder } from '../activity-drafts.js';
+import { reminderFromForm } from '../activity-drafts.js';
 
-export function reminderFromForm(values) {
-	return {
-		scheduled_at: `${values.reminder_date ?? ''}T${values.reminder_time || '00:00'}`,
-		note: values.reminder_note ?? null
-	};
-}
-export function optionalReminder(values) {
-	return values.add_reminder === 'on' ? { reminder: reminderFromForm(values) } : {};
-}
-export function loadReminders(owner, params) {
+export async function loadReminders(owner, params) {
 	const page = (key) =>
 		/^[1-9]\d*$/.test(params.get(key) ?? '') && Number.isSafeInteger(Number(params.get(key)))
 			? Number(params.get(key))
 			: 1;
 	return {
-		active: listReminders({ ...owner, limit: 5, page: page('reminders_page') }),
-		past: listReminders({
+		active: await listReminders({ ...owner, limit: 5, page: page('reminders_page') }),
+		past: await listReminders({
 			...owner,
 			view: 'inactive',
 			limit: 5,
@@ -46,16 +39,16 @@ export function reminderActions(kind) {
 						owner = { [field]: params.id };
 					try {
 						const identity = { ...owner, reminder_id: values.reminder_id };
-						if (mode === 'create') createReminder({ ...owner, ...reminderFromForm(values) });
+						if (mode === 'create') await createReminder({ ...owner, ...reminderFromForm(values) });
 						if (mode === 'edit')
-							editReminder({
+							await editReminder({
 								...identity,
 								...reminderFromForm(values),
 								...(values.active_changed === '1' ? { is_active: values.is_active === 'on' } : {})
 							});
-						if (mode === 'dismiss') dismissReminder(identity);
+						if (mode === 'dismiss') await dismissReminder(identity);
 						if (mode === 'delete')
-							deleteReminder({ ...identity, confirm: values.confirm === 'true' });
+							await deleteReminder({ ...identity, confirm: values.confirm === 'true' });
 					} catch (error) {
 						if (error instanceof ValidationError)
 							return fail(400, { action: name, errors: error.fieldErrors, values });

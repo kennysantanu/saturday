@@ -1,6 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { Readable } from 'node:stream';
-import { uploadDocument } from '$lib/server/files/documents.js';
+import { uploadDocument } from '$lib/server/application.js';
 export async function POST({ request, url }) {
 	if (request.headers.get('origin') !== url.origin)
 		return json({ error: 'Cross-origin uploads are not allowed.' }, { status: 403 });
@@ -11,7 +10,7 @@ export async function POST({ request, url }) {
 			filename: url.searchParams.get('filename'),
 			designation: url.searchParams.get('designation') ?? undefined,
 			catalog_token: url.searchParams.get('catalog_token') ?? undefined,
-			stream: Readable.fromWeb(request.body)
+			stream: request.body
 		});
 		return json(doc);
 	} catch (e) {
