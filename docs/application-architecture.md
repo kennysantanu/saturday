@@ -2,6 +2,8 @@
 
 Saturday currently runs as a personal Node application with SQLite and local files. The shared core separates career operations from that runtime. It does not provide cloud deployment, native apps, remote MCP, provider sign-in or a built-in chat assistant.
 
+The shared modules also execute in a local Cloudflare workerd harness. See the [Cloudflare and hosted storage contracts](cloudflare-storage-contract.md) for commands, verification scope and requirements for a future PostgreSQL/private-object-storage implementation.
+
 ## Calling an operation
 
 Web loaders/actions use `src/lib/server/application.js`. The local stdio adapter supplies its assistant application to `createAssistantCatalog` in `src/lib/application/assistant-catalog.js`. Both reach the same operations and local persistence code. Routes still own HTTP status, redirects, form failures, authentication and navigation. MCP still owns protocol responses, error envelopes and trusted extension registration.

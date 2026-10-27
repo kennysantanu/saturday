@@ -43,25 +43,27 @@ History records local macOS source/setup, PDF, HTTP/browser, and limited managed
 
 ## Commands and verification
 
-| Command                                                | Purpose                                                                           |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| `npm run setup`                                        | Resumable dependency/PDF/build/storage preparation                                |
-| `npm run dev`                                          | Loopback development server                                                       |
-| `npm run open` / `npm run stop` / `npm run restart`    | Control this installation's background UI                                         |
-| `npm run start`                                        | Production start with foreground control when creating a server                   |
-| `npm run status`                                       | Verify installation/build readiness and actual URL                                |
-| `npm run build` / `npm run build:mcp`                  | Build web and MCP / MCP only                                                      |
-| `npm run migrate`                                      | Create the database or apply supported migrations                                 |
-| `npm run check`                                        | Generate extension registrations; check Svelte and types                          |
-| `npm run lint` / `npm run format`                      | Check / write Prettier formatting                                                 |
-| `npm run setup:pdf`                                    | Install Puppeteer's managed Chrome                                                |
-| `npm test`                                             | Build MCP; run service, CLI, process, and protocol tests                          |
-| `npm run test:web`                                     | Build production; run HTTP, lifecycle, password, LAN, and available Chrome checks |
-| `npm run test:beta`                                    | Browser review against an existing production build                               |
-| `npm run verify`                                       | Lint, type checks, unit/integration tests, production tests, browser review       |
-| `npm run assistant -- config --format json`            | Generate local MCP configuration; also supports TOML                              |
-| `npm run update:check` / `npm run update -- --confirm` | Check / perform a manual application update                                       |
-| `npm run repair` / `npm run uninstall -- --confirm`    | Repair installation / uninstall with data retained                                |
+| Command                                                | Purpose                                                                                 |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `npm run setup`                                        | Resumable dependency/PDF/build/storage preparation                                      |
+| `npm run dev`                                          | Loopback development server                                                             |
+| `npm run open` / `npm run stop` / `npm run restart`    | Control this installation's background UI                                               |
+| `npm run start`                                        | Production start with foreground control when creating a server                         |
+| `npm run status`                                       | Verify installation/build readiness and actual URL                                      |
+| `npm run build` / `npm run build:mcp`                  | Build web and MCP / MCP only                                                            |
+| `npm run migrate`                                      | Create the database or apply supported migrations                                       |
+| `npm run check`                                        | Generate extension registrations; check Svelte and types                                |
+| `npm run lint` / `npm run format`                      | Check / write Prettier formatting                                                       |
+| `npm run setup:pdf`                                    | Install Puppeteer's managed Chrome                                                      |
+| `npm test`                                             | Build MCP; run service, CLI, process, and protocol tests                                |
+| `npm run test:contracts`                               | Check application contracts against actual local SQLite and document adapters           |
+| `npm run test:cloudflare`                              | Build shared core and execute its offline Miniflare/workerd harness                     |
+| `npm run test:web`                                     | Build production; run HTTP, lifecycle, password, LAN, and available Chrome checks       |
+| `npm run test:beta`                                    | Browser review against an existing production build                                     |
+| `npm run verify`                                       | Lint, type checks, unit/contracts, Cloudflare runtime, production tests, browser review |
+| `npm run assistant -- config --format json`            | Generate local MCP configuration; also supports TOML                                    |
+| `npm run update:check` / `npm run update -- --confirm` | Check / perform a manual application update                                             |
+| `npm run repair` / `npm run uninstall -- --confirm`    | Repair installation / uninstall with data retained                                      |
 
 Backup/file commands are in the [agent guide](agent-guide.md#backup-and-recovery-commands); extension commands are in the [extension guide](extension-guide.md).
 
@@ -97,6 +99,8 @@ For the optional large-archive case, run `node --max-old-space-size=128 --test t
 | `docs/`                                                               | User, assistant, and contributor guides                                             |
 
 New browser and assistant features use the shared asynchronous application boundary; await its operations before handling results or redirecting. See [Application architecture](application-architecture.md) for transaction, streaming, authorization, platform and future transfer contracts. Existing local service exports remain for scripts, trusted extensions and storage regression fixtures.
+
+The [Cloudflare and hosted storage guide](cloudflare-storage-contract.md) describes the local compatibility harness and the remaining PostgreSQL/Supabase requirements. Its fixture Worker stays under `tests/fixtures/cloudflare/`; `scripts/cloudflare-build.mjs` guards the portable dependency graph. Miniflare is a pinned development dependency. Run `test:cloudflare` with loopback/process permission; it blocks outbound Worker requests and needs no account, project or credentials. A core harness pass does not establish full-app cloud support.
 
 ## Local workflow and access verification — 2026-10-21
 
