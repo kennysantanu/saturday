@@ -1,22 +1,42 @@
-import { listTags } from '$lib/server/tags.js';
 import {
+	getBackupMetadata,
+	listTags,
 	listWorkflowStages,
 	addWorkflowStage,
 	renameWorkflowStage,
 	setWorkflowStageClosed,
 	reorderWorkflowStage,
 	archiveWorkflowStage,
-	restoreWorkflowStage
-} from '$lib/server/workflow.js';
-import { ServiceError, ValidationError } from '$lib/server/validation.js';
-import {
+	restoreWorkflowStage,
+	listFileBackups,
+	prepareFileRestore,
+	restoreFiles,
+	storageSummary,
+	pdfReadiness,
+	createManualBackup,
+	listBackupHistory,
+	deleteManualBackup,
+	prepareBackupPairRestore,
+	restoreBackupPair,
+	createBackup,
+	importBackupBytes,
+	prepareRestore,
+	restoreBackup
+} from '$lib/server/application.js';
+import { localPlatform, localCapabilities } from '$lib/server/platform.js';
+const {
 	checkUpdates,
 	installedCheck,
 	operationStatus,
 	queueOperation,
-	ownedRemovalTargets,
-	operationPaths
-} from '$lib/server/installation-operations.js';
+	serverSummary,
+	controlServer,
+	loginStartupStatus,
+	setLoginStartup,
+	setExtensionsEnabled
+} = localPlatform;
+import { ServiceError, ValidationError } from '$lib/server/validation.js';
+import { ownedRemovalTargets } from '$lib/server/installation-operations.js';
 import {
 	accessForm,
 	accessCookieName,
@@ -35,58 +55,15 @@ import {
 	passwordHash
 } from '$lib/server/access-auth.js';
 import { withAccessChange } from '$lib/server/access-admin.js';
-import {
-	serverSummary,
-	controlServer,
-	validServerSession,
-	networkSummary
-} from '$lib/server/server-lifecycle.js';
-import {
-	assistantConfiguration,
-	getInstallation,
-	loginStartupStatus,
-	setLoginStartup
-} from '$lib/server/installation.js';
-import { spawn } from 'node:child_process';
-import {
-	extensionCatalog,
-	extensionPaths,
-	setExtensionsEnabled,
-	extensionError
-} from '$lib/server/extensions.js';
-import {
-	getFileBackup,
-	listFileBackups,
-	prepareFileRestore,
-	restoreFiles
-} from '$lib/server/files/backups.js';
-import { storageSummary } from '$lib/server/files/documents.js';
-import { filePaths } from '$lib/server/files/store.js';
-import { pdfReadiness } from '$lib/server/files/pdf.js';
-import {
-	createManualBackup,
-	listBackupHistory,
-	deleteManualBackup,
-	prepareBackupPairRestore,
-	restoreBackupPair
-} from '$lib/server/files/pairs.js';
+import { validServerSession, networkSummary } from '$lib/server/server-lifecycle.js';
+import { assistantConfiguration, getInstallation } from '$lib/server/installation.js';
+import { extensionPaths, extensionError } from '$lib/server/extensions.js';
 import { fail, redirect } from '@sveltejs/kit';
-import {
-	createBackup,
-	getBackupPaths,
-	getBackupFile,
-	importBackupBytes,
-	prepareRestore,
-	restoreBackup,
-	publicBackupError,
-	MAX_BACKUP_BYTES,
-	BackupError
-} from '$lib/server/backups.js';
+import { publicBackupError, MAX_BACKUP_BYTES, BackupError } from '$lib/server/backups.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { getDatabasePath, getProjectRoot, openDatabase } from '$lib/server/database.js';
+import { getDatabasePath, getProjectRoot } from '$lib/server/database.js';
 import { buildInfo, storageCompatibility } from '$lib/server/compatibility.js';
-
 export async function load(event) {
 	const { setHeaders, url } = event;
 	setHeaders({ 'x-saturday-build': buildInfo.id });
@@ -102,7 +79,7 @@ export async function load(event) {
 	let extensionsEnabled = false,
 		extensionsError = null;
 	try {
-		extensionsEnabled = (await extensionCatalog()).extensions_enabled;
+		extensionsEnabled = (await localPlatform.extensionCatalog()).extensions_enabled;
 	} catch (e) {
 		extensionsError = extensionError(e).message;
 	}
@@ -129,22 +106,7 @@ export async function load(event) {
 		history = await listBackupHistory({ offset: (backupPage - 1) * 50 });
 	}
 	const backupHistory = history.backups;
-	const db = openDatabase({ migrate: false });
-	let diagnostics;
-	try {
-		diagnostics = {
-			databaseVersion: db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get()
-				.version,
-			databaseFormat: db.prepare('SELECT format FROM app_metadata WHERE id=1').get().format,
-			datasetId: db.prepare('SELECT dataset_id FROM app_metadata WHERE id=1').get().dataset_id,
-			manifestVersion: fileSummary?.format_version ?? null,
-			manifestFormat: fileSummary?.format ?? null,
-			databasePaths: getBackupPaths(),
-			filePaths: filePaths()
-		};
-	} finally {
-		db.close();
-	}
+	const diagnostics = localPlatform.storageDiagnostics(fileSummary);
 	let installationOperation = null,
 		updateCheck = null,
 		installationError = null,
@@ -160,7 +122,7 @@ export async function load(event) {
 	let workflowStages = [],
 		workflowError = null;
 	try {
-		workflowStages = listWorkflowStages();
+		workflowStages = await listWorkflowStages();
 	} catch {
 		workflowError =
 			'Workflow is unavailable. Repair storage before editing stages; diagnostics and recovery remain available.';
@@ -168,7 +130,10 @@ export async function load(event) {
 	return {
 		tagCollections: workflowError
 			? null
-			: { job: listTags({ collection: 'job' }), person: listTags({ collection: 'person' }) },
+			: {
+					job: await listTags({ collection: 'job' }),
+					person: await listTags({ collection: 'person' })
+				},
 		access: event.locals.access,
 		workflowStages,
 		workflowError,
@@ -194,6 +159,7 @@ export async function load(event) {
 		databasePath,
 		filesError,
 		fileSummary,
+		capabilities: localCapabilities,
 		fileBackups,
 		pdfStatus: await pdfReadiness(),
 		mcpPath,
@@ -202,7 +168,6 @@ export async function load(event) {
 		configurationToml: config.toml
 	};
 }
-
 function actionFailure(error) {
 	const detail =
 		error.code && !(error instanceof BackupError)
@@ -257,22 +222,22 @@ export const actions = {
 		try {
 			switch (values.kind) {
 				case 'add':
-					addWorkflowStage({ name: values.name, is_closed: values.is_closed === '1' });
+					await addWorkflowStage({ name: values.name, is_closed: values.is_closed === '1' });
 					break;
 				case 'rename':
-					renameWorkflowStage(values.stage_id, values.name);
+					await renameWorkflowStage(values.stage_id, values.name);
 					break;
 				case 'closure':
-					setWorkflowStageClosed(values.stage_id, values.is_closed === '1', options);
+					await setWorkflowStageClosed(values.stage_id, values.is_closed === '1', options);
 					break;
 				case 'reorder':
-					reorderWorkflowStage(values.stage_id, values.direction, options);
+					await reorderWorkflowStage(values.stage_id, values.direction, options);
 					break;
 				case 'archive':
-					archiveWorkflowStage(values.stage_id, options);
+					await archiveWorkflowStage(values.stage_id, options);
 					break;
 				case 'restore':
-					restoreWorkflowStage(values.stage_id);
+					await restoreWorkflowStage(values.stage_id);
 					break;
 				default:
 					throw new ServiceError('Choose an available workflow action.');
@@ -449,27 +414,7 @@ export const actions = {
 		if (!localBrowser(event) || !sameOrigin(event))
 			return fail(403, { storageError: 'Open folders from this computer’s local browser.' });
 		try {
-			const path = getInstallation().data_root;
-			if (!existsSync(path)) throw new Error('The data directory is unavailable.');
-			const command =
-				process.platform === 'darwin'
-					? 'open'
-					: process.platform === 'win32'
-						? 'explorer.exe'
-						: process.platform === 'linux'
-							? 'xdg-open'
-							: null;
-			if (!command)
-				throw new Error('Opening a folder is unavailable on this platform. Copy its path instead.');
-			await new Promise((resolve, reject) => {
-				const child = spawn(command, [path], { stdio: 'ignore', shell: false });
-				child.once('error', reject);
-				child.once('close', (code) =>
-					code === 0
-						? resolve()
-						: reject(new Error('Could not open the folder. Copy its path instead.'))
-				);
-			});
+			await localPlatform.openDataFolder();
 			return { folderOpened: true };
 		} catch (e) {
 			return fail(400, { storageError: e.message });
@@ -563,10 +508,10 @@ export const actions = {
 		}
 		redirect(303, '/settings?saved=restored');
 	},
-	download: () => {
+	download: async () => {
 		let backup;
 		try {
-			backup = createBackup();
+			backup = await createBackup();
 		} catch (error) {
 			return actionFailure(error);
 		}
@@ -593,12 +538,12 @@ export const actions = {
 			if (file && typeof file !== 'string' && file.size) {
 				if (file.size > MAX_BACKUP_BYTES)
 					return fail(413, { backupError: 'Backups must be no larger than 100 MiB.' });
-				backupId = importBackupBytes(new Uint8Array(await file.arrayBuffer())).backup_id;
+				backupId = (await importBackupBytes(new Uint8Array(await file.arrayBuffer()))).backup_id;
 			}
 			if (typeof backupId !== 'string' || !backupId)
 				return fail(400, { backupError: 'Choose a backup file or a saved backup.' });
 			if (backupId.startsWith('all:')) {
-				const database = getBackupFile(backupId.slice(4)).metadata;
+				const database = await getBackupMetadata(backupId.slice(4));
 				const fileId =
 					database.file_backup_id ??
 					(await listFileBackups({ limit: 100 })).backups.find(
@@ -620,7 +565,7 @@ export const actions = {
 					filePreview: await prepareFileRestore({ backup_id: backupId.slice(6), mode: 'replace' })
 				};
 			if (backupId.startsWith('database:')) backupId = backupId.slice(9);
-			return { preview: prepareRestore(backupId) };
+			return { preview: await prepareRestore(backupId) };
 		} catch (error) {
 			return actionFailure(error);
 		}
@@ -629,7 +574,7 @@ export const actions = {
 		let result;
 		try {
 			const values = await request.formData();
-			result = restoreBackup(
+			result = await restoreBackup(
 				String(values.get('restore_id') ?? ''),
 				values.get('confirm') === 'true'
 			);

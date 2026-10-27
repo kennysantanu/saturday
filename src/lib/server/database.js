@@ -72,7 +72,7 @@ export function migrateDatabase() {
 export function withDatabase(callback) {
 	const db = openDatabase();
 	try {
-		return callback(db);
+		return synchronousResult(callback(db));
 	} finally {
 		db.close();
 	}
@@ -160,7 +160,7 @@ export function inTransaction(db, callback, { checkFiles = true } = {}) {
 			assertDatabaseAvailable();
 			assertMigrationHistory(db);
 			if (checkFiles) assertFileStorageCompatible();
-			const result = callback();
+			const result = synchronousResult(callback());
 			db.exec('COMMIT');
 			return result;
 		} catch (error) {
@@ -170,4 +170,16 @@ export function inTransaction(db, callback, { checkFiles = true } = {}) {
 			throw error;
 		}
 	});
+}
+
+// Synchronous SQLite callbacks must finish before commit/close. Async work belongs outside.
+function synchronousResult(result) {
+	if (result && typeof result.then === 'function') {
+		Promise.resolve(result).catch(() => {});
+		throw new ServiceError(
+			'SQLite callbacks must be synchronous. Await application operations outside the transaction.',
+			'async_transaction'
+		);
+	}
+	return result;
 }

@@ -1,17 +1,16 @@
 import { tagPickerData } from '$lib/server/tag-forms.js';
-import { listWorkflowStages } from '$lib/server/workflow.js';
+import { listWorkflowStages, searchJobs } from '$lib/server/application.js';
 import { redirect } from '@sveltejs/kit';
-import { searchJobs, ValidationError } from '$lib/server/services.js';
+import { ValidationError } from '$lib/domain/validation.js';
 import { parseSchema, jobSearchSchema } from '$lib/server/validation.js';
 import { searchFromUrl, filterChips, searchUrl } from '$lib/job-search.js';
-
-export function load({ url }) {
-	const stages = listWorkflowStages();
+export async function load({ url }) {
+	const stages = await listWorkflowStages();
 	const input = searchFromUrl(url.searchParams);
 	try {
 		const filters = parseSchema(jobSearchSchema, { ...input, limit: 50 });
-		const result = searchJobs(filters);
-		const tagOptions = tagPickerData('job', filters.tag_ids);
+		const result = await searchJobs(filters);
+		const tagOptions = await tagPickerData('job', filters.tag_ids);
 		let canonical = searchUrl(filters, result.page);
 		const saved = url.searchParams.get('saved');
 		if (saved === 'job-deleted' || saved === 'job-missing') {
@@ -34,7 +33,7 @@ export function load({ url }) {
 		if (!(error instanceof ValidationError)) throw error;
 		return {
 			stages,
-			tagOptions: tagPickerData('job'),
+			tagOptions: await tagPickerData('job'),
 			jobs: [],
 			total: 0,
 			totalJobs: 0,

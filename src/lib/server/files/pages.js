@@ -1,8 +1,8 @@
 import { documentDesignations } from '../../file-types.js';
 import { fail, redirect, error } from '@sveltejs/kit';
-import * as documents from './documents.js';
-import { generateDocumentPdf } from './pdf.js';
-import { filename, publicFileError, reject } from './store.js';
+import * as documents from '../application.js';
+import { generateDocumentPdf } from '../application.js';
+import { filename, publicFileError, reject } from '../../domain/documents.js';
 const pageScope = (event) => event.params.id ?? 'documents';
 const listUrl = (scope) => (scope === 'documents' ? '/documents' : `/jobs/${scope}/documents`);
 function fileFailure(e, values = {}) {
@@ -19,7 +19,6 @@ export async function listLoad(event) {
 			query: event.url.searchParams.get('query') ?? '',
 			page: Number(event.url.searchParams.get('page') || 1)
 		});
-
 		return {
 			...result,
 			scope,
@@ -138,7 +137,6 @@ export async function editorLoad(e) {
 			returnTo: profile ? '/profile' : null
 		};
 	}
-
 	let d;
 	try {
 		d = await documents.getDocument(

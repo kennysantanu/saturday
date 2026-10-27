@@ -1,23 +1,22 @@
 import { tagPickerData, tagFormValues, tagFailureSelection } from '$lib/server/tag-forms.js';
 import { fail, redirect } from '@sveltejs/kit';
-import { createNetwork } from '$lib/server/networks.js';
-import { getJob } from '$lib/server/services.js';
+import { createNetwork, getJob } from '$lib/server/application.js';
 import { ValidationError, ServiceError } from '$lib/server/validation.js';
 import { jobReturn, jobDetailUrl } from '$lib/job-navigation.js';
-function findJob(id) {
+async function findJob(id) {
 	if (!id) return null;
 	try {
-		return getJob(id);
+		return await getJob(id);
 	} catch (e) {
 		if (e instanceof ValidationError) return null;
 		throw e;
 	}
 }
-export function load({ url }) {
+export async function load({ url }) {
 	const jobId = url.searchParams.get('job_id');
-	const job = findJob(jobId);
+	const job = await findJob(jobId);
 	return {
-		tagOptions: tagPickerData('person'),
+		tagOptions: await tagPickerData('person'),
 		returnTo: jobReturn(url.searchParams.get('return_to')),
 		job: job ? { id: job.id, title: job.title, company: job.company } : null,
 		missingJob: !!jobId && !job
@@ -28,18 +27,18 @@ export const actions = {
 		const values = tagFormValues(await request.formData());
 		let person;
 		try {
-			person = createNetwork(values, 'manual');
+			person = await createNetwork(values);
 		} catch (e) {
 			if (e instanceof ValidationError)
 				return fail(400, {
 					errors: e.fieldErrors,
-					tagSelection: tagFailureSelection('person', values),
+					tagSelection: await tagFailureSelection('person', values),
 					values
 				});
 			if (e instanceof ServiceError)
 				return fail(400, {
 					errors: { form: e.message },
-					tagSelection: tagFailureSelection('person', values),
+					tagSelection: await tagFailureSelection('person', values),
 					values
 				});
 			console.error('Could not save person:', e);
@@ -49,7 +48,7 @@ export const actions = {
 			});
 		}
 		const jobId = url.searchParams.get('job_id');
-		if (jobId && findJob(jobId)) {
+		if (jobId && (await findJob(jobId))) {
 			const destination = new URL(
 				jobDetailUrl(jobId, url.searchParams.get('return_to'), 'person'),
 				url

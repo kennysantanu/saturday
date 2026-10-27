@@ -12,6 +12,7 @@
 	import { UnsavedChanges } from '$lib/unsaved.svelte';
 	import { focusFirstError, withPending } from '$lib/forms';
 	import type { ReminderDraft } from '$lib/reminders';
+	import { jobHistoryDraft, reminderDraft } from '$lib/activity-drafts.js';
 	let {
 		data,
 		mode,
@@ -48,19 +49,11 @@
 	let open = $state(true),
 		deleting = $state(false);
 	let draft = $state(
-		untrack(() => ({
-			stage_id: form?.values.stage_id ?? (entry?.stageId ? String(entry.stageId) : ''),
-			event_date: form?.values.event_date ?? entry?.date ?? data.today,
-			note: form?.values.note ?? entry?.note ?? ''
-		}))
+		untrack(() => jobHistoryDraft({ today: data.today, entry, values: form?.values }))
 	);
 	let addReminder = $state(untrack(() => form?.values.add_reminder === 'on'));
 	let reminder = $state<ReminderDraft>(
-		untrack(() => ({
-			reminder_date: form?.values.reminder_date ?? data.today,
-			reminder_time: form?.values.reminder_time ?? '00:00',
-			reminder_note: form?.values.reminder_note ?? ''
-		}))
+		untrack(() => reminderDraft({ today: data.today, values: form?.values }))
 	);
 	const guard = new UnsavedChanges();
 	$effect(() => {

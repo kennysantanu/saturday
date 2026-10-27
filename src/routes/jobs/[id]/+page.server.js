@@ -2,30 +2,27 @@ import { tagPickerData } from '$lib/server/tag-forms.js';
 import { reminderActions, loadReminders, optionalReminder } from '$lib/server/reminder-actions.js';
 import { searchFromUrl } from '$lib/job-search.js';
 import { jobReturn, jobDetailUrl } from '$lib/job-navigation.js';
-import * as networks from '$lib/server/networks.js';
-import { listDocuments } from '$lib/server/files/documents.js';
-import { error, fail, redirect } from '@sveltejs/kit';
+import * as networks from '$lib/server/application.js';
 import {
+	listDocuments,
 	moveJobStage,
 	addJobUpdate,
 	correctJobUpdate,
 	setJobStarred,
 	getJob,
 	searchJobs,
-	ServiceError,
-	ValidationError
-} from '$lib/server/services.js';
-import { listWorkflowStages } from '$lib/server/workflow.js';
+	listWorkflowStages,
+	deleteJob
+} from '$lib/server/application.js';
+import { error, fail, redirect } from '@sveltejs/kit';
+import { ServiceError, ValidationError } from '$lib/domain/validation.js';
 import { todayIso } from '$lib/format.js';
-import { deleteJob } from '$lib/server/services.js';
 import { recordDeletionAction } from '$lib/server/record-deletion-actions.js';
-
 function formValues(formData) {
 	return Object.fromEntries(
 		Array.from(formData.entries(), ([key, value]) => [key, typeof value === 'string' ? value : ''])
 	);
 }
-
 function actionError(error, values, action) {
 	if (error instanceof ValidationError)
 		return fail(400, { action, errors: error.fieldErrors, values });
@@ -43,11 +40,10 @@ function actionError(error, values, action) {
 		values
 	});
 }
-
 export async function load({ params, url }) {
 	let job;
 	try {
-		job = getJob(params.id);
+		job = await getJob(params.id);
 	} catch (e) {
 		if (e instanceof ValidationError) error(404, 'Job not found');
 		throw e;
@@ -68,9 +64,9 @@ export async function load({ params, url }) {
 		personPicker = null,
 		networkErrors = {};
 	try {
-		people = networks.listNetworks({ job_id: params.id, page: networkQuery.network_page });
+		people = await networks.listNetworks({ job_id: params.id, page: networkQuery.network_page });
 		if (networkQuery.link_person === '1')
-			personPicker = networks.listNetworks({
+			personPicker = await networks.listNetworks({
 				query: networkQuery.person_query,
 				page: networkQuery.person_page,
 				limit: 5
@@ -78,13 +74,13 @@ export async function load({ params, url }) {
 	} catch (e) {
 		if (!(e instanceof ValidationError)) throw e;
 		networkErrors = e.fieldErrors;
-		people ??= networks.listNetworks({ job_id: params.id });
-		if (networkQuery.link_person === '1') personPicker = networks.listNetworks({ limit: 5 });
+		people ??= await networks.listNetworks({ job_id: params.id });
+		if (networkQuery.link_person === '1') personPicker = await networks.listNetworks({ limit: 5 });
 	}
 	let selectedPerson = null;
 	if (networkQuery.person) {
 		try {
-			selectedPerson = networks.getNetwork(networkQuery.person);
+			selectedPerson = await networks.getNetwork(networkQuery.person);
 		} catch (e) {
 			if (!(e instanceof ServiceError || e instanceof ValidationError)) throw e;
 			networkErrors = { ...networkErrors, person: 'The selected person was not found.' };
@@ -95,23 +91,23 @@ export async function load({ params, url }) {
 	if (returnTo.startsWith('/jobs')) {
 		try {
 			outsideResults =
-				searchJobs(searchFromUrl(new URL(returnTo, url).searchParams), { jobId: job.id }).total ===
-				0;
+				(await searchJobs(searchFromUrl(new URL(returnTo, url).searchParams), { jobId: job.id }))
+					.total === 0;
 		} catch {
 			/* Invalid old filter URLs do not block detail. */
 		}
 	}
 	return {
-		tagOptions: tagPickerData(
+		tagOptions: await tagPickerData(
 			'job',
 			job.tags.map((tag) => tag.id)
 		),
-		reminderData: loadReminders({ job_id: params.id }, url.searchParams),
+		reminderData: await loadReminders({ job_id: params.id }, url.searchParams),
 		job,
 		outsideResults,
 		returnTo: jobReturn(url.searchParams.get('return_to')),
 		today: todayIso(),
-		stages: listWorkflowStages(),
+		stages: await listWorkflowStages(),
 		documents,
 		documentCount,
 		documentsError,
@@ -120,15 +116,14 @@ export async function load({ params, url }) {
 		networkQuery,
 		networkErrors,
 		selectedPerson,
-		linkedPersonIds: personPicker ? networks.networkLinkIds({ job_id: params.id }) : []
+		linkedPersonIds: personPicker ? await networks.networkLinkIds({ job_id: params.id }) : []
 	};
 }
-
 function networkAction(operation, saved) {
 	return async ({ params, request, url }) => {
 		const values = formValues(await request.formData());
 		try {
-			operation({ ...values, job_id: params.id });
+			await operation({ ...values, job_id: params.id });
 		} catch (e) {
 			return actionError(e, values, saved);
 		}
@@ -152,11 +147,7 @@ function historyAction(mode) {
 			mode === 'changeStage' ? 'stage-changed' : mode === 'addHistory' ? 'update' : 'correction';
 		try {
 			if (mode === 'changeStage') {
-				const changed = moveJobStage(
-					params.id,
-					{ ...values, ...optionalReminder(values) },
-					'manual'
-				);
+				const changed = await moveJobStage(params.id, { ...values, ...optionalReminder(values) });
 				saved = changed.unchanged
 					? values.add_reminder === 'on'
 						? 'reminder'
@@ -165,18 +156,15 @@ function historyAction(mode) {
 						? 'stage-changed'
 						: 'job-closed';
 			} else if (mode === 'addHistory') {
-				addJobUpdate(
-					{
-						...values,
-						...optionalReminder(values),
-						job_id: params.id,
-						stage_id: values.stage_id || null
-					},
-					'manual'
-				);
+				await addJobUpdate({
+					...values,
+					...optionalReminder(values),
+					job_id: params.id,
+					stage_id: values.stage_id || null
+				});
 			} else {
 				// The route owns the job; the service scopes the entry to that job.
-				correctJobUpdate(values.update_id, {
+				await correctJobUpdate(values.update_id, {
 					...values,
 					job_id: params.id,
 					stage_id: values.stage_id || null,
@@ -197,13 +185,13 @@ export const actions = {
 	addHistory: historyAction('addHistory'),
 	editHistory: historyAction('editHistory'),
 	deleteHistory: historyAction('deleteHistory'),
-	networkLink: networkAction((i) => networks.linkJobNetwork(i, 'manual'), 'network-linked'),
+	networkLink: networkAction(async (i) => await networks.linkJobNetwork(i), 'network-linked'),
 	networkNote: networkAction(networks.editJobNetwork, 'network-note'),
 	networkUnlink: networkAction(networks.unlinkJobNetwork, 'network-unlinked'),
 	star: async ({ params, request, url }) => {
 		const values = formValues(await request.formData());
 		try {
-			setJobStarred(params.id, values.is_starred === '1');
+			await setJobStarred(params.id, values.is_starred === '1');
 		} catch (error) {
 			return actionError(error, values, 'star');
 		}

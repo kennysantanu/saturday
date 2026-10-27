@@ -1,11 +1,13 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { recoveryDocuments, recoverCopy } from '$lib/server/files/documents.js';
-import { searchJobs } from '$lib/server/services.js';
+import { recoveryDocuments, recoverCopy } from '$lib/server/application.js';
+import { searchJobs } from '$lib/server/application.js';
 export async function load({ params, url }) {
 	return {
 		documents: await recoveryDocuments(params.jobId),
 		jobId: params.jobId,
-		jobs: searchJobs({ view: 'all', query: url.searchParams.get('query') ?? '', limit: 100 }).jobs
+		jobs: (
+			await searchJobs({ view: 'all', query: url.searchParams.get('query') ?? '', limit: 100 })
+		).jobs
 	};
 }
 export const actions = {

@@ -73,26 +73,30 @@ For the optional large-archive case, run `node --max-old-space-size=128 --test t
 
 ## Source map
 
-| Location                                                                     | Responsibility                                                                    |
-| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `src/routes/`                                                                | SvelteKit pages, form actions, HTTP endpoints, and layout                         |
-| `src/lib/components/app/`                                                    | Shared app UI patterns                                                            |
-| `src/lib/components/ui/`                                                     | UI primitives                                                                     |
-| `src/lib/job-fields.js`, `src/lib/job-search.js`                             | Job field registry and browser-safe search/URL choices                            |
-| `src/lib/server/services.js`, `networks.js`, `reminders.js`, `validation.js` | Record services, queries, and validation                                          |
-| `src/lib/server/workflow.js`                                                 | Workflow configuration, starting-stage selection, ordering, and usage guards      |
-| `src/lib/server/access-settings.js`, `access-auth.js`                        | Private access preferences, password verification, and browser sessions           |
-| `src/lib/server/database.js`, `migrations.js`, `compatibility.js`            | SQLite access, schema, and supported formats                                      |
-| `src/lib/server/backups.js`, `src/lib/server/files/`                         | Database/file backups, documents, PDF, journals, and coordinated recovery         |
-| `src/lib/server/mcp-server.js`                                               | Core tool schemas and adapters; extension tool registration                       |
-| `src/lib/server/installation.js`                                             | Shared descriptor, paths, setup helpers, client configuration, and OS integration |
-| `src/lib/server/server-lifecycle.js`                                         | Owned UI supervisor, readiness, and lifecycle admission                           |
-| `src/lib/server/installation-operations.js`                                  | Update selection, external controller, publication, repair, and uninstall         |
-| `src/lib/server/extensions.js`, `src/lib/extension-ui.js`                    | Extension runtime/storage services and public browser exports                     |
-| `scripts/`                                                                   | Setup/build/run, installer, backup/recovery, and extension commands               |
-| `tests/`                                                                     | Service, process, CLI, MCP, HTTP, browser, and UI-convention checks               |
-| `examples/extensions/interview-practice/`                                    | Portable extension example                                                        |
-| `docs/`                                                                      | User, assistant, and contributor guides                                           |
+| Location                                                              | Responsibility                                                                      |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `src/routes/`                                                         | SvelteKit pages, form actions, HTTP endpoints, and layout                           |
+| `src/lib/components/app/`                                             | Shared app UI patterns                                                              |
+| `src/lib/components/ui/`                                              | UI primitives                                                                       |
+| `src/lib/job-fields.js`, `src/lib/job-search.js`                      | Job field registry and browser-safe search/URL choices                              |
+| `src/lib/application/`, `src/lib/domain/`                             | Portable async operation contracts, assistant catalog, validation, types and errors |
+| `src/lib/server/application.js`, `local-operations.js`, `platform.js` | Local composition, document stream adaptation and platform capabilities             |
+| `src/lib/server/local/`                                               | Local SQLite queries and atomic career operations                                   |
+| `src/lib/server/local/workflow.js`                                    | Workflow configuration, starting-stage selection, ordering, and usage guards        |
+| `src/lib/server/access-settings.js`, `access-auth.js`                 | Private access preferences, password verification, and browser sessions             |
+| `src/lib/server/database.js`, `migrations.js`, `compatibility.js`     | SQLite access, schema, and supported formats                                        |
+| `src/lib/server/backups.js`, `src/lib/server/files/`                  | Database/file backups, documents, PDF, journals, and coordinated recovery           |
+| `src/lib/server/mcp-server.js`                                        | MCP protocol/error adapters and trusted extension tool registration                 |
+| `src/lib/server/installation.js`                                      | Shared descriptor, paths, setup helpers, client configuration, and OS integration   |
+| `src/lib/server/server-lifecycle.js`                                  | Owned UI supervisor, readiness, and lifecycle admission                             |
+| `src/lib/server/installation-operations.js`                           | Update selection, external controller, publication, repair, and uninstall           |
+| `src/lib/server/extensions.js`, `src/lib/extension-ui.js`             | Extension runtime/storage services and public browser exports                       |
+| `scripts/`                                                            | Setup/build/run, installer, backup/recovery, and extension commands                 |
+| `tests/`                                                              | Service, process, CLI, MCP, HTTP, browser, and UI-convention checks                 |
+| `examples/extensions/interview-practice/`                             | Portable extension example                                                          |
+| `docs/`                                                               | User, assistant, and contributor guides                                             |
+
+New browser and assistant features use the shared asynchronous application boundary; await its operations before handling results or redirecting. See [Application architecture](application-architecture.md) for transaction, streaming, authorization, platform and future transfer contracts. Existing local service exports remain for scripts, trusted extensions and storage regression fixtures.
 
 ## Local workflow and access verification — 2026-10-21
 

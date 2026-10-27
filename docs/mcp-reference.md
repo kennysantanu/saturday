@@ -1,6 +1,6 @@
 # MCP reference
 
-This reference describes Saturday's local stdio MCP tools for agents and developers. For client configuration and connection verification, read the [assistant guide](assistant-guide.md). Tool discovery and schemas in `src/lib/server/mcp-server.js` define the executable contract; enabled extensions can add tools.
+This reference describes Saturday's local stdio MCP tools for agents and developers. For client configuration and connection verification, read the [assistant guide](assistant-guide.md). Tool discovery and schemas in `src/lib/application/assistant-catalog.js` define the shared command contract. `src/lib/server/mcp-server.js` adapts those commands to local stdio responses; enabled extensions can add tools.
 
 ## Safe tool use
 

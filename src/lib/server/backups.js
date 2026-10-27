@@ -53,38 +53,11 @@ const columns = {
 		'updated_at'
 	]
 };
-export class BackupError extends Error {
-	constructor(code, message) {
-		super(message);
-		this.code = code;
-		this.name = 'BackupError';
-	}
-}
-function fail(code, message) {
+export { BackupError, publicBackupError } from '../domain/recovery.js';
+import { BackupError, publicBackupError } from '../domain/recovery.js';
+const fail = (code, message) => {
 	throw new BackupError(code, message);
-}
-export function publicBackupError(error) {
-	if (error instanceof BackupError) return { code: error.code, message: error.message };
-	if (
-		[
-			'VALIDATION',
-			'BUSY',
-			'CONFIRMATION',
-			'NOT_FOUND',
-			'INTEGRITY',
-			'DATASET_MISMATCH',
-			'RECOVERY_REQUIRED'
-		].includes(error?.code)
-	)
-		return { code: error.code, message: error.message };
-	if (error?.code === 'FORMAT') return { code: 'unsupported_file_format', message: error.message };
-	if (String(error?.message).includes('locked') || String(error?.message).includes('busy'))
-		return { code: 'database_busy', message: 'Saturday is busy. Try again shortly.' };
-	return {
-		code: 'io_error',
-		message: 'The backup operation failed. Check storage space and file permissions.'
-	};
-}
+};
 function safe(operation) {
 	try {
 		assertDatabaseAvailable();

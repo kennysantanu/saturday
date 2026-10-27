@@ -370,6 +370,16 @@ export async function recoveryDocuments(jobId) {
 		return m.documents.filter((d) => d.key.startsWith(`jobs/${jobId}/`)).map((d) => info(d, m));
 	});
 }
+export async function openRecoveryDocument({ job_id, id }) {
+	return withFileLock(async (m) => {
+		const d = m.documents.find(
+			(d) => d.id === id && d.key.startsWith(`${scopePrefix(job_id, false)}/`)
+		);
+		if (!d) reject('NOT_FOUND', 'Recovery file not found.');
+		await verifiedPath(d);
+		return { ...(await new LocalFileStore().open(d.key)), document: info(d, m) };
+	});
+}
 export async function recoverCopy({ id, job_id, destination_scope, filename: name, token }) {
 	return withFileLock(async (m) => {
 		const d = m.documents.find(

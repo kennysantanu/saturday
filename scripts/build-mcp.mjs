@@ -20,7 +20,8 @@ try {
 		target: 'node22.13',
 		define: { __SATURDAY_BUILD_INFO__: JSON.stringify(readBuildInfo(root)) },
 		packages: 'bundle',
-		external: ['puppeteer', 'yazl', 'yauzl'],
+		// Zod's ESM cycles must retain module initialization order alongside the SDK.
+		external: ['puppeteer', 'yazl', 'yauzl', 'zod'],
 		banner: { js: '#!/usr/bin/env node' }
 	});
 	await build({

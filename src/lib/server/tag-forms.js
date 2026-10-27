@@ -1,8 +1,8 @@
-import { listTags, getTagSelection } from './tags.js';
-export function tagPickerData(collection, ids = []) {
+import { listTags, getTagSelection } from './application.js';
+export async function tagPickerData(collection, ids = []) {
 	return {
-		...listTags({ collection }),
-		selectedTags: getTagSelection({ collection, tag_ids: ids })
+		...(await listTags({ collection })),
+		selectedTags: await getTagSelection({ collection, tag_ids: ids })
 	};
 }
 export function tagFormValues(data) {
@@ -13,12 +13,11 @@ export function tagFormValues(data) {
 	else delete values.tag_ids;
 	return values;
 }
-
-export function tagFailureSelection(collection, values) {
+export async function tagFailureSelection(collection, values) {
 	const ids = Array.isArray(values.tag_ids)
 		? values.tag_ids.filter(
 				(id) => /^[1-9]\d*$/.test(String(id)) && Number.isSafeInteger(Number(id))
 			)
 		: [];
-	return getTagSelection({ collection, tag_ids: ids });
+	return await getTagSelection({ collection, tag_ids: ids });
 }
