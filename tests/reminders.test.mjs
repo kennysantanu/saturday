@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -41,58 +41,37 @@ const person = () => people.createNetwork({ name: 'Alex' });
 const at = '2099-08-01T00:00';
 const list = (owner, view = 'all') => reminders.listReminders({ ...owner, view }).reminders;
 
-test('schema 1 reminders migrate without resetting identity, relationships or allocation counters', () => {
-	const db = new DatabaseSync(':memory:');
-	try {
-		db.exec('PRAGMA foreign_keys=ON');
-		applyMigrations(db, 1);
-		const stamp = '2026-01-01T00:00:00.000Z';
-		db.prepare(
-			"INSERT INTO jobs(job_title,company_name,current_stage_id,created_via,created_at,updated_at,follow_up_date,follow_up_comment) VALUES('Engineer','Example',1,'mcp',?,?,'2026-08-01','Call')"
-		).run(stamp, stamp);
-		db.prepare(
-			"INSERT INTO networks(name,created_via,created_at,updated_at,follow_up_date) VALUES('Alex','manual',?,?,'2026-08-02')"
-		).run(stamp, stamp);
-		db.prepare(
-			"INSERT INTO job_networks(job_id,network_id,created_via,created_at,updated_at) VALUES(1,1,'manual',?,?)"
-		).run(stamp, stamp);
-		db.exec(
-			"UPDATE sqlite_sequence SET seq=100 WHERE name='jobs'; UPDATE sqlite_sequence SET seq=200 WHERE name='networks'"
-		);
-		const identity = db.prepare('SELECT dataset_id FROM app_metadata').get().dataset_id;
-		applyMigrations(db);
+test('fresh reminder tables enforce exclusive ownership and neutral record origins', () => {
+	const j = job(),
+		p = person();
+	withDatabase((db) => {
 		assertMigrationHistory(db);
-		const rows = db.prepare('SELECT * FROM reminders ORDER BY id').all();
-		assert.equal(rows.length, 2);
-		assert.equal(rows[0].scheduled_at, '2026-08-01T00:00');
-		assert.equal(rows[0].note, 'Call');
-		assert.equal(rows[0].created_via, 'mcp');
-		assert.equal(rows[1].network_id, 1);
-		assert.equal(db.prepare('SELECT dataset_id FROM app_metadata').get().dataset_id, identity);
-		assert.equal(db.prepare("SELECT seq FROM sqlite_sequence WHERE name='jobs'").get().seq, 100);
-		assert.equal(
-			db.prepare("SELECT seq FROM sqlite_sequence WHERE name='networks'").get().seq,
-			200
+		const insert = db.prepare(
+			`INSERT INTO reminders(job_id,network_id,scheduled_at,created_via,created_at,updated_at) VALUES(?,?,'2099-08-01T00:00',?,'2026-01-01','2026-01-01')`
 		);
-		assert.equal(db.prepare('SELECT COUNT(*) n FROM job_networks').get().n, 1);
-		assert(
-			!db
-				.prepare('PRAGMA table_info(jobs)')
+		assert.throws(() => insert.run(null, null, 'manual'));
+		assert.throws(() => insert.run(j.id, p.id, 'manual'));
+		assert.throws(() => insert.run(j.id, null, 'mcp'));
+		insert.run(j.id, null, 'assistant');
+		insert.run(null, p.id, 'manual');
+		assert.deepEqual(
+			db
+				.prepare('SELECT created_via FROM reminders ORDER BY id')
 				.all()
-				.some((c) => c.name === 'follow_up_date')
+				.map((r) => r.created_via),
+			['assistant', 'manual']
 		);
-		applyMigrations(db);
-		assert.equal(db.prepare('SELECT COUNT(*) n FROM reminders').get().n, 2);
-	} finally {
-		db.close();
-	}
+	});
 });
 
 test('shared owner-scoped lifecycle preserves dismissal dates and supports explicit restoration', () => {
 	const j = job(),
 		p = person();
 	for (const owner of [{ job_id: j.id }, { network_id: p.id }]) {
-		const first = reminders.createReminder({ ...owner, scheduled_at: at, note: ' Call ' }, 'mcp');
+		const first = reminders.createReminder(
+			{ ...owner, scheduled_at: at, note: ' Call ' },
+			'assistant'
+		);
 		assert.equal(first.note, 'Call');
 		assert(first.is_active);
 		assert.equal(first.dismissed_at, null);
@@ -258,28 +237,20 @@ test('backup restores reminder values, dismissal metadata and counters and rejec
 	assert.throws(() => backups.createBackup());
 });
 
-test('schema 1 backups restore through the reminder migration', () => {
-	const path = join(scratch, 'old.sqlite'),
+test('incompatible database artifacts reject unchanged without replacing live reminders', () => {
+	const j = job();
+	reminders.createReminder({ job_id: j.id, scheduled_at: at, note: 'Keep' });
+	const before = list({ job_id: j.id });
+	const path = join(scratch, 'unsupported.sqlite'),
 		db = new DatabaseSync(path);
-	applyMigrations(db, 1);
-	const stamp = '2026-01-01T00:00:00.000Z';
-	db.prepare(
-		"INSERT INTO jobs(job_title,company_name,current_stage_id,created_via,created_at,updated_at,follow_up_date,follow_up_comment) VALUES('Old','Example',1,'manual',?,?,'2026-08-01','Keep')"
-	).run(stamp, stamp);
-	db.prepare(
-		"INSERT INTO job_updates(job_id,stage_id,event_date,created_via,created_at,updated_at) VALUES(1,1,'2026-01-01','manual',?,?)"
-	).run(stamp, stamp);
+	db.exec(
+		"CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY,name TEXT,applied_at TEXT); INSERT INTO schema_migrations VALUES(1,'unsupported_baseline','2026-01-01'); CREATE TABLE jobs(id INTEGER PRIMARY KEY,follow_up_date TEXT); INSERT INTO jobs VALUES(1,'2026-08-01')"
+	);
 	db.close();
-	const imported = backups.importBackup(path);
-	rmSync(process.env.SATURDAY_DB_PATH);
-	const oldTarget = new DatabaseSync(process.env.SATURDAY_DB_PATH);
-	applyMigrations(oldTarget, 1);
-	oldTarget.close();
-	const preview = backups.prepareRestore(imported.backup_id);
-	backups.restoreBackup(preview.restore_id, true);
-	assert.equal(getJob(1).title, 'Old');
-	assert.equal(list({ job_id: 1 })[0].scheduled_at, '2026-08-01T00:00');
-	assert.equal(list({ job_id: 1 })[0].note, 'Keep');
+	const bytes = readFileSync(path);
+	assert.throws(() => backups.importBackup(path), { code: 'unsupported_schema' });
+	assert.deepEqual(readFileSync(path), bytes);
+	assert.deepEqual(list({ job_id: j.id }), before);
 });
 
 test('built MCP exposes shared reminder tools and atomic activity scheduling without legacy setters', async () => {
@@ -401,22 +372,25 @@ test('parent deletion removes only its reminders and preserves linked-owner remi
 	withDatabase((db) => assert.equal(db.prepare('SELECT COUNT(*) n FROM reminders').get().n, 1));
 });
 
-test('failed migration rolls back all reminder schema and data changes', () => {
+test('failed initialization rolls back the complete baseline, seeds and version ledger', () => {
 	const db = new DatabaseSync(':memory:');
 	try {
-		applyMigrations(db, 1);
-		const before = db.prepare('SELECT * FROM app_metadata').get();
 		const exec = db.exec.bind(db);
 		db.exec = (sql) =>
-			exec(sql.includes('CREATE TABLE reminders') ? sql + '\nINVALID MIGRATION STATEMENT;' : sql);
+			exec(
+				sql.includes('CREATE TABLE reminders') ? sql + '\nINVALID INITIALIZATION STATEMENT;' : sql
+			);
 		assert.throws(() => applyMigrations(db));
-		assertMigrationHistory(db);
-		assert.deepEqual(db.prepare('SELECT * FROM app_metadata').get(), before);
-		assert.equal(db.prepare('SELECT COUNT(*) n FROM schema_migrations').get().n, 1);
-		assert(!db.prepare("SELECT name FROM sqlite_schema WHERE name='reminders'").get());
+		assert.deepEqual(
+			db.prepare("SELECT name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").all(),
+			[]
+		);
 		db.exec = exec;
 		applyMigrations(db);
 		assertMigrationHistory(db);
+		assert.equal(db.prepare('SELECT COUNT(*) n FROM schema_migrations').get().n, 1);
+		assert.equal(db.prepare('SELECT COUNT(*) n FROM workflow_stages').get().n, 8);
+		assert.equal(db.prepare('SELECT COUNT(*) n FROM reminders').get().n, 0);
 	} finally {
 		db.close();
 	}

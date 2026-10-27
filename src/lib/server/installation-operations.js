@@ -145,8 +145,8 @@ export function validateDistribution(metadata) {
 	if (
 		metadata?.installation_api !== 1 ||
 		!/^\d+\.\d+\.\d+$/.test(metadata.node_minimum || '') ||
-		metadata.storage?.database?.format !== 'saturday.database.workflow' ||
-		metadata.storage?.manifest?.format !== 'saturday.files.numeric'
+		metadata.storage?.database?.format !== 'saturday.database' ||
+		metadata.storage?.manifest?.format !== 'saturday.files'
 	)
 		throw new Error(
 			'This build does not provide a compatible installation/storage contract. Keep the current build.'

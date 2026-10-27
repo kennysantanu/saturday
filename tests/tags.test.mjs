@@ -41,10 +41,10 @@ const make = (collection, name = 'Career faIR', color = '#ABCDEF') =>
 const assigned = (collection, owner_id, tag_ids) =>
 	tags.setTagAssignments({ collection, owner_id, tag_ids });
 
-test('schema 2 upgrades additively and database constraints reject noncanonical names and colors', () => {
+test('initial tag tables are idempotent and reject noncanonical names and colors', () => {
 	const db = new DatabaseSync(':memory:');
 	try {
-		applyMigrations(db, 2);
+		applyMigrations(db);
 		const identity = db.prepare('SELECT dataset_id FROM app_metadata').get().dataset_id;
 		applyMigrations(db);
 		assertMigrationHistory(db);
@@ -250,7 +250,7 @@ test('tag deletion and parent deletion preserve other definitions, owners and co
 	await deleteJob({ job_id: j.id, dataset_id: getJob(j.id).dataset_id, confirm: true });
 	assert.equal(tags.listTags({ collection: 'job' }).tags[0].usage_count, 0);
 });
-test('backup restores definitions, merged references and allocation counters; older backups upgrade empty', () => {
+test('backup restores definitions, merged references and allocation counters; empty baselines restore empty', () => {
 	const a = make('job', 'a'),
 		b = make('job', 'b'),
 		n = make('person'),
@@ -269,11 +269,11 @@ test('backup restores definitions, merged references and allocation counters; ol
 	);
 	assert.equal(getNetwork(p.id).tags[0].id, n.id);
 	assert(make('job', 'after').id > newer.id);
-	const old = join(scratch, 'v2.sqlite'),
-		db = new DatabaseSync(old);
-	applyMigrations(db, 2);
+	const empty = join(scratch, 'empty.sqlite'),
+		db = new DatabaseSync(empty);
+	applyMigrations(db);
 	db.close();
-	const imported = backups.importBackup(old);
+	const imported = backups.importBackup(empty);
 	backups.restoreBackup(backups.prepareRestore(imported.backup_id).restore_id, true);
 	assert.equal(tags.listTags({ collection: 'job' }).total, 0);
 });

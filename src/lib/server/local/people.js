@@ -38,7 +38,7 @@ function parents(db, input) {
 	if (!db.prepare('SELECT id FROM jobs WHERE id=?').get(input.job_id)) missing('Job');
 }
 function origin(value) {
-	return parseSchema(z.enum(['manual', 'mcp']), value);
+	return parseSchema(z.enum(['manual', 'assistant']), value);
 }
 function pageRows(db, select, count, args, input, order) {
 	const total = Number(db.prepare(count).get(...args).total);

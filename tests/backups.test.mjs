@@ -61,9 +61,12 @@ function rows() {
 	}
 }
 function populated() {
-	const job = createJob({ job_title: 'Engineer', company_name: 'Acme' }, 'mcp');
+	const job = createJob({ job_title: 'Engineer', company_name: 'Acme' }, 'assistant');
 	for (const name of ['Applied', 'Interview', 'Interview'])
-		addJobUpdate({ job_id: job.id, stage_id: stageId(name), event_date: '2028-10-07' }, 'mcp');
+		addJobUpdate(
+			{ job_id: job.id, stage_id: stageId(name), event_date: '2028-10-07' },
+			'assistant'
+		);
 	closeJob(job.id, '2026-10-05');
 	reopenJob(job.id, '2026-10-06');
 	addJobUpdate({ job_id: job.id, event_date: '2026-10-05', note: 'Context' }, 'manual');
@@ -570,7 +573,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 				notes: 'General'
 			})
 		).network;
-		assert.equal(person.created_via, 'mcp');
+		assert.equal(person.created_via, 'assistant');
 		assert.equal(person.next_reminder_at, null);
 		await call('edit_network', { network_id: person.id, phone: '+1 555 0100' });
 		await call('edit_network', { network_id: person.id, email: null });
@@ -627,7 +630,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 				note: 'Met'
 			})
 		).update;
-		assert.equal(interaction.created_via, 'mcp');
+		assert.equal(interaction.created_via, 'assistant');
 		await call('edit_network_update', {
 			network_id: person.id,
 			update_id: interaction.id,
@@ -717,7 +720,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 			score_min: 8,
 			score_max: 9,
 			status: ['new'],
-			created_via: ['mcp'],
+			created_via: ['assistant'],
 			limit: 1
 		});
 		assert.equal(filteredList.total, 1);
@@ -779,7 +782,7 @@ test('built MCP preserves legacy tools and exposes document tools and complete b
 		);
 		assert.ok((await call('list_backup_history')).backups.length);
 		const doc = await call('create_document', { filename: 'master.md', content: '# Career' });
-		assert.equal(doc.created_via, 'mcp');
+		assert.equal(doc.created_via, 'assistant');
 		const catalog = await call('list_documents');
 		await call('set_master_document', {
 			id: doc.id,

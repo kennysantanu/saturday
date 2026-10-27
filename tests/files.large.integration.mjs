@@ -47,7 +47,7 @@ test('file backups and streamed imports exceed 1 GiB with bounded memory', async
 		await writeFile(
 			join(root, 'files', 'manifest.json'),
 			JSON.stringify({
-				format: 'saturday.files.numeric',
+				format: 'saturday.files',
 				dataset_id: randomUUID(),
 				format_version: 1,
 				token: randomUUID(),

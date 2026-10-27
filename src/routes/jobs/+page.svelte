@@ -110,7 +110,7 @@
 			label: 'Created via',
 			options: [
 				{ value: 'manual', label: 'Manual' },
-				{ value: 'mcp', label: 'MCP' }
+				{ value: 'assistant', label: 'Assistant' }
 			]
 		}
 	] as const);

@@ -40,7 +40,7 @@ function entry(db, input) {
 export function insertReminder(db, input, createdVia = 'manual') {
 	const { column, id } = scope(db, input),
 		values = parseSchema(z.object(reminderInputShape), input);
-	const via = parseSchema(z.enum(['manual', 'mcp']), createdVia),
+	const via = parseSchema(z.enum(['manual', 'assistant']), createdVia),
 		stamp = new Date().toISOString();
 	const result = db
 		.prepare(

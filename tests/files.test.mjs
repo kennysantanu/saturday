@@ -21,7 +21,7 @@ test('shared text files, designation, scopes, independent copies and conflict to
 	job = jobs.createJob({ job_title: 'Engineer', company_name: 'Saturday' }, 'manual');
 	cv = await d.createDocument(
 		{ filename: 'master.md', content: '# Profile\n\nA **career**.' },
-		'mcp'
+		'assistant'
 	);
 	const stored = JSON.parse(await readFile(join(s.filePaths().root, 'manifest.json'), 'utf8'));
 	assert.deepEqual(
@@ -224,14 +224,14 @@ test('real HTML PDF generation saves independently and enforces source conflicts
 			content:
 				'<!doctype html><style>@page{size:A4}body{font:12pt sans-serif}</style><h1>Résumé</h1><p>Selectable career history.</p>'
 		},
-		'mcp'
+		'assistant'
 	);
 	const result = await pdf.generateDocumentPdf(
 		{ id: html.id, scope: job.id, token: html.token },
-		'mcp'
+		'assistant'
 	);
 	assert.equal(result.filename, 'resume.pdf');
-	assert.equal(result.created_via, 'mcp');
+	assert.equal(result.created_via, 'assistant');
 	assert.ok(result.size > 1000);
 	await assert.rejects(pdf.generateDocumentPdf({ id: html.id, scope: job.id, token: 'old' }), {
 		code: 'CONFLICT'
@@ -263,20 +263,30 @@ test('real HTML PDF generation saves independently and enforces source conflicts
 test('manifest validation preserves extensions and refuses unknown versions', async () => {
 	const m = JSON.parse(await readFile(join(s.filePaths().root, 'manifest.json'), 'utf8'));
 	m.custom = { future_note: 'preserve' };
-	const converted = s.migrateManifest(m);
-	assert.deepEqual(converted.custom, m.custom);
-	assert.notEqual(converted, m);
-	assert.throws(() => s.migrateManifest({ ...m, format_version: 3 }), { code: 'FORMAT' });
-	const stable = await readFile(join(s.filePaths().root, 'manifest.json'), 'utf8');
-	await writeFile(
-		join(s.filePaths().root, 'manifest.json'),
-		JSON.stringify({ ...m, format_version: 3 })
-	);
+	const validated = s.validateManifest(m);
+	assert.deepEqual(validated.custom, m.custom);
+	assert.equal(validated, m);
+	const path = join(s.filePaths().root, 'manifest.json');
+	const stable = await readFile(path);
 	try {
-		await assert.rejects(d.listDocuments(), { code: 'FORMAT' });
+		for (const unsupported of [
+			{ ...m, format_version: 0 },
+			{ ...m, format_version: 2 },
+			{ ...m, format: 'foreign.files' },
+			{ ...m, format: 'saturday.files.numeric', format_version: 1 },
+			{ ...m, format: 'saturday.files.numeric', format_version: 2 },
+			{ ...m, documents: m.documents.map((d) => ({ ...d, created_via: 'mcp' })) }
+		]) {
+			assert.throws(() => s.validateManifest(unsupported), { code: 'FORMAT' });
+			const bytes = JSON.stringify(unsupported);
+			await writeFile(path, bytes);
+			await assert.rejects(d.listDocuments(), { code: 'FORMAT' });
+			assert.equal(await readFile(path, 'utf8'), bytes);
+		}
+		await writeFile(path, JSON.stringify({ ...m, format_version: 2 }));
 		assert.throws(() => jobs.getJob(job.id), { code: 'FORMAT' });
 	} finally {
-		await writeFile(join(s.filePaths().root, 'manifest.json'), stable);
+		await writeFile(path, stable);
 	}
 	assert.ok(jobs.getJob(job.id));
 });
@@ -427,7 +437,7 @@ test('new file stores bind once to the database and accept only canonical numeri
 		const database = await import('../src/lib/server/database.js');
 		await d.createDocument({ filename: 'cv.md', content: '# CV' });
 		const m = JSON.parse(await readFile(join(s.filePaths().root, 'manifest.json'), 'utf8'));
-		assert.equal(m.format, 'saturday.files.numeric');
+		assert.equal(m.format, 'saturday.files');
 		assert.equal(m.dataset_id, database.databaseIdentity().dataset_id);
 		const original = m.dataset_id;
 		database.migrateDatabase();
@@ -622,7 +632,7 @@ test('cross-dataset pair restore publishes one namespace and retains incoming em
 			)
 		);
 		const pair = await pairs.createBackupPair();
-		assert.equal(pair.format, 'saturday.backup-pair.numeric');
+		assert.equal(pair.format, 'saturday.backup-pair');
 		const originalDbPath = process.env.SATURDAY_DB_PATH;
 		process.env.SATURDAY_DB_PATH = join(scratch, 'other.sqlite');
 		jobs.createJob({ job_title: 'Other', company_name: 'B' });
@@ -709,7 +719,7 @@ test('interrupted cross-dataset pair publication recovers the original database 
 				s.withFileLock(async (m) => {
 					const recoveryFiles = await b.publishCapture(await b.captureFiles(m), 'recovery');
 					await s.atomicJson(join(s.filePaths().state, 'pair-session.json'), {
-						format: 'saturday.backup-pair.numeric',
+						format: 'saturday.backup-pair',
 						format_version: 1,
 						recovery_database_id: recoveryDb.backup_id,
 						recovery_files_id: recoveryFiles.backup_id,
@@ -942,45 +952,42 @@ test('Profile assignments are atomic, format checked, protected on deletion and 
 	});
 });
 
-test('version-1 manifest upgrade preserves original metadata and selections', async () => {
+test('baseline manifest supports every Profile slot without conversion or metadata rewriting', async () => {
 	await isolatedStores(async () => {
-		const cv = await d.createDocument({ filename: 'cv.md', content: '# Experience' });
-		let catalog = await d.listDocuments();
-		await d.setMasterDocument({ id: cv.id, token: cv.token, catalog_token: catalog.catalog_token });
+		const { documentDesignations } = await import('../src/lib/file-types.js');
+		const expected = {};
+		for (const [slot, definition] of Object.entries(documentDesignations)) {
+			const file = await d.createDocument(
+				{ filename: `${slot}${definition.extension}`, content: 'Profile content' },
+				'assistant'
+			);
+			await d.setMasterDocument({
+				id: file.id,
+				designation: slot,
+				token: file.token,
+				catalog_token: (await d.listDocuments()).catalog_token
+			});
+			expected[slot] = file.id;
+		}
 		const path = join(s.filePaths().root, 'manifest.json');
 		const original = JSON.parse(await readFile(path, 'utf8'));
-		original.format_version = 1;
+		assert.equal(original.format_version, 1);
 		original.custom = { preserved: true };
 		await writeFile(path, JSON.stringify(original));
-		catalog = await d.listDocuments();
-		assert.equal(catalog.designations.master_cv, cv.id);
-		const upgraded = JSON.parse(await readFile(path, 'utf8'));
-		assert.equal(upgraded.format_version, 2);
-		assert.deepEqual(upgraded.custom, original.custom);
-		assert.deepEqual(
-			JSON.parse(await readFile(join(s.filePaths().state, 'manifest-v1.json'), 'utf8')),
-			original
-		);
-		assert.deepEqual(s.migrateManifest(original).documents, original.documents);
-		const { default: yazl } = await import('yazl');
-		const { pipeline } = await import('node:stream/promises');
-		const { createWriteStream, createReadStream } = await import('node:fs');
-		const archive = join(s.filePaths().state, 'v1.zip');
-		const zip = new yazl.ZipFile();
-		zip.addBuffer(Buffer.from(JSON.stringify(original)), 'manifest.json');
-		zip.addFile(join(s.filePaths().root, cv.key), cv.key);
-		const output = pipeline(zip.outputStream, createWriteStream(archive));
-		zip.end();
-		await output;
-		const imported = await b.importFileBackup(createReadStream(archive));
-		const preview = await b.prepareFileRestore({ backup_id: imported.backup_id, mode: 'replace' });
+		const bytes = await readFile(path);
+		assert.deepEqual((await d.listDocuments()).designations, expected);
+		assert.deepEqual(await readFile(path), bytes);
+		const saved = await b.createFileBackup();
+		const preview = await b.prepareFileRestore({ backup_id: saved.backup_id, mode: 'replace' });
 		await b.restoreFiles({ restore_id: preview.restore_id, confirm: true });
-		assert.equal((await d.getDocument({ designation: 'master_cv' })).id, cv.id);
-
-		assert.throws(
-			() => s.validateManifest({ ...original, designations: { resume_template: cv.id } }),
-			{ code: 'FORMAT' }
-		);
+		assert.deepEqual((await d.listDocuments()).designations, expected);
+		assert.deepEqual(JSON.parse(await readFile(path)).custom, original.custom);
+		for (const slot of Object.keys(expected)) {
+			const restored = await d.getDocument({ designation: slot, include_content: true });
+			assert.equal(restored.id, expected[slot]);
+			assert.equal(restored.created_via, 'assistant');
+			assert.equal(restored.content, 'Profile content');
+		}
 	});
 });
 
