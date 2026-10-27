@@ -1,0 +1,55 @@
+# Cloudflare and hosted storage contracts
+
+Saturday's shared application core has a local Cloudflare compatibility harness. The app itself still uses the Node/SvelteKit adapter, SQLite and local files. There is no production Cloudflare or Supabase adapter, remote MCP server, hosted authentication or deployment command.
+
+## Run the checks
+
+After `npm ci`, run:
+
+```sh
+npm run test:contracts
+npm run test:cloudflare
+```
+
+`test:contracts` exercises the actual local operation adapters with disposable SQLite and document stores. It covers normalized creation/reads, partial edits and nullable fields, transactional rollback, ownership/dataset guards, document conflicts, deletion, Profile assignment, actor permissions and assistant catalog parity.
+
+`test:cloudflare` uses the existing esbuild dependency to bundle `tests/fixtures/cloudflare/worker.js`, which imports `src/lib/application/index.js` and real domain validators. It then runs that bundle in Miniflare/workerd. The pinned development dependency is Miniflare `4.20260730.0` with workerd `1.20260730.1`; the harness fixes compatibility date `2026-07-30` and enables no Node compatibility flags. The runtime reports its versions in test output.
+
+The build guard rejects Node imports/globals, local server modules, routes, framework/MCP runtimes and extension registration, including unused imports before tree shaking. The output must be self-contained. Runtime checks assert that Node globals are unavailable and Web Crypto exists. A local service binding supplies fictional records and document metadata; the same job CRUD assertions run against this fixture and the real local adapter. Validated assistant commands read/edit the same fixture records and retain permission/capability checks.
+
+The harness disables Cloudflare metadata fetching, intercepts all outbound requests locally, binds only to loopback and removes its temporary bundle/state after execution. It never reads cloud credentials, logs into an account, contacts Supabase or deploys. Dependencies require npm access when first installed; the checks themselves run offline. A restricted sandbox may need permission to launch workerd and open its loopback listener. Runtime startup failure is a failed check, not a skipped pass. Both commands are included in `npm run verify` through the unit and Cloudflare test steps.
+
+Miniflare provides the [local testing API](https://developers.cloudflare.com/workers/testing/miniflare/get-started/). [Pages Functions uses the Workers runtime](https://developers.cloudflare.com/pages/functions/), which makes this relevant core execution evidence for a future Pages edition. It does **not** build or certify Pages routing, the full SvelteKit app, authentication, PDF, extensions, native mobile, Vercel or live Supabase storage. The in-memory storage fixture is a test double, not a PostgreSQL adapter or a transaction/durability implementation.
+
+## PostgreSQL operation requirements
+
+Implement the named application operations from `src/lib/application/operations.js` against PostgreSQL. Keep shared field/date/ID validation and error classes; keep SQL, driver scalar conversion and database error translation inside that adapter. Do not expose a remote `prepare()` API or use the fixture as production storage. One personal workspace has one database and file collection; no tenant tables or synchronization protocol are required.
+
+- **Atomic writes:** creating a job, moving placement with history/reminder, recording an interaction with a reminder, replacing assignments and merging tags must each commit as one transaction. A transaction or database function must also validate the current parents/stages/references. Separate REST writes cannot provide these guarantees. PostgreSQL documents [transactional all-or-nothing behavior](https://www.postgresql.org/docs/current/tutorial-transactions.html); Supabase exposes [database functions](https://supabase.com/docs/guides/database/functions) as one possible operation boundary.
+- **Concurrency:** lock or otherwise serialize the affected records. Preserve last committed placement while retaining each actual move's milestone. No-op moves must not create history. Protect the final available open stage and sole current-stage evidence. Tag merge must union assignments without duplicate links. A stale read followed by independent writes is insufficient. Define database-side authorization for each function; restrict execution grants and avoid granting arbitrary SQL or privileged functions to public clients.
+- **Reads and filters:** preserve AND/OR semantics, literal search characters, stable ID tie breakers, pagination/clamping, distinct-job milestone counts and active/closed behavior. Compound snapshots such as Dashboard counts/cards must read one consistent dataset. Translate SQLite JSON aggregation, joins, boolean expressions and placeholders into PostgreSQL queries rather than passing SQLite SQL over HTTP.
+- **IDs and scalars:** expose positive safe integer IDs, never lossy `bigint` conversion or numeric strings as public record IDs. Validate range before converting driver results to JavaScript numbers. Return actual booleans, finite score numbers, nulls and plain objects/arrays; preserve omitted-versus-null patch semantics. Keep calendar dates and fixed `YYYY-MM-DDTHH:mm` reminders as entered, without applying a host/UTC timezone conversion. Creation/update timestamps remain UTC instants.
+- **Identity and allocation:** preserve dataset identity, relationships, opaque document IDs and numeric allocation high-water marks, including deleted records. PostgreSQL [identity columns use sequences](https://www.postgresql.org/docs/current/ddl-identity-columns.html); a transfer/import must advance those sequences safely. IDs need not be contiguous, and failed operations must not be assumed to reuse a number. Use constraints to enforce references and uniqueness even when a caller races another writer.
+- **Errors and retries:** map validation, not-found, conflict, busy, dataset and unsupported-capability failures into the existing domain errors without leaking SQL, connection strings or private paths. Roll back on validation/storage failure. After a lost write response, inspect authoritative state; never retry non-idempotent creation, history, merge, deletion or restore automatically.
+
+The local contract tests verify observable behavior against SQLite. They specify behavior for PostgreSQL; they do not prove that an unimplemented PostgreSQL transaction or query behaves equivalently. A real adapter will need database-backed concurrency, rollback, scalar, authorization and recovery tests before release.
+
+## Private object storage and document consistency
+
+Use private object storage, with dataset-bound logical document IDs/keys and metadata owned by the adapter. An object path or URL alone is not authority to read another scope. Retain hashes, sizes, filename checks, content limits, per-document/catalog conflict tokens, Profile format/assignment validation and explicit deletion acknowledgements. Keep user documents and each job's documents distinct even when numeric job IDs match across datasets.
+
+[Private Supabase buckets require authenticated access or signed URLs](https://supabase.com/docs/guides/storage/buckets/fundamentals). Use restrictive [Storage access policies](https://supabase.com/docs/guides/storage/security/access-control); privileged service credentials bypass those policies and must stay server-side. Authenticate the personal workspace before issuing any storage access. Signed URLs should be short-lived and excluded from portable records, logs and transfers.
+
+A database transaction does not atomically commit an object upload/delete. A future implementation must stage immutable bytes, verify hashes and publish metadata conditionally against the expected tokens. Retain the previous object on conflict/failure, and clean abandoned staging objects safely. Overwriting a shared object path before checking a token can destroy the winning writer's bytes. Stream uploads/downloads with backpressure and cancellation; bounded text editing must remain distinct from binary transfer.
+
+Job deletion must include all scoped documents present at execution, history, reminders and relationships, while preserving linked people and unrelated files. Coordinate database writes with a durable deletion/recovery record and finish interrupted cleanup forward. Readers/writers must respect that pending state across instances. Do not report successful deletion while required cleanup is still pending, or reuse the local filesystem journal as if it were shared serverless storage. Profile assignments and their catalog token must change consistently with document deletion. Test failures before and after metadata publication, concurrent uploads/deletion, stale tokens, cancellation and interrupted cleanup against the real object store.
+
+## Credentials, coordination and recovery
+
+Hosted workspace authentication and sessions must be suitable for concurrent/stateless requests. Keep CSRF/origin checks at the browser boundary and AI authorization at the assistant boundary. Trusted execution context comes from the deployment adapter, never from submitted actor/permission fields. A personal deployment still requires access control; single-user scope does not make a public service private.
+
+[Supabase API keys identify the application while Auth identifies the user](https://supabase.com/docs/guides/getting-started/api-keys). Keep secret/service keys and AI-provider credentials in platform secret storage/bindings, separate from career tables, documents, browser bundles and portable backups. Do not forward arbitrary model-supplied URLs, SQL or credential references. No provider sign-in or API-key implementation is included in the compatibility harness.
+
+Process-local sessions, leases, file locks and in-memory maps cannot coordinate multiple Workers. Supply durable admission/maintenance, restore previews, operation ownership and recovery state, with explicit expiry and crash behavior. Host installation/startup controls, filesystem export, local stdio, Puppeteer PDF and trusted Node extensions remain unavailable unless a deployment supplies a supported implementation; the harness reports these capabilities unavailable and tests handler rejection.
+
+Existing SQLite/file/paired backups remain local capabilities. [Supabase database backups omit Storage object bytes](https://supabase.com/docs/guides/platform/backups); database recovery alone is not a complete Saturday restore. A hosted backup/restore implementation must coordinate metadata, bytes, identities/counters, Profile assignments and pending operations, and preserve the current dataset on failed restore. A SQLite snapshot is not directly importable into PostgreSQL. Future deployment transfer uses `application/transfer.ts`, validates a complete destination before publication and excludes machine settings, sessions and credentials. Full cross-backend transfer and hosted recovery remain unimplemented.
