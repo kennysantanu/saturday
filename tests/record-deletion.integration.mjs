@@ -11,6 +11,8 @@ import { randomUUID } from 'node:crypto';
 import { createJob, getJob, addJobUpdate } from '../src/lib/server/local/jobs.js';
 import { createDocument, listDocuments } from '../src/lib/server/files/documents.js';
 import * as networks from '../src/lib/server/local/people.js';
+import * as reminders from '../src/lib/server/local/reminders.js';
+import { withDatabase } from '../src/lib/server/database.js';
 
 test('parent deletion confirms current scope, preserves related records and return paths, and recovers cleanly in the browser', async (t) => {
 	assert(
@@ -35,6 +37,20 @@ test('parent deletion confirms current scope, preserves related records and retu
 		network_id: person.id,
 		interaction_date: '2020-01-01',
 		note: 'History'
+	});
+	reminders.createReminder({ job_id: job.id, scheduled_at: '2099-08-01T00:00' });
+	const dismissed = reminders.createReminder({
+		job_id: job.id,
+		scheduled_at: '2099-08-02T09:30'
+	});
+	reminders.dismissReminder({ job_id: job.id, reminder_id: dismissed.id });
+	const otherReminder = reminders.createReminder({
+		job_id: other.id,
+		scheduled_at: '2099-08-01T00:00'
+	});
+	const personReminder = reminders.createReminder({
+		network_id: person.id,
+		scheduled_at: '2099-08-01T00:00'
 	});
 	await createDocument({ scope: job.id, filename: 'tailored.md', content: 'remove with job' });
 	await createDocument({ filename: 'keep.md', content: 'keep general document' });
@@ -117,7 +133,7 @@ test('parent deletion confirms current scope, preserves related records and retu
 			assert.equal(await page.evaluate(() => document.activeElement.textContent.trim()), 'Cancel');
 			assert.match(
 				await page.$eval('[role="dialog"]', (el) => el.textContent),
-				/all job-specific documents/
+				/history, reminders, person relationships and all job-specific documents/
 			);
 			const geometry = await page.$eval('[role="dialog"]', (el) => {
 				const buttons = [...el.querySelectorAll('[data-slot="dialog-footer"] button')].map(
@@ -196,6 +212,20 @@ test('parent deletion confirms current scope, preserves related records and retu
 		assert(getJob(other.id));
 		assert.equal(networks.getNetwork(person.id).name, 'Delete person');
 		assert.equal(networks.listNetworkJobs({ network_id: person.id }).total, 1);
+		withDatabase((db) => {
+			assert.equal(
+				db.prepare('SELECT COUNT(*) AS n FROM reminders WHERE job_id=?').get(job.id).n,
+				0
+			);
+			assert.equal(
+				db.prepare('SELECT COUNT(*) AS n FROM job_updates WHERE job_id=?').get(job.id).n,
+				0
+			);
+		});
+		assert.deepEqual(reminders.listReminders({ job_id: other.id }).reminders, [otherReminder]);
+		assert.deepEqual(reminders.listReminders({ network_id: person.id }).reminders, [
+			personReminder
+		]);
 		assert.equal((await listDocuments()).total, 1);
 		const fileManifest = JSON.parse(await readFile(join(root, 'files', 'manifest.json'), 'utf8'));
 		assert(!fileManifest.documents.some((entry) => entry.key.startsWith(`jobs/${job.id}/`)));
@@ -223,6 +253,13 @@ test('parent deletion confirms current scope, preserves related records and retu
 		assert.equal(new URL(page.url()).searchParams.get('return_to'), '/jobs?view=all');
 		assert(getJob(other.id));
 		assert.equal(networks.listNetworks({ job_id: other.id }).total, 0);
+		withDatabase((db) =>
+			assert.equal(
+				db.prepare('SELECT COUNT(*) AS n FROM reminders WHERE network_id=?').get(person.id).n,
+				0
+			)
+		);
+		assert.deepEqual(reminders.listReminders({ job_id: other.id }).reminders, [otherReminder]);
 		assert.throws(
 			() => networks.getNetwork(person.id),
 			(e) => e.code === 'not_found'
