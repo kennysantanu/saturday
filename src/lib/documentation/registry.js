@@ -1,6 +1,13 @@
 // Only these maintained guides may be included in assistant help.
 export const documentationRegistry = [
 	[
+		'release',
+		'docs/release-notes.md',
+		'Release notes',
+		'Version 0.1.0 features, limits and distribution status.',
+		['release', 'beta', 'version']
+	],
+	[
 		'overview',
 		'README.md',
 		'Saturday overview',

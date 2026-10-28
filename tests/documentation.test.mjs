@@ -11,7 +11,7 @@ const documents = buildDocumentation(),
 const help = createDocumentationHelp(documents, build);
 
 test('bundled help indexes, ranks relevant sections and preserves complete bounded content', () => {
-	assert.equal(help.search().guides.length, 12);
+	assert.equal(help.search().guides.length, 13);
 	for (const [query, id] of [
 		['phone wifi', 'installation'],
 		['forgot password', 'installation'],
@@ -26,7 +26,7 @@ test('bundled help indexes, ranks relevant sections and preserves complete bound
 	}
 	assert.deepEqual(help.search({ query: 'zxqvvunknown' }).results, []);
 	assert.equal(help.search({ query: 'INSTALLATION', limit: 1 }).results.length, 1);
-	assert.equal(help.search({ query: '   ' }).guides.length, 12);
+	assert.equal(help.search({ query: '   ' }).guides.length, 13);
 	for (const document of documents) {
 		assert.equal(document.sections.map((s) => s.markdown).join(''), document.markdown);
 		const all = help.read({ document_id: document.id });
@@ -58,7 +58,7 @@ test('documentation build rejects missing guides, broken anchors and missing req
 	try {
 		for (const file of ['README.md', 'LICENSE', 'docs', 'src'])
 			await cp(file, join(root, file), { recursive: true });
-		assert.equal(buildDocumentation(root).length, 12);
+		assert.equal(buildDocumentation(root).length, 13);
 		await writeFile(join(root, 'docs/README.md'), '# Help\n[bad](user-guide.md#missing-anchor)\n');
 		assert.throws(() => buildDocumentation(root), /anchor/);
 		await cp('docs/README.md', join(root, 'docs/README.md'));
