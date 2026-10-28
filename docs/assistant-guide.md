@@ -106,3 +106,9 @@ Follow the [installation guide](installation-guide.md#updates) for update/repair
 Reminder tools manage independent job/person prompts. Use create/list/edit/dismiss/delete reminder operations from the [MCP reference](mcp-reference.md#reminders). Dismissal does not record a completed appointment; record outcomes in history or interactions. Fixed reminder schedules do not convert timezones.
 
 Use the [tag tools](mcp-reference.md#tags) to organize jobs and people in separate collections. Discover existing tags before creating duplicates; names are lowercase alphanumeric words stored with underscores and displayed with spaces. Prefer `add_tag`/`remove_tag` for individual changes; omitted `tag_ids` preserves assignments, while an explicit empty array clears them. Deleting or merging definitions requires specific user authorization and affects all their assignments. Never copy tags between linked jobs/people automatically, and inspect state before retrying an uncertain merge.
+
+## Ask for Saturday help
+
+Ask your assistant about phone access, a forgotten password, updates or a feature workflow. It can use `search_documentation({query})` and `read_documentation({document_id, section_id})` to consult guides bundled with the running build. Omitting the search query lists guides. Long guides expose section IDs and explicit remaining sections; the assistant should read the relevant sections before giving instructions.
+
+These tools read documentation only. They do not read your career records, fetch remote pages or run commands. Password recovery still requires an authorized terminal action on the server computer. Actual help-tool discovery and interpretation depend on your assistant client; verify them separately from connection setup.

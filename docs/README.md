@@ -19,3 +19,14 @@ These guides describe implemented behavior. Development status and platform veri
 Use the installation guide for application operations and the agent guide for advanced data recovery. Keep detailed tool contracts in the MCP reference; the assistant guide focuses on connecting and using a client.
 
 For implementation details, start with the source map in Contributing. Tool schemas in `src/lib/application/assistant-catalog.js`, the MCP adapter in `src/lib/server/mcp-server.js`, scripts in `package.json`, and current source define executable behavior; update the owning guide when those contracts change.
+
+## Find help by task
+
+- **Install, open or update:** [managed installation](installation-guide.md#managed-installation) and [updates](installation-guide.md#updates).
+- **Use the app:** [user guide](user-guide.md) for jobs, people, reminders, tags, documents and Profile.
+- **Recover access or data:** [password recovery](installation-guide.md#password-login-and-local-recovery) and [backup/recovery commands](agent-guide.md#backup-and-recovery-commands).
+- **Connect an assistant:** [connection and verification](assistant-guide.md#connect).
+- **Develop a feature:** [source map and checks](contributing.md), [application architecture](application-architecture.md) and [design conventions](design-guide.md).
+- **Author an extension:** [extension guide](extension-guide.md).
+
+A connected assistant can call `search_documentation` with no query for the bundled guide index, search by a short phrase, then call `read_documentation` using the returned IDs. Help comes from the installed build and works offline with the UI stopped; it cannot execute recovery commands. Developer/extension topics describe authoring, not additional end-user setup requirements.

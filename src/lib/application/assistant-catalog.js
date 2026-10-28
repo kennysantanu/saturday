@@ -56,7 +56,7 @@ export function createAssistantCatalog(app, capabilities) {
 			name: 'get_saturday_info',
 			operation: 'getSaturdayInfo',
 			description:
-				'Read this Saturday installation and database identity, build and record counts. Compare with Settings before using a newly configured or reconnected client. Works with an empty dataset. This is a read, not certification of an assistant client.',
+				'Read this Saturday installation and database identity, build and record counts. Compare with Settings before using a newly configured or reconnected client. Works with an empty dataset. For Saturday help use search_documentation and read_documentation. This is a read, not certification of an assistant client.',
 			inputSchema: z.object({}),
 			annotations: { readOnlyHint: true, destructiveHint: false },
 			execute: () => app.getSaturdayInfo()
