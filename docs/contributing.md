@@ -57,7 +57,7 @@ Record exact candidate/build, OS, runtime, browser and client results when claim
 | `npm run test:contracts`                               | Check application contracts against actual local SQLite and document adapters           |
 | `npm run test:cloudflare`                              | Build shared core and execute its offline Miniflare/workerd harness                     |
 | `npm run test:web`                                     | Build production; run HTTP, lifecycle, password, LAN, and available Chrome checks       |
-| `npm run test:beta`                                    | Browser review against an existing production build                                     |
+| `npm run test:beta`                                    | Browser workflow, MCP reconnect and PDF review against an existing production build     |
 | `npm run verify`                                       | Lint, type checks, unit/contracts, Cloudflare runtime, production tests, browser review |
 | `npm run assistant -- config --format json`            | Generate local MCP configuration; also supports TOML                                    |
 | `npm run update:check` / `npm run update -- --confirm` | Check / perform a manual application update                                             |
@@ -68,6 +68,8 @@ Backup/file commands are in the [agent guide](agent-guide.md#backup-and-recovery
 `npm run check` also runs `npm run check:scripts`, which uses the existing TypeScript dependency to detect unresolved names in `scripts/**/*.mjs`. This is a focused name-resolution check; other JavaScript typing diagnostics remain outside its scope. Installer tests cover fresh managed installation from an empty root as well as repair/reinstallation. The fresh-install test reuses local dependencies while exercising runtime configuration, web/MCP builds, setup, publication, desktop shortcut creation, and UI readiness.
 
 Run checks appropriate to a change. Before sharing a candidate, install Chrome and run `npm run verify`. `test:beta` requires `npm run build` first when run independently. Browser screenshots and failure evidence are written to the printed OS temporary directory. Tests use disposable stores; real Chrome checks need sandboxed browser startup. HTTP and compilation checks do not replace visual or screen-reader review.
+
+The browser review includes a continuous Dashboard-to-job workflow with inline tags, search/sort, stage and history changes, reminders, and an MCP write/reconnect against the same fictional workspace. Its temporary directory retains `verification.json`, screenshots, a representative `release-review.pdf` and its HTML source, plus invalid-PDF failure evidence. Inspect these artifacts separately for presentation quality. Run this review after the build finishes; rebuilding the same output while a test server is running can invalidate its loaded route chunks.
 
 For the optional large-archive case, run `node --max-old-space-size=128 --test tests/files.large.integration.mjs`; allow several GiB of temporary space. It exercises a ZIP and expanded collection above 1 GiB.
 

@@ -3,16 +3,25 @@ import { listReminders } from '../src/lib/server/local/reminders.js';
 import puppeteer from 'puppeteer';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { connectMcp } from '../tests/helpers/mcp-client.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import assert from 'node:assert/strict';
 const scratch = await mkdtemp(join(tmpdir(), 'saturday-documents-ui-'));
-process.env.SATURDAY_FILES_PATH = join(scratch, 'files');
-process.env.SATURDAY_DB_PATH = join(scratch, 'db.sqlite');
+Object.assign(process.env, {
+	SATURDAY_PROJECT_ROOT: process.cwd(),
+	SATURDAY_INSTALLATION_PATH: '',
+	SATURDAY_FILES_PATH: join(scratch, 'files'),
+	SATURDAY_DB_PATH: join(scratch, 'db.sqlite'),
+	SATURDAY_EXTENSION_STATE_PATH: join(scratch, 'extension-state'),
+	SATURDAY_EXTENSIONS_PATH: join(scratch, 'extensions-code')
+});
 const { createDocument, getDocument } = await import('../src/lib/server/files/documents.js');
 const networks = await import('../src/lib/server/local/people.js');
-const { createJob } = await import('../src/lib/server/local/jobs.js');
+const { createJob, getJob } = await import('../src/lib/server/local/jobs.js');
+const { listWorkflowStages } = await import('../src/lib/server/local/workflow.js');
 const cv = await createDocument({
 	filename: 'master-cv.md',
 	content:
@@ -61,8 +70,16 @@ const child = spawn(process.execPath, ['scripts/start.mjs'], {
 });
 let logs = '';
 child.stderr.on('data', (c) => (logs += c));
-let browser;
+let browser, client;
+let step = 'startup';
 const errors = [];
+const verification = {
+	format: 'saturday.browser-verification',
+	version: 1,
+	environment: { platform: process.platform, arch: process.arch, node: process.version },
+	manual_review:
+		'Visual/font quality, real zoom, screen readers, physical devices and actual assistant clients remain user tests.'
+};
 try {
 	const base = `http://127.0.0.1:${port}`;
 	for (let i = 0; i < 100; i++) {
@@ -72,6 +89,8 @@ try {
 		await new Promise((r) => setTimeout(r, 100));
 	}
 	browser = await puppeteer.launch({ headless: true });
+	verification.environment.browser = await browser.version();
+	verification.build = (await (await fetch(`${base}/health`)).json()).build;
 	const page = await browser.newPage();
 	const settled = async () => {
 		await page.waitForNetworkIdle({ idleTime: 100 });
@@ -589,6 +608,202 @@ try {
 	await page.waitForSelector('[role=dialog]');
 	await page.locator('[role=dialog] button::-p-text(Discard changes)').click();
 	await page.waitForFunction(() => location.pathname === '/jobs');
+	// One continuous release workflow catches integration gaps between otherwise
+	// independently tested features. Start from Dashboard rather than seeded detail.
+	step = 'continuous job workflow';
+	await page.setViewport({ width: 1280, height: 900 });
+	await page.goto(base, { waitUntil: 'networkidle0' });
+	await page.locator('main a::-p-text(Add job)').click();
+	await page.waitForSelector('#job_title');
+	await settled();
+	await page.type('#job_title', 'Release workflow engineer');
+	await page.type('#company_name', 'Fictional Release Labs');
+	await page.locator('button::-p-text(Create a tag)').click();
+	await page
+		.locator('[role="group"][aria-label="Create tag"] input[id$="-name"]')
+		.fill('Release QA');
+	await page.locator('[role="group"][aria-label="Create tag"] input[id$="-hex"]').fill('#2468AC');
+	await page.locator('button::-p-text(Create tag)').click();
+	await page.waitForFunction(
+		() =>
+			document.querySelector('.tag-choice input:checked') ||
+			document.querySelector('[role="group"][aria-label="Tags"] [role="alert"]')
+	);
+	assert.ok(
+		await page.$('.tag-choice input:checked'),
+		await page.$eval('main', (e) => e.textContent)
+	);
+	assert.equal(await page.$eval('#job_title', (e) => e.value), 'Release workflow engineer');
+	await page.locator('button::-p-text(Save job)').click();
+	await page.waitForFunction(() => /^\/jobs\/\d+$/.test(location.pathname));
+	await settled();
+	const workflowId = Number(new URL(page.url()).pathname.split('/').at(-1));
+	const createdJob = getJob(workflowId);
+	assert.equal(new URL(page.url()).searchParams.get('return_to'), '/');
+	assert.equal(createdJob.tags[0].name, 'release_qa');
+	assert.equal(createdJob.tags[0].color, '#2468ac');
+	await page.goto(`${base}/jobs`, { waitUntil: 'networkidle0' });
+	await page.locator('#query').fill('Release workflow');
+	await page.select('#sort', 'created');
+	await page.click(`[data-choice="${createdJob.tags[0].id}"] input`);
+	await page.locator('button::-p-text(Apply filters)').click();
+	await page.waitForFunction(() => location.search.includes('query=Release'));
+	await settled();
+	const filters = new URL(page.url()).search;
+	assert.equal(new URL(page.url()).searchParams.get('sort'), 'created');
+	assert.deepEqual(new URL(page.url()).searchParams.getAll('tag_ids'), [
+		String(createdJob.tags[0].id)
+	]);
+	assert.equal(await page.$$eval(`a[href^="/jobs/${workflowId}?"]`, (els) => els.length), 1);
+	assert.equal(await page.$(`a[href^="/jobs/${job.id}?"]`), null);
+	await page.locator(`a[href^="/jobs/${workflowId}?"]`).click();
+	await page.waitForSelector('button::-p-text(Change stage)');
+	await settled();
+	assert.equal(new URL(page.url()).searchParams.get('return_to'), '/jobs' + filters);
+	const applied = listWorkflowStages().find((stage) => stage.name === 'Applied');
+	const interview = listWorkflowStages().find((stage) => stage.name === 'Interview');
+	const saveHistory = async () => {
+		await page.click('#job-update-form button[type="submit"]:not([formaction])');
+		await page.waitForSelector('[role="dialog"]', { hidden: true });
+		await settled();
+	};
+	await page.locator('button::-p-text(Change stage)').click();
+	await page.waitForSelector('#move-stage');
+	await settled();
+	await page.select('#move-stage', String(applied.id));
+	await page.type('#move-note', 'Application submitted');
+	await page.click('input[name="add_reminder"]');
+	await page.locator('#history-reminder-date').fill('2099-08-01');
+	assert.equal(await page.$eval('#history-reminder-time', (e) => e.value), '00:00');
+	await page.locator('#history-reminder-note').fill('Check application progress');
+	await saveHistory();
+	assert.equal(getJob(workflowId).currentStageId, applied.id);
+	const reminder = listReminders({ job_id: workflowId }).reminders[0];
+	assert.equal(reminder.scheduled_at, '2099-08-01T00:00');
+	await page.click('button::-p-text(Add history)');
+	await page.waitForSelector('#history-stage');
+	await settled();
+	await page.select('#history-stage', String(interview.id));
+	await page.locator('#history-date').fill('2099-08-02');
+	await page.type('#history-note', 'Scheduled interview');
+	await saveHistory();
+	const milestone = getJob(workflowId).updates.find(
+		(entry) => entry.note === 'Scheduled interview'
+	);
+	assert.equal(getJob(workflowId).currentStageId, applied.id);
+	await page.click('button[aria-label^="Edit history: Interview"]');
+	await page.waitForSelector('#correction-note');
+	await settled();
+	await page.locator('#correction-note').fill('Interview details corrected');
+	await saveHistory();
+	assert.equal(getJob(workflowId).currentStageId, applied.id);
+	assert.equal(
+		getJob(workflowId).updates.find((entry) => entry.id === milestone.id).note,
+		'Interview details corrected'
+	);
+	assert.equal(listReminders({ job_id: workflowId }).reminders[0].note, reminder.note);
+	await page
+		.locator(`[data-reminder-id="${reminder.id}"] button::-p-text(Dismiss reminder)`)
+		.click();
+	await settled();
+	assert.equal(listReminders({ job_id: workflowId }).total, 0);
+	assert.equal(
+		listReminders({ job_id: workflowId, view: 'inactive' }).reminders[0].id,
+		reminder.id
+	);
+	assert.equal(getJob(workflowId).currentStageId, applied.id);
+	await page.screenshot({ path: join(scratch, 'release-workflow.png'), fullPage: true });
+	await page.goto(base, { waitUntil: 'networkidle0' });
+	assert.ok(await page.$(`.pipeline-column a[href^="/jobs/${workflowId}?"]`));
+	assert.ok(
+		!(await page.$eval('#notifications-heading', (e) => e.closest('section').textContent)).includes(
+			reminder.note
+		)
+	);
+	verification.continuous_workflow =
+		'passed: Dashboard, create job with inline tag, search/tag/sort, stage plus reminder, independent scheduled history/edit, dismiss reminder and Dashboard';
+	// Verify browser and a reconnected stdio client see the same stored job/build.
+	step = 'MCP reads, write, reconnect and help';
+	client = await connectMcp();
+	const info = await client.call('get_saturday_info');
+	assert.equal(info.build.id, verification.build.id);
+	assert.equal(client.initialized.serverInfo.version, verification.build.id);
+	assert.equal((await client.call('get_job', { job_id: workflowId })).current_stage_id, applied.id);
+	await client.call('edit_job', {
+		job_id: workflowId,
+		notes: 'Updated through the release protocol check'
+	});
+	await page.goto(`${base}/jobs/${workflowId}`, { waitUntil: 'networkidle0' });
+	assert.ok((await page.content()).includes('Updated through the release protocol check'));
+	await client.close();
+	client = await connectMcp();
+	assert.equal(
+		(await client.call('get_job', { job_id: workflowId })).notes,
+		'Updated through the release protocol check'
+	);
+	const help = await client.call('search_documentation', { query: 'reminders' });
+	assert.ok(help.results.length);
+	const hit = help.results[0];
+	assert.ok(
+		(
+			await client.call('read_documentation', {
+				document_id: hit.document_id,
+				section_id: hit.section_id
+			})
+		).markdown.length
+	);
+	verification.mcp =
+		'passed: matching web/protocol identity, reads, write visible in browser, reconnect and bundled help';
+	// Keep the actual generated PDF and HTML outside the checkout for user review.
+	step = 'HTTP PDF generation and download';
+	const pdfSource =
+		'<!doctype html><html lang="en"><meta charset="utf-8"><title>Fictional release CV</title><style>@page{size:A4;margin:18mm}body{font:11pt sans-serif;line-height:1.5}h1{font-size:24pt}h2{font-size:14pt}</style><h1>Alex Example</h1><p>Fictional software engineer · person@example.invalid</p><h2>Experience</h2><p>Built accessible tools for a fictional team.</p><ul><li>Application design and testing</li><li>Résumé and document workflows</li></ul><h2>Education</h2><p>Example University · Computer Science</p></html>';
+	const source = await createDocument({ filename: 'release-review.html', content: pdfSource });
+	await page.goto(`${base}/documents/${source.id}`, { waitUntil: 'networkidle0' });
+	assert.ok(await page.$('form[action="?/pdf"] button[type="submit"]'));
+	// Exercise the real form action without opening Chrome's embedded PDF viewer:
+	// that viewer prevents reliable headless network-idle checks on later pages.
+	const generated = await fetch(`${base}/documents/${source.id}?/pdf`, {
+		method: 'POST',
+		headers: {
+			origin: base,
+			accept: 'text/html',
+			'content-type': 'application/x-www-form-urlencoded'
+		},
+		body: new URLSearchParams({ token: source.token }),
+		redirect: 'manual'
+	});
+	assert.equal(generated.status, 303);
+	const pdfId = new URL(generated.headers.get('location'), base).pathname.split('/').at(-1);
+	const downloadPdf = await fetch(`${base}/api/files/${pdfId}`);
+	assert.equal(downloadPdf.status, 200);
+	const pdfBytes = Buffer.from(await downloadPdf.arrayBuffer());
+	assert.equal(pdfBytes.subarray(0, 5).toString(), '%PDF-');
+	assert.match(pdfBytes.subarray(-1024).toString(), /%%EOF\s*$/);
+	assert.ok(pdfBytes.length > 1000);
+	assert.equal((await getDocument({ id: source.id, include_content: true })).content, pdfSource);
+	await writeFile(join(scratch, 'release-review.pdf'), pdfBytes);
+	await writeFile(join(scratch, 'release-review.html'), pdfSource);
+	step = 'invalid PDF preserves HTML source';
+	const badSource = '<style>@page{size:100in}</style><p>Keep this failed source.</p>';
+	const badPdf = await createDocument({ filename: 'failed-pdf.html', content: badSource });
+	await page.goto(`${base}/documents/${badPdf.id}`, { waitUntil: 'networkidle0' });
+	await page.locator('button::-p-text(Generate PDF)').click();
+	await page.waitForSelector('[role="alert"]');
+	await settled();
+	assert.equal(new URL(page.url()).pathname, `/documents/${badPdf.id}`);
+	assert.equal((await getDocument({ id: badPdf.id, include_content: true })).content, badSource);
+	assert.equal((await getDocument({ id: badPdf.id })).token, badPdf.token);
+	await writeFile(join(scratch, 'failed-pdf.html'), badSource);
+	await page.screenshot({ path: join(scratch, 'pdf-failure.png'), fullPage: true });
+	verification.pdf = {
+		status: 'passed',
+		bytes: pdfBytes.length,
+		sha256: createHash('sha256').update(pdfBytes).digest('hex'),
+		checks:
+			'HTTP form generation/download, PDF signature/EOF, unchanged HTML and browser invalid-page failure; embedded viewer and visual acceptance deferred'
+	};
+	step = 'no-JavaScript filters';
 	const noJs = await browser.newPage();
 	await noJs.setJavaScriptEnabled(false);
 	await noJs.goto(`${base}/networks?organization=Acme&role=recruiter`, {
@@ -606,15 +821,22 @@ try {
 	);
 	await noJs.close();
 	assert.deepEqual(errors, []);
+	await writeFile(
+		join(scratch, 'verification.json'),
+		JSON.stringify({ ...verification, errors }, null, 2) + '\n'
+	);
 	console.log(JSON.stringify({ scratch, errors, job_id: job.id }));
 } catch (e) {
-	console.error({ scratch, browserErrors: typeof errors !== 'undefined' ? errors : [] });
-	for (const page of (await browser?.pages()) ?? []) {
-		await writeFile(join(scratch, 'failed.html'), await page.content());
-		await page.screenshot({ path: join(scratch, 'failed.png'), fullPage: true });
+	console.error({ scratch, step, error: e.message, browserErrors: errors });
+	for (const [index, page] of ((await browser?.pages()) ?? []).entries()) {
+		await writeFile(join(scratch, `failed-${index}.html`), await page.content());
+		await page
+			.screenshot({ path: join(scratch, `failed-${index}.png`), fullPage: true, timeout: 5000 })
+			.catch(() => {});
 	}
 	throw e;
 } finally {
+	await client?.close();
 	await browser?.close();
 	child.kill('SIGTERM');
 	await new Promise((r) => child.once('close', r));
