@@ -541,7 +541,7 @@ test('built MCP exposes career/document tools and complete backup/restore workfl
 			score_comment: 'Initial fit'
 		});
 		assert.equal(job.id, 1);
-		assert.equal(listing.tools.length, 59);
+		assert.equal(listing.tools.length, 61);
 		for (const name of [
 			'list_networks',
 			'get_network',

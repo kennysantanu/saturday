@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { createDocumentationHelp } from '../documentation/help.js';
 import { createAssistantCatalog } from '../application/assistant-catalog.js';
 import { McpServer } from '@modelcontextprotocol/server';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
@@ -19,7 +21,14 @@ import {
 	registerExtensionRuntime
 } from './extensions.js';
 
-const server = new McpServer({ name: 'saturday', version: buildInfo.id });
+const server = new McpServer(
+	{ name: 'saturday', version: buildInfo.id },
+	{
+		instructions:
+			'For help with Saturday installation, phone/LAN access, password recovery, usage or development, call search_documentation then read_documentation. These bundled guides match this build. Recovery instructions require separate authorized host-terminal actions; help tools cannot execute them.'
+	}
+);
+const help = createDocumentationHelp(undefined, buildInfo);
 function toolError(error) {
 	const message =
 		error instanceof ValidationError
@@ -48,6 +57,42 @@ function publicDeletionError(error) {
 	if (error instanceof ServiceError) return { code: error.code, message: error.message };
 	return publicFileError(error);
 }
+for (const [name, description, inputSchema, execute] of [
+	[
+		'search_documentation',
+		'Search this build’s bundled Saturday guides for setup, phone/LAN, forgotten passwords, usage and development. Omit query for the guide index. Read-only, offline; does not access career records or execute recovery.',
+		z
+			.object({
+				query: z.string().max(200).optional(),
+				limit: z.number().int().min(1).max(10).optional()
+			})
+			.strict(),
+		(input) => help.search(input)
+	],
+	[
+		'read_documentation',
+		'Read a bundled Saturday guide or section by IDs returned from search_documentation. Follow remaining_sections for long guides. Accepts no file paths or URLs; cannot execute commands or reset passwords.',
+		z
+			.object({ document_id: z.string().max(80), section_id: z.string().max(200).optional() })
+			.strict(),
+		(input) => help.read(input)
+	]
+])
+	server.registerTool(
+		name,
+		{
+			description,
+			inputSchema,
+			annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
+		},
+		async (input) => {
+			try {
+				return toolResult(execute(input));
+			} catch (error) {
+				return toolError(error);
+			}
+		}
+	);
 // Preserve existing MCP response/error envelopes outside the shared command catalog.
 const responseGroups = {
 	backup: [
@@ -110,7 +155,12 @@ for (const { name, description, inputSchema, annotations, execute } of createAss
 		{ description, inputSchema, ...(annotations ? { annotations } : {}) },
 		async (input) => {
 			try {
-				const value = await withServerActivity(() => execute(input));
+				let value = await withServerActivity(() => execute(input));
+				if (name === 'get_saturday_info')
+					value = {
+						...value,
+						documentation: { search_tool: 'search_documentation', read_tool: 'read_documentation' }
+					};
 				return toolResult(errorGroup ? { ok: true, ...value } : value);
 			} catch (error) {
 				if (!errorGroup) return toolError(error);

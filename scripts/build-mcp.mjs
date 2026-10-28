@@ -1,3 +1,4 @@
+import { buildDocumentation } from './documentation-build.mjs';
 import { generateExtensions } from './extension-build.mjs';
 import { build } from 'esbuild';
 import { mkdir } from 'node:fs/promises';
@@ -18,7 +19,10 @@ try {
 		platform: 'node',
 		format: 'esm',
 		target: 'node22.13',
-		define: { __SATURDAY_BUILD_INFO__: JSON.stringify(readBuildInfo(root)) },
+		define: {
+			__SATURDAY_BUILD_INFO__: JSON.stringify(readBuildInfo(root)),
+			__SATURDAY_DOCUMENTATION__: JSON.stringify(buildDocumentation(root))
+		},
 		packages: 'bundle',
 		// Zod's ESM cycles must retain module initialization order alongside the SDK.
 		external: ['puppeteer', 'yazl', 'yauzl', 'zod'],
