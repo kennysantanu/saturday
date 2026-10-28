@@ -1,3 +1,5 @@
+import { fail } from '@sveltejs/kit';
+import { ValidationError, ServiceError } from '../domain/validation.js';
 import { listTags, getTagSelection } from './application.js';
 export async function tagPickerData(collection, ids = []) {
 	return {
@@ -20,4 +22,16 @@ export async function tagFailureSelection(collection, values) {
 			)
 		: [];
 	return await getTagSelection({ collection, tag_ids: ids });
+}
+
+/** Preserve submitted fields and selected tags when a job/person form fails. */
+export async function tagFormFailure(error, collection, values, fallback) {
+	if (error instanceof ValidationError || error instanceof ServiceError)
+		return fail(400, {
+			errors: error instanceof ValidationError ? error.fieldErrors : { form: error.message },
+			tagSelection: await tagFailureSelection(collection, values),
+			values
+		});
+	console.error(fallback, error);
+	return fail(500, { errors: { form: fallback }, values });
 }

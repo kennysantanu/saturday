@@ -13,13 +13,11 @@ Setup installs dependencies, prepares optional Chrome/PDF support, builds web/MC
 
 For an isolated source workspace, set absolute `SATURDAY_DB_PATH`, `SATURDAY_FILES_PATH`, `SATURDAY_EXTENSION_STATE_PATH`, and `SATURDAY_EXTENSIONS_PATH` before setup. Keep the resulting `SATURDAY_INSTALLATION_PATH` consistent across commands. Existing descriptors reject conflicting overrides rather than selecting another workspace.
 
-## Development toward 0.1.0
+## Release and compatibility policy
 
-Development remains unversioned until `0.1.0`: leave placeholder package/lockfile versions unchanged and do not create numbered beta releases. Breaking development APIs/storage may require an explicitly authorized reset; startup and setup must never reset data silently. Retain compatible backups and their source/build when testing upgrades.
+Saturday is preparing its first `0.1.0` release. Available features and automated checks do not establish platform certification; use the support matrix below when evaluating an installation.
 
-Dashboard, Jobs, Network, Documents/Profile, backups, local MCP, extensions, managed installers, and manual update/repair/uninstall are implemented. Implementation does not establish platform certification. The database format is `saturday.database`, schema 1, with workflow stages, jobs, people, histories, reminders and tags created together. File storage uses `saturday.files`, manifest 1, including all Profile slots. Incompatible stores reject unchanged; use disposable storage for development.
-
-After `0.1.0`, released storage baselines are immutable and supported data changes use migrations independently of application version numbers.
+Released storage baselines are immutable. Append migrations for supported data changes and test upgrades with populated fixtures. Database and file-format versions advance independently of the application version. Setup and updates must never reset existing data silently. Preserve recovery backups and their compatible application build.
 
 ### Build identity
 
@@ -39,7 +37,7 @@ Run `npm run build` to rebuild both artifacts; restart Vite to refresh a dev ser
 | Browser/accessibility | Modern desktop browser; full keyboard, zoom, contrast, screen-reader, and platform certification pending                                        |
 | Assistant client      | Local stdio MCP; real-client connection/reconnect must be verified separately from protocol tests                                               |
 
-History records local macOS source/setup, PDF, HTTP/browser, and limited managed-launcher/login checks. These are historical observations, not a current all-platform test pass. Before claiming support, record the candidate commit/build, OS/architecture, Node/npm/Chrome and client versions, commands, and actual results. Reboot/login/session behavior and real assistant-client access remain explicit manual checks.
+Record exact candidate/build, OS, runtime, browser and client results when claiming platform support. Real device, reboot/login and assistant-client checks remain separate from automated suites.
 
 ## Commands and verification
 
@@ -98,25 +96,15 @@ For the optional large-archive case, run `node --max-old-space-size=128 --test t
 | `examples/extensions/interview-practice/`                             | Portable extension example                                                          |
 | `docs/`                                                               | User, assistant, and contributor guides                                             |
 
-New browser and assistant features use the shared asynchronous application boundary; await its operations before handling results or redirecting. See [Application architecture](application-architecture.md) for transaction, streaming, authorization, platform and future transfer contracts. Existing local service exports remain for scripts, trusted extensions and storage regression fixtures.
+New browser and assistant features use the shared asynchronous application boundary; await its operations before handling results or redirecting. See [Application architecture](application-architecture.md) for transaction, streaming, authorization, platform and future transfer contracts. Host scripts and storage regression fixtures may call local implementations directly; third-party extensions use their public context.
 
 The [Cloudflare and hosted storage guide](cloudflare-storage-contract.md) describes the local compatibility harness and the remaining PostgreSQL/Supabase requirements. Its fixture Worker stays under `tests/fixtures/cloudflare/`; `scripts/cloudflare-build.mjs` guards the portable dependency graph. Miniflare is a pinned development dependency. Run `test:cloudflare` with loopback/process permission; it blocks outbound Worker requests and needs no account, project or credentials. A core harness pass does not establish full-app cloud support.
 
-## Local workflow and access verification — 2026-10-21
+## Verification scope
 
-The development candidate based on `4f3a26c` plus local changes passed `npm run verify` on macOS 26.4.1 arm64, Node 25.9.0, npm 11.12.1 and managed Chrome 154.0.8037.57: 160 regression tests, eight production HTTP/browser checks, and the document/extension browser review. The package remains an unreleased development version.
+`npm run verify` checks formatting, scripts/types, shared operations and MCP, local Cloudflare execution, production HTTP/browser behavior, and document/extension workflows. Tests use disposable stores. Coverage includes populated and empty lists, form drafts and expired sessions, workflow history, deletion recovery, backup integrity, file conflicts, access controls and installation lifecycle failures.
 
-Coverage includes more than 100 jobs, independent board pages, empty/closed-only data, current-versus-recorded milestones, Back/reload, keyboard focus, stale destination choices, uncertain-response retries, expired drafts, last-write-wins races, and fresh/populated database/paired restores. Fresh paired restore initializes its target file manifest before capturing database preview guards. Workflow names/order/archive state, IDs/counters, Network, Profile and attachments survive recovery. Old database formats reject unchanged. Reduced-motion preferences shorten sheet/control animations.
-
-A separately created temporary installation built and initialized the workflow baseline, generated an isolated desktop shortcut and JSON/TOML client fixtures, matched web/MCP identities, reflected a stage change on Dashboard, and supported MCP reconnect/read with the UI stopped. It reused local dependencies/runtime and did not alter personal data, the real Desktop, login startup or actual assistant-client configuration.
-
-Desktop/light, 320px/dark, 640px reflow, exact 767/768px dialog boundaries, touch emulation and Chrome accessibility-tree heading/link checks were reviewed. Reflow emulation is not actual browser 200% zoom; touch emulation is not a physical phone; an accessibility tree is not a screen-reader test. Actual zoom, physical touch/assistive technology, other supported platforms/minimum runtimes and real assistant-client verification remain release gates. Native GET lists/board paging and ordinary job forms are covered; quick-edit dialogs require JavaScript.
-
-A subsequent full `npm run verify` on commit `9550890` passed 160 regression tests, eight production HTTP/browser checks and document/extension browser review. Access coverage includes independent LAN/password defaults, all four combinations, initialization interruption/fail-closed behavior, route gates, forged-header rejection, host-only controls, restart/revocation, stopped-server recovery, expired-save/upload drafts and browser Back. Chrome used an actual external IPv4 address for login, job capture, upload/download and logout-all; this is not physical-phone certification.
-
-The wheel-activity follow-up reproduced missing finite-session renewal before the fix and verified trusted renewal, burst throttling, rejected synthetic activity and No expiration afterward. Build, formatting, zero-error/warning type checks, 29 focused tests and four production password/Dashboard/LAN checks passed. The separate theme follow-up passed build/type/format checks, 14 UI-convention tests and nine production checks, including browser-local persistence and fallback behavior; this does not claim a fresh full `verify` run for that follow-up.
-
-Regression entry points are `tests/workflow.test.mjs`, `tests/workflow.integration.mjs`, `tests/dashboard.test.mjs`, `tests/dashboard.integration.mjs`, `tests/access.test.mjs`, `tests/access-network.test.mjs`, `tests/access.integration.mjs`, `tests/access.browser.mjs`, `tests/lan.integration.mjs` and `tests/theme.integration.mjs`. Temporary screenshots/logs and disposable installation paths are review artifacts, not permanent release evidence. Repeat relevant checks against the exact candidate before claiming support.
+Record the exact candidate build, OS, runtime, browser and command results when reporting verification. Automated checks do not certify physical phones, native keyboards, actual 200% browser zoom, screen readers, reboot/login behavior, other operating systems or a real assistant client's connection. Check those separately on the release candidate; a simulated viewport or protocol test is insufficient.
 
 ## Storage contracts
 
@@ -161,7 +149,7 @@ Stage names are trimmed, 1–80 characters and unique among available stages usi
 
 Creation saves starting placement plus its initial milestone atomically. Change stage validates the latest job and available destination, accepts today/past dates, and commits placement plus one milestone together. Same-stage requests change neither timestamps nor history. Last committed moves win, retaining both actual moves' milestones; ordinary detail edits cannot overwrite placement. History-only changes never move a job, but refresh its `updated_at`. Notes require text; milestones may omit notes and use archived stages or confirmed future dates. Scheduled milestones count in distinct-job historical totals without advancing placement. History correction/deletion rechecks ownership and latest placement transactionally and cannot remove the sole milestone supporting that placement; date/note-only corrections remain allowed. Reads never reconstruct placement from history, and clients inspect authoritative state before manually retrying uncertain writes.
 
-Database backups include every stage, job pointer, history entry, dataset identity and allocator counter. Restore validates available names/types/order, at least one available open stage, available current destinations and supporting milestones. Remove dependent records before replacing all stages, including staging defaults; insert incoming stages before jobs/history. Workflow changes invalidate prepared restores through existing fingerprints. Test fresh and populated targets with different stage IDs and custom/archived stages, preserving Network, Profile, file namespaces and counters. Reject old formats unchanged; no development converter or automatic reset is supplied.
+Database backups include every stage, job pointer, history entry, dataset identity and allocator counter. Restore validates available names/types/order, at least one available open stage, available current destinations and supporting milestones. Remove dependent records before replacing all stages, including staging defaults; insert incoming stages before jobs/history. Workflow changes invalidate prepared restores through existing fingerprints. Test fresh and populated targets with different stage IDs and custom/archived stages, preserving Network, Profile, file namespaces and counters. Reject unsupported formats unchanged; never reset storage automatically.
 
 ### Parent-record deletion
 
@@ -177,7 +165,7 @@ Use `files/` services for every file mutation; routes/tools must not write bytes
 
 Coordinated restore acquires the SQLite write gate before the file lock and persists cross-store recovery state. Interrupted sessions block normal access until offline recovery. Backups include creator-build and dataset metadata; fingerprints must include all stored fields. Previews expire, reject relevant changes, and are single-use. Preserve recovery copies after uncertain failures.
 
-Manual backup orchestration lives in `files/pairs.js`. Database/files/both appear in grouped history; combined downloads/imports stream ZIPs while retaining independent artifact formats. New archives use `backups/database/` and `backups/files/` beside the stores. Supported older adjacent archives remain discoverable. Scheduling/retention workers are removed; old schedule JSON is inert. Core backups exclude extension databases.
+Manual backup orchestration lives in `files/pairs.js`. Database/files/both appear in grouped history; combined downloads/imports stream ZIPs while retaining independent artifact formats. Archives use the configured backup directories, normally `backups/database/` and `backups/files/` beside the stores. Backup creation is manual; there is no scheduling or retention worker. Core backups exclude extension databases.
 
 ## Installation and lifecycle contracts
 

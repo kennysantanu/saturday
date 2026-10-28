@@ -1,5 +1,5 @@
-import { listReminders } from '../src/lib/server/reminders.js';
-import * as networks from '../src/lib/server/networks.js';
+import { listReminders } from '../src/lib/server/local/reminders.js';
+import * as networks from '../src/lib/server/local/people.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
@@ -9,7 +9,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { parse } from 'devalue';
 import { migrateDatabase } from '../src/lib/server/database.js';
-import { createJob, getJob, setJobScore } from '../src/lib/server/services.js';
+import { createJob, getJob, setJobScore } from '../src/lib/server/local/jobs.js';
 import { listBackups } from '../src/lib/server/backups.js';
 import { readBuildInfo } from '../scripts/build-info.mjs';
 

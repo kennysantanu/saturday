@@ -12,8 +12,8 @@ import yazl from 'yazl';
 import yauzl from 'yauzl';
 import { getProjectRoot, getDatabasePath, databaseIdentity } from './database.js';
 import { acquireDirectoryLock, atomicJson } from './files/store.js';
-import { getJob, searchJobs } from './services.js';
-import { getNetwork, listNetworks } from './networks.js';
+import { getJob, searchJobs } from './local/jobs.js';
+import { getNetwork, listNetworks } from './local/people.js';
 import { getDocument, listDocuments } from './files/documents.js';
 
 export class ExtensionError extends Error {

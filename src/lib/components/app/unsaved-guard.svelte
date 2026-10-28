@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { beforeNavigate, goto } from '$app/navigation';
-	import { Button } from '$lib/components/ui/button/index.js';
-	import * as Dialog from '$lib/components/ui/dialog/index.js';
+	import DiscardChangesDialog from './discard-changes-dialog.svelte';
 	import type { UnsavedChanges } from '$lib/unsaved.svelte';
 
 	/** Asks before leaving a page with unsaved edits. Place once on the page. */
@@ -28,22 +27,10 @@
 
 <svelte:window onbeforeunload={unload} />
 
-<Dialog.Root bind:open>
-	<Dialog.Content class="sm:max-w-md">
-		<Dialog.Header>
-			<Dialog.Title>Discard unsaved changes?</Dialog.Title>
-			<Dialog.Description>Your latest edits have not been saved.</Dialog.Description>
-		</Dialog.Header>
-		<Dialog.Footer>
-			<Button variant="ghost" onclick={() => (open = false)}>Keep editing</Button>
-			<Button
-				variant="destructive"
-				onclick={() => {
-					guard.dirty = false;
-					open = false;
-					void goto(target);
-				}}>Discard changes</Button
-			>
-		</Dialog.Footer>
-	</Dialog.Content>
-</Dialog.Root>
+<DiscardChangesDialog
+	bind:open
+	ondiscard={() => {
+		guard.dirty = false;
+		void goto(target);
+	}}
+/>

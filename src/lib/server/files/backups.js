@@ -121,21 +121,12 @@ export async function listFileBackups({ limit = 50, offset = 0 } = {}) {
 		reject('VALIDATION', 'Invalid backup pagination.');
 	const root = await backupDirectory();
 	const all = [];
-	for (const directory of [root, filePaths().legacyBackups]) {
-		let names;
+	for (const name of await fs.readdir(root)) {
+		if (!uuid.test(name.replace(/\.json$/, '')) || !name.endsWith('.json')) continue;
 		try {
-			names = await fs.readdir(directory);
-		} catch (e) {
-			if (e.code === 'ENOENT') continue;
-			throw e;
-		}
-		for (const name of names) {
-			if (!uuid.test(name.replace(/\.json$/, '')) || !name.endsWith('.json')) continue;
-			try {
-				const meta = JSON.parse(await fs.readFile(join(directory, name), 'utf8'));
-				if (meta.backup_id === name.slice(0, -5)) all.push(meta);
-			} catch {}
-		}
+			const meta = JSON.parse(await fs.readFile(join(root, name), 'utf8'));
+			if (meta.backup_id === name.slice(0, -5)) all.push(meta);
+		} catch {}
 	}
 	all.sort(
 		(a, b) => b.created_at.localeCompare(a.created_at) || a.backup_id.localeCompare(b.backup_id)
@@ -147,15 +138,8 @@ export async function listFileBackups({ limit = 50, offset = 0 } = {}) {
 	};
 }
 export async function getFileBackup(id) {
-	const root = await backupDirectory();
+	const directory = await backupDirectory();
 	managed(id);
-	let directory = root;
-	try {
-		await fs.access(join(root, `${id}.json`));
-	} catch (e) {
-		if (e.code !== 'ENOENT') throw e;
-		directory = filePaths().legacyBackups;
-	}
 	const metadata = JSON.parse(await fs.readFile(join(directory, `${id}.json`), 'utf8'));
 	if (
 		metadata.format !== storageCompatibility.manifest.format ||

@@ -2,11 +2,11 @@
 
 Use this guide to install, open, update, repair, or remove Saturday. For assistant-led execution, also read the [agent guide](agent-guide.md). For connecting a client after installation, use the [assistant guide](assistant-guide.md).
 
-Saturday is in development toward `0.1.0`. Setup preserves existing data, but compatibility between development builds is not guaranteed. See the [development policy](contributing.md#development-toward-010) and [provisional support matrix](contributing.md#provisional-support-matrix).
+Saturday is preparing its first `0.1.0` release. Setup preserves existing data and rejects incompatible storage unchanged. See the [compatibility policy](contributing.md#release-and-compatibility-policy) and [provisional support matrix](contributing.md#provisional-support-matrix).
 
 ## Requirements
 
-The development installer targets macOS 14+ (Apple silicon/x64), Windows 11 x64, and Ubuntu 22.04/24.04 x64 with graphical GNOME. Limited macOS checks are recorded; full platform, reboot/login, and accessibility verification remains pending.
+The managed installer targets macOS 14+ (Apple silicon/x64), Windows 11 x64, and Ubuntu 22.04/24.04 x64 with graphical GNOME. Platform, reboot/login and accessibility certification remains pending.
 
 Installation needs network access for runtime/dependency downloads. The bootstrap provisions a verified private Node/npm runtime without replacing global tools or requiring administrator access. Git is unnecessary for app installation, but required for Git-sourced extensions.
 
@@ -17,7 +17,7 @@ Installation needs network access for runtime/dependency downloads. The bootstra
 | Windows            | curl.exe, tar.exe, certutil.exe; Windows Script Host for shortcuts |
 | Source development | Node.js 22.13+ and npm 10+; Git to clone the repository            |
 
-## Development installer
+## Managed installation
 
 Download and extract the selected repository revision, then open Terminal or Command Prompt in that folder:
 
@@ -147,7 +147,7 @@ node scripts/access.mjs disable --confirm --json
 node scripts/access.mjs recover --confirm --json
 ```
 
-Mutating authentication commands stop an owned UI and verify it has exited, then hold the lifecycle maintenance guard while saving. A competing operation/shutdown failure refuses the change. An independently launched development/preview UI must be stopped first; current local MCP may remain connected. Older runtimes without an identified process role must be stopped once before access maintenance. The command leaves the UI stopped; use **Open Saturday** afterward. `recover --confirm` explicitly clears password protection, repairs the access settings file, and saves LAN off while retaining career data. It refuses linked settings files. No browser endpoint can reset a forgotten password.
+Mutating authentication commands stop an owned UI and verify it has exited, then hold the lifecycle maintenance guard while saving. A competing operation/shutdown failure refuses the change. An independently launched development/preview UI must be stopped first; current local MCP may remain connected. Processes without an identified runtime role must stop before access maintenance. The command leaves the UI stopped; use **Open Saturday** afterward. `recover --confirm` explicitly clears password protection, repairs the access settings file, and saves LAN off while retaining career data. It refuses linked settings files. No browser endpoint can reset a forgotten password.
 
 `set-password --stdin` accepts JSON containing `password` and `confirm_password` through protected standard input. It follows the same stop/save rules. Never put passwords in command-line arguments, shell history, diagnostics, or assistant configuration. Results are JSON with account-enabled status and inactivity hours; no verifier, cookie, or plaintext password is returned.
 
@@ -208,7 +208,7 @@ node scripts/install.mjs status --installation <descriptor> --json
 
 Wait for persisted status `complete`. `--background` returns an operation receipt, not completion. `install.mjs status` reports installation operations; `status.mjs` checks UI readiness. With password login off, progress remains available through the external local controller while the UI is stopped, and readiness reloads the UI. With password login on, the separate browser progress gateway is disabled; the operation continues, and **Open Saturday** followed by sign-in shows its durable result. CLI status and local logs remain available. Keep operation logs/recovery paths if reopening fails.
 
-Development updates compare exact `main` commits. Stable-release selection uses verified release metadata and version ordering; released installations never silently fall back to `main`. Dirty source checkouts block updates. Successful source updates retain the previous HEAD/build and switch to a pinned detached checkout. Managed updates retain previous code and independent database/file/extension recovery snapshots. Updates never silently reset development data or downgrade over migrated storage.
+Source-channel updates compare exact `main` commits. Stable-release selection uses verified release metadata and version ordering; released installations never silently fall back to `main`. Dirty source checkouts block updates. Successful source updates retain the previous HEAD/build and switch to a pinned detached checkout. Managed updates retain previous code and independent database/file/extension recovery snapshots. Updates never silently reset data or downgrade over migrated storage.
 
 After completion, reconnect MCP and [verify installation/dataset/build identities](assistant-guide.md#verify-the-connection). Regenerate configuration if runtime paths changed.
 

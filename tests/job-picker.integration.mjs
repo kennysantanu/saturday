@@ -7,8 +7,8 @@ import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import puppeteer from 'puppeteer';
-import { createJob } from '../src/lib/server/services.js';
-import { createNetwork, listNetworks } from '../src/lib/server/networks.js';
+import { createJob } from '../src/lib/server/local/jobs.js';
+import { createNetwork, listNetworks } from '../src/lib/server/local/people.js';
 
 test('Link person keeps its footer visible and preserves selection and notes through search, paging and rejected saves', async (t) => {
 	if (!existsSync(await puppeteer.executablePath())) return t.skip('Managed Chrome is required.');

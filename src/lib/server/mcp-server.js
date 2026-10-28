@@ -102,13 +102,13 @@ for (const { name, description, inputSchema, annotations, execute } of createAss
 	assistantApplication,
 	localCapabilities
 )) {
+	const errorGroup = Object.keys(responseGroups).find((group) =>
+		responseGroups[group].includes(name)
+	);
 	server.registerTool(
 		name,
 		{ description, inputSchema, ...(annotations ? { annotations } : {}) },
 		async (input) => {
-			const errorGroup = Object.keys(responseGroups).find((group) =>
-				responseGroups[group].includes(name)
-			);
 			try {
 				const value = await withServerActivity(() => execute(input));
 				return toolResult(errorGroup ? { ok: true, ...value } : value);

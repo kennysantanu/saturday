@@ -27,7 +27,7 @@ test('portable graph rejects Node, server, framework and extension imports even 
 			'node:sqlite',
 			'@sveltejs/kit',
 			'@modelcontextprotocol/server',
-			resolve('src/lib/server/services.js'),
+			resolve('src/lib/server/local/jobs.js'),
 			resolve('src/lib/server/extensions.generated.js')
 		]) {
 			await writeFile(

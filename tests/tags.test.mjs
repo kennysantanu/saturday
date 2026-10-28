@@ -6,15 +6,15 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { applyMigrations, assertMigrationHistory } from '../src/lib/server/migrations.js';
 import { migrateDatabase, withDatabase } from '../src/lib/server/database.js';
-import { createJob, editJob, getJob, searchJobs, deleteJob } from '../src/lib/server/services.js';
+import { createJob, editJob, getJob, searchJobs, deleteJob } from '../src/lib/server/local/jobs.js';
 import {
 	createNetwork,
 	editNetwork,
 	getNetwork,
 	listNetworks,
 	deleteNetwork
-} from '../src/lib/server/networks.js';
-import * as tags from '../src/lib/server/tags.js';
+} from '../src/lib/server/local/people.js';
+import * as tags from '../src/lib/server/local/tags.js';
 import * as backups from '../src/lib/server/backups.js';
 import { normalizeTagName, displayTagName, tagTextColor } from '../src/lib/tags.js';
 let scratch;

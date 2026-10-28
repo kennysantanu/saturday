@@ -373,8 +373,7 @@ export async function deleteManualBackup({ backup_id, contents, confirm }) {
 			await deleteFileBackup(entry.files?.backup_id ?? backup_id, true);
 		if (contents !== 'files') deleteBackup(backup_id, true);
 		if (entry.backup_set_id) {
-			for (const root of [filePaths().backups, filePaths().legacyBackups])
-				await fs.rm(join(root, `${entry.backup_set_id}.pair.json`), { force: true });
+			await fs.rm(join(filePaths().backups, `${entry.backup_set_id}.pair.json`), { force: true });
 		}
 		return { deleted: true, backup_id, contents };
 	} finally {
@@ -428,12 +427,12 @@ export async function downloadManualBackup({ backup_id, contents }) {
 }
 async function readPair(id) {
 	if (!/^[a-f0-9-]{36}$/.test(id)) reject('VALIDATION', 'Invalid pair ID.');
-	for (const root of [filePaths().backups, filePaths().legacyBackups]) {
-		try {
-			return JSON.parse(await fs.readFile(await regularPath(root, `${id}.pair.json`), 'utf8'));
-		} catch (e) {
-			if (e.code !== 'ENOENT') throw e;
-		}
+	try {
+		return JSON.parse(
+			await fs.readFile(await regularPath(filePaths().backups, `${id}.pair.json`), 'utf8')
+		);
+	} catch (e) {
+		if (e.code !== 'ENOENT') throw e;
 	}
 	reject('NOT_FOUND', 'Pair metadata not found. Restore the artifacts independently.');
 }
@@ -444,12 +443,10 @@ export async function exportManualBackup(input, destination) {
 	const protectedPaths = [
 		database.database,
 		database.backups,
-		database.legacyBackups,
 		database.restore,
 		files.root,
 		files.state,
-		files.backups,
-		files.legacyBackups
+		files.backups
 	];
 	if (
 		protectedPaths.some((p) => destination === p || destination.startsWith(p + sep)) ||

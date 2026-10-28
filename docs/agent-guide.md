@@ -6,7 +6,7 @@ Use this guide for authorized local installation, maintenance, and recovery. The
 
 1. Confirm local filesystem/process access and the client's execution mode. A hosted-only chat cannot launch Saturday's stdio server; provide manual installation instructions when local execution is unavailable. MCP data access alone does not grant process execution.
 2. Inspect the selected revision's README and installers. Find an existing descriptor before creating a workspace. Preserve data paths, client settings, and login choices; do not relocate/reset stores or bypass OS restrictions without the user's instruction.
-3. Use the [development installer](installation-guide.md#development-installer) for normal installation or [source setup](installation-guide.md#source-checkout) for development. Use the same descriptor and its runtime for all commands, following [managed command invocation](installation-guide.md#running-commands-for-a-managed-installation).
+3. Use the [managed installer](installation-guide.md#managed-installation) for normal installation or [source setup](installation-guide.md#source-checkout) for development. Use the same descriptor and its runtime for all commands, following [managed command invocation](installation-guide.md#running-commands-for-a-managed-installation).
 4. Treat missing initialized storage, locks, and publication journals as recovery conditions. Preserve them and inspect the error; do not delete them to force a fresh setup.
 
 ## Browser password settings

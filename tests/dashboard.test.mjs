@@ -11,13 +11,13 @@ import {
 	addJobUpdate,
 	getDashboardStats,
 	searchJobs
-} from '../src/lib/server/services.js';
+} from '../src/lib/server/local/jobs.js';
 import {
 	listWorkflowStages,
 	renameWorkflowStage,
 	archiveWorkflowStage,
 	reorderWorkflowStage
-} from '../src/lib/server/workflow.js';
+} from '../src/lib/server/local/workflow.js';
 import { pipelineHref, pipelinePage } from '../src/lib/job-pipeline.js';
 import { jobReturn } from '../src/lib/job-navigation.js';
 

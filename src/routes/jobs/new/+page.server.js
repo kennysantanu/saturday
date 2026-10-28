@@ -1,4 +1,4 @@
-import { tagPickerData, tagFormValues, tagFailureSelection } from '$lib/server/tag-forms.js';
+import { tagPickerData, tagFormValues, tagFormFailure } from '$lib/server/tag-forms.js';
 import { jobReturn, jobDetailUrl } from '$lib/job-navigation.js';
 export async function load({ url }) {
 	return {
@@ -6,9 +6,8 @@ export async function load({ url }) {
 		returnTo: jobReturn(url.searchParams.get('return_to'))
 	};
 }
-import { fail, redirect } from '@sveltejs/kit';
+import { redirect } from '@sveltejs/kit';
 import { createJob } from '$lib/server/application.js';
-import { ServiceError, ValidationError } from '$lib/domain/validation.js';
 export const actions = {
 	default: async ({ request, url }) => {
 		const values = tagFormValues(await request.formData());
@@ -16,23 +15,7 @@ export const actions = {
 		try {
 			job = await createJob(values);
 		} catch (error) {
-			if (error instanceof ValidationError)
-				return fail(400, {
-					errors: error.fieldErrors,
-					tagSelection: await tagFailureSelection('job', values),
-					values
-				});
-			if (error instanceof ServiceError)
-				return fail(400, {
-					errors: { form: error.message },
-					tagSelection: await tagFailureSelection('job', values),
-					values
-				});
-			console.error('Could not save job:', error);
-			return fail(500, {
-				errors: { form: 'Saturday could not save this job. Try again.' },
-				values
-			});
+			return tagFormFailure(error, 'job', values, 'Saturday could not save this job. Try again.');
 		}
 		redirect(303, jobDetailUrl(job.id, url.searchParams.get('return_to'), 'job'));
 	}

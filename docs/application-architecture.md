@@ -12,7 +12,7 @@ Web loaders/actions use `src/lib/server/application.js`. The local stdio adapter
 
 The operation names and policies live in `application/operations.js`. An implementation receives `(context, ...arguments)` and returns a plain value or a promise of that value. The public method accepts only the arguments; it does not accept a caller-supplied context. Domain input/result, document, credential and transfer types are in `application/contracts.ts` and `application/transfer.ts`. Shared Zod validation, calendar rules and errors are in `src/lib/domain/`. Keep those modules free of Node, installation paths, SvelteKit and extension imports.
 
-The local implementation is `server/local-operations.js`, backed by `server/local/` for SQLite queries and `server/files/` for document/recovery coordination. Older server service entry points re-export the local implementations for scripts, trusted extensions and storage fixtures; new web/assistant code should use the application boundary.
+The local implementation is `server/local-operations.js`, backed by `server/local/` for SQLite queries and `server/files/` for document/recovery coordination. Host scripts and storage regression fixtures may use the local implementation directly. Web/assistant code uses the application boundary, and extensions receive core reads through their public context.
 
 ## Transactions and storage implementations
 

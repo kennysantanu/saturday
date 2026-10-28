@@ -293,7 +293,7 @@ test('repair stages with recovery, preserves populated stores and stopped state;
 			[
 				'--input-type=module',
 				'-e',
-				`import {createJob} from ${JSON.stringify(join(f.app, 'src/lib/server/services.js'))};createJob({job_title:'Preserve',company_name:'Fixture'});`
+				`import {createJob} from ${JSON.stringify(join(f.app, 'src/lib/server/local/jobs.js'))};createJob({job_title:'Preserve',company_name:'Fixture'});`
 			],
 			{ env: f.env }
 		);

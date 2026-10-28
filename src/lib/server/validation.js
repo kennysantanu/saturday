@@ -1,4 +1,4 @@
-// Compatibility entry for local services. Domain validation is runtime-independent.
+// Shared domain validation plus the local dataset guard used by deletion.
 export * from '../domain/validation.js';
 import { ServiceError } from '../domain/validation.js';
 
