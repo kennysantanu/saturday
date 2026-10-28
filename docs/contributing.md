@@ -9,7 +9,7 @@ npm run setup
 npm run dev
 ```
 
-Setup installs dependencies, prepares optional Chrome/PDF support, builds web/MCP, and initializes or validates stores. It persists an installation descriptor and can be repeated without resetting data. The dev/preview server binds to loopback. Test LAN through the owned production launcher; it reads Settings on each web start. Use disposable paths for experiments and tests; do not develop recovery workflows against personal data.
+Setup installs dependencies, prepares optional Chrome/PDF support, builds web/MCP, and initializes or validates stores. Run setup before data commands in a fresh source workspace. An explicitly missing descriptor or managed storage without its descriptor requires recovery. Deliberate first source setup preserves existing source records and their dataset identity. It persists an installation descriptor and can be repeated without resetting data. The dev/preview server binds to loopback. Test LAN through the owned production launcher; it reads Settings on each web start. Use disposable paths for experiments and tests; do not develop recovery workflows against personal data.
 
 For an isolated source workspace, set absolute `SATURDAY_DB_PATH`, `SATURDAY_FILES_PATH`, `SATURDAY_EXTENSION_STATE_PATH`, and `SATURDAY_EXTENSIONS_PATH` before setup. Keep the resulting `SATURDAY_INSTALLATION_PATH` consistent across commands. Existing descriptors reject conflicting overrides rather than selecting another workspace.
 

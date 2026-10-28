@@ -49,6 +49,10 @@ try {
 		: values.managed
 			? join(values.root ? resolve(values.root) : defaultInstallationRoot(), 'installation.json')
 			: descriptorPath() || join(source.data_root, 'installation.json');
+	if (process.env.SATURDAY_INSTALLATION_PATH && !existsSync(path))
+		throw new Error(
+			'The configured installation descriptor is missing. Restore or repair it; existing data has not been changed.'
+		);
 	await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 });
 	release = await acquireDirectoryLock(`${path}.lock`, { attempts: 0 });
 	if (!release) throw new Error('Another setup is running for this installation.');
@@ -58,6 +62,14 @@ try {
 		if (values.managed && config.mode !== 'managed')
 			throw new Error('An existing source installation will not be relocated by setup.');
 	} else {
+		if (
+			values.managed &&
+			process.env.SATURDAY_SETUP_STAGING !== '1' &&
+			existsSync(join(dirname(path), 'data'))
+		)
+			throw new Error(
+				'Managed storage exists without its installation descriptor. Recover the descriptor before setup; no replacement workspace was created.'
+			);
 		config = { ...source, installation_id: randomUUID(), build: readBuildInfo(source.code_root) };
 		if (values.managed) {
 			const root = dirname(path),
@@ -173,7 +185,10 @@ try {
 		},
 		true
 	);
-	await step('build', values['skip-build'], () => command([npm, 'run', 'build']));
+	await step('build', values['skip-build'], async () => {
+		await command([npm, 'run', 'build']);
+		config.build = readBuildInfo(config.code_root);
+	});
 	await step('database', false, async () => {
 		migrateDatabase();
 		config.initialized.database = true;
@@ -198,7 +213,6 @@ try {
 			.node,
 		storage: storageCompatibility
 	};
-	config.build = readBuildInfo(config.code_root);
 	await persist();
 	const result = {
 		ok: true,

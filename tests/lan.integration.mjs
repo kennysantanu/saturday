@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
 import { request } from 'node:http';
 import puppeteer from 'puppeteer';
 import { phoneAddresses } from '../src/lib/server/access-network.js';
@@ -396,6 +397,63 @@ test('LAN startup chooses a free port across all interfaces and keeps supervisor
 		await waitFor(async () => !(await run('scripts/access.mjs', 'status')).managed).catch(() => {});
 		occupied.closeAllConnections?.();
 		await new Promise((r) => occupied.close(r));
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test('local-only startup avoids an existing wildcard listener without touching it', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'saturday-local-port-'));
+	const occupied = createHttpServer((_request, response) => response.end('unrelated listener'));
+	await new Promise((resolve) => occupied.listen(0, '0.0.0.0', resolve));
+	const port = occupied.address().port;
+	const env = {
+		...process.env,
+		SATURDAY_PROJECT_ROOT: resolve('.'),
+		SATURDAY_INSTALLATION_PATH: '',
+		SATURDAY_DB_PATH: join(root, 'saturday.db'),
+		SATURDAY_FILES_PATH: join(root, 'files'),
+		SATURDAY_EXTENSION_STATE_PATH: join(root, 'extensions'),
+		SATURDAY_EXTENSIONS_PATH: join(root, 'extension-code'),
+		PORT: String(port)
+	};
+	const run = async (file, ...args) =>
+		JSON.parse(
+			(await exec(process.execPath, [file, ...args], { env, maxBuffer: 1024 * 1024 })).stdout
+		);
+	let pid;
+	try {
+		const setup = await run(
+			'scripts/setup.mjs',
+			'--skip-dependencies',
+			'--skip-build',
+			'--skip-pdf',
+			'--json'
+		);
+		env.SATURDAY_INSTALLATION_PATH = setup.descriptor_path;
+		const started = await run('scripts/start.mjs', '--background', '--json');
+		pid = JSON.parse(await readFile(join(root, 'server.state/server.json'))).pid;
+		assert.equal(started.allow_lan, false);
+		assert.notEqual(Number(new URL(started.url).port), port);
+		const health = await (await fetch(new URL('/health', started.url))).json();
+		assert.equal(health.installation_id, setup.installation_id);
+		assert.equal(
+			await (await fetch(`http://127.0.0.1:${port}`, { signal: AbortSignal.timeout(3000) })).text(),
+			'unrelated listener'
+		);
+	} finally {
+		await run('scripts/start.mjs', 'stop', '--json').catch(() => {});
+		if (pid)
+			await waitFor(() => {
+				try {
+					process.kill(pid, 0);
+					return false;
+				} catch (e) {
+					if (e.code === 'ESRCH') return true;
+					throw e;
+				}
+			});
+		occupied.closeAllConnections?.();
+		await new Promise((resolve) => occupied.close(resolve));
 		await rm(root, { recursive: true, force: true });
 	}
 });

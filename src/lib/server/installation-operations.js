@@ -727,7 +727,7 @@ async function publish(config, app, previous, target, journal, writeJournal) {
 		distribution: target.kind,
 		uninstalled: false,
 		...(config.data_deleted
-			? { initialized: { database: false, files: false, extensions: false } }
+			? { initialized: { database: false, files: false, extensions: false, access: false } }
 			: {})
 	};
 	if (config.mode === 'managed') {
@@ -1016,6 +1016,8 @@ export async function executeOperation(
 			}
 			config.uninstalled = true;
 			config.data_deleted = state.delete_data;
+			if (state.delete_data)
+				config.initialized = { database: false, files: false, extensions: false, access: false };
 			config.uninstall.status = 'complete';
 			await atomicJson(config.descriptor_path, config);
 			await update(
