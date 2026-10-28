@@ -43,8 +43,7 @@ export function filePaths() {
 	return {
 		root,
 		state: config.files_state,
-		backups: config.file_backups,
-		legacyBackups: `${root}.backups`
+		backups: config.file_backups
 	};
 }
 export function scopePrefix(scope = 'documents', checkJob = true, manifest) {

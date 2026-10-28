@@ -1,6 +1,6 @@
 import { canonicalTagPattern, tagColorPattern } from '../tags.js';
-import { reminderInputShape } from './reminders.js';
-import { normalizeStageName } from './workflow.js';
+import { reminderInputShape } from '../domain/reminders.js';
+import { normalizeStageName } from '../domain/workflow.js';
 import { getInstallation } from './installation.js';
 import { z } from 'zod';
 import {
@@ -64,7 +64,6 @@ function paths() {
 	return {
 		database: p,
 		backups: getInstallation().database_backups,
-		legacyBackups: `${p}.backups`,
 		restore: getInstallation().database_restore
 	};
 }
@@ -487,7 +486,7 @@ function inspectPath(path) {
 function backupPath(backupId) {
 	const name = `${id(backupId)}.sqlite`;
 	const p = storage();
-	return existsSync(join(p.backups, name)) ? join(p.backups, name) : join(p.legacyBackups, name);
+	return join(p.backups, name);
 }
 export function getBackupFile(backupId, { verify = true } = {}) {
 	return safe(() => {
@@ -583,22 +582,18 @@ export function listBackups({ limit = 20, offset = 0 } = {}) {
 		)
 			fail('invalid_request', 'Invalid backup pagination.');
 		const p = storage();
-		const all = [p.backups, p.legacyBackups]
-			.filter(existsSync)
-			.flatMap((directory) =>
-				readdirSync(directory)
-					.filter((n) => UUID.test(n.replace(/\.json$/, '')) && n.endsWith('.json'))
-					.flatMap((name) => {
-						try {
-							const m = json(join(directory, name));
-							if (m.backup_id !== name.slice(0, -5)) return [];
-							regular(join(directory, `${m.backup_id}.sqlite`));
-							return [m];
-						} catch {
-							return [];
-						}
-					})
-			)
+		const all = readdirSync(p.backups)
+			.filter((n) => UUID.test(n.replace(/\.json$/, '')) && n.endsWith('.json'))
+			.flatMap((name) => {
+				try {
+					const m = json(join(p.backups, name));
+					if (m.backup_id !== name.slice(0, -5)) return [];
+					regular(join(p.backups, `${m.backup_id}.sqlite`));
+					return [m];
+				} catch {
+					return [];
+				}
+			})
 			.sort(
 				(a, b) => b.created_at.localeCompare(a.created_at) || b.backup_id.localeCompare(a.backup_id)
 			);

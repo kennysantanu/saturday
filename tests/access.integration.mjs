@@ -119,7 +119,7 @@ test('optional password UI gates private routes, supports login/logout/settings/
 			[
 				'-e',
 				`
-			import { createJob } from './src/lib/server/services.js';
+			import { createJob } from './src/lib/server/local/jobs.js';
 			import { createDocument } from './src/lib/server/files/documents.js';
 			createJob({job_title:'Existing source record',company_name:'Preserve'});
 			await createDocument({filename:'existing.txt',content:'Preserve this document.'});

@@ -14,7 +14,7 @@ Job, person and update IDs are positive safe integer JSON numbers, for example `
 
 Job-file access requires matching database/manifest dataset identities. A folder number alone cannot associate files with a different database. Report `DATASET_MISMATCH` and preserve the files; never rewrite dataset metadata to bypass the check. User documents and explicit Settings recovery remain available. Independent database/file restores may occur in either order, but job-file access waits for a matching pair of datasets. Add missing cannot combine populated different datasets; Replace installs the incoming namespace. Show dataset warnings as well as counts before requesting restore confirmation.
 
-Backup results include format/dataset/creator-build metadata. Same-dataset database restores retain higher allocation counters; matching file-folder IDs are also reserved to avoid reuse after independently timed restores. Coordinated artifacts must have matching identities and hashes. Unsupported old artifacts require the corresponding development build or an explicit reset; rebuild/restart every process together after an update.
+Backup results include format/dataset/creator-build metadata. Same-dataset database restores retain higher allocation counters; matching file-folder IDs are also reserved to avoid reuse after independently timed restores. Coordinated artifacts must have matching identities and hashes. Unsupported artifacts require a compatible application build; preserve them unchanged. Restart every process with the matching build after an update.
 
 Jobs and people have separate ID sequences; clarify ambiguous references before writes. Settings → Storage → Diagnostics shows build, storage versions, and resolved paths. Share only the support details needed.
 
@@ -120,7 +120,7 @@ Reminders belong to exactly one owner: supply either `job_id` or `network_id`, n
 
 `edit_reminder({is_active: true})` restores a reminder and clears its dismissal date. Editing a past reminder without changing activity keeps its original dismissal date. Dismissal does not mean an appointment or task was completed. Normal job reads expose `next_reminder`; person reads expose `next_reminder_at`. The `follow_up` search/filter/sort parameters refer to active reminders: ranges match any active reminder, sorting uses the earliest, and owners without one sort last. Today matches the saved date; Upcoming includes later today. Closed-job reminders remain active and appear on Dashboard.
 
-`add_job_update`, `change_job_stage` and `add_network_update` accept optional `reminder: {scheduled_at, note?}` to save activity and a reminder atomically. It inherits the activity's owner and MCP creation source. Later history correction/deletion leaves reminders intact. Inspect records before retrying an uncertain create or combined save. Parent deletion includes its reminders and preserves reminders owned by linked records. Job/person creation and editing no longer accept the former single-reminder fields.
+`add_job_update`, `change_job_stage` and `add_network_update` accept optional `reminder: {scheduled_at, note?}` to save activity and a reminder atomically. It inherits the activity's owner and MCP creation source. Later history correction/deletion leaves reminders intact. Inspect records before retrying an uncertain create or combined save. Parent deletion includes its reminders and preserves reminders owned by linked records. Create and edit reminders through their dedicated operations.
 
 ## Network tools
 

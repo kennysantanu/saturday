@@ -181,7 +181,7 @@ Job attachments belong to a database dataset, not just a job number. If database
 
 Same-dataset folders without a current job remain recoverable, and their numbers are reserved against future job creation. Interrupted coordinated restores block access until [offline recovery](agent-guide.md#file-storage-and-recovery-commands) completes. Do not delete recovery markers or change dataset IDs.
 
-New archives normally live under `data/backups/database/` and `data/backups/files/`, with actual paths shown in Diagnostics. Supported older adjacent backup folders remain readable.
+Archives live in the configured backup directories, normally `data/backups/database/` and `data/backups/files/`. Diagnostics shows the actual paths. Import a supported backup stored elsewhere through Settings.
 
 ## Extensions
 

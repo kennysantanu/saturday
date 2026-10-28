@@ -6,9 +6,9 @@ import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import puppeteer from 'puppeteer';
-import * as tags from '../src/lib/server/tags.js';
-import { createJob, getJob, searchJobs } from '../src/lib/server/services.js';
-import { createNetwork, getNetwork, listNetworks } from '../src/lib/server/networks.js';
+import * as tags from '../src/lib/server/local/tags.js';
+import { createJob, getJob, searchJobs } from '../src/lib/server/local/jobs.js';
+import { createNetwork, getNetwork, listNetworks } from '../src/lib/server/local/people.js';
 import { accessPath, defaultAccessSettings } from '../src/lib/server/access-settings.js';
 import { passwordHash } from '../src/lib/server/access-auth.js';
 

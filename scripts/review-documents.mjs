@@ -1,4 +1,4 @@
-import { listReminders } from '../src/lib/server/reminders.js';
+import { listReminders } from '../src/lib/server/local/reminders.js';
 // Local browser QA using disposable stores. Writes screenshots only to the OS temp directory.
 import puppeteer from 'puppeteer';
 import { spawn } from 'node:child_process';
@@ -11,8 +11,8 @@ const scratch = await mkdtemp(join(tmpdir(), 'saturday-documents-ui-'));
 process.env.SATURDAY_FILES_PATH = join(scratch, 'files');
 process.env.SATURDAY_DB_PATH = join(scratch, 'db.sqlite');
 const { createDocument, getDocument } = await import('../src/lib/server/files/documents.js');
-const networks = await import('../src/lib/server/networks.js');
-const { createJob } = await import('../src/lib/server/services.js');
+const networks = await import('../src/lib/server/local/people.js');
+const { createJob } = await import('../src/lib/server/local/jobs.js');
 const cv = await createDocument({
 	filename: 'master-cv.md',
 	content:

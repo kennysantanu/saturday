@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { migrateDatabase, withDatabase } from '../src/lib/server/database.js';
-import { createJob, getJob } from '../src/lib/server/services.js';
+import { createJob, getJob } from '../src/lib/server/local/jobs.js';
 import { createDocument } from '../src/lib/server/files/documents.js';
 import { jobDeletionPath } from '../src/lib/server/job-deletion-state.js';
 

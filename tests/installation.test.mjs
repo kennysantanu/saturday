@@ -141,9 +141,9 @@ test('source setup persists identity and shared paths, repeated setup preserves 
 		[
 			'--input-type=module',
 			'-e',
-			`import {createJob} from './src/lib/server/services.js';
-			import {createNetwork} from './src/lib/server/networks.js';
-			import {renameWorkflowStage,reorderWorkflowStage,archiveWorkflowStage,setWorkflowStageClosed,addWorkflowStage} from './src/lib/server/workflow.js';
+			`import {createJob} from './src/lib/server/local/jobs.js';
+			import {createNetwork} from './src/lib/server/local/people.js';
+			import {renameWorkflowStage,reorderWorkflowStage,archiveWorkflowStage,setWorkflowStageClosed,addWorkflowStage} from './src/lib/server/local/workflow.js';
 			const job = createJob({job_title:'Keep',company_name:'Example'});
 			const person = createNetwork({name:'Keep person'});
 			renameWorkflowStage(1,'Inbox');

@@ -12,7 +12,7 @@ process.env.SATURDAY_DB_PATH = join(root, 'jobs.sqlite');
 const d = await import('../src/lib/server/files/documents.js');
 const b = await import('../src/lib/server/files/backups.js');
 const s = await import('../src/lib/server/files/store.js');
-const jobs = await import('../src/lib/server/services.js');
+const jobs = await import('../src/lib/server/local/jobs.js');
 const pairs = await import('../src/lib/server/files/pairs.js');
 const pdf = await import('../src/lib/server/files/pdf.js');
 test.after(async () => rm(root, { recursive: true, force: true }));
@@ -1097,23 +1097,24 @@ test('partial manual capture retains database and prior backups; delete protects
 		assert.ok(preview.restore_id);
 	});
 });
-test('legacy adjacent artifacts remain discoverable, downloadable and restorable', async () => {
+test('backup discovery uses only configured directories and leaves other archives untouched', async () => {
 	await isolatedStores(async () => {
-		await d.createDocument({ filename: 'legacy.md', content: 'legacy' });
+		await d.createDocument({ filename: 'retained.md', content: 'retained' });
 		const pair = await pairs.createManualBackup({ contents: 'all' });
 		const database = await import('../src/lib/server/backups.js');
 		const p = database.getBackupPaths(),
 			f = s.filePaths();
-		await s.fs.rename(p.backups, p.legacyBackups);
-		await s.fs.rename(f.backups, f.legacyBackups);
-		assert.equal((await pairs.listBackupHistory()).backups[0].contents, 'all');
-		const output = await pairs.downloadManualBackup({
-			backup_id: pair.database_backup_id,
-			contents: 'all'
-		});
-		for await (const chunk of output.stream) assert.ok(chunk.length);
-		const preview = await pairs.prepareBackupPairRestore({ file_backup_id: pair.file_backup_id });
-		assert.ok(preview.restore_id);
+		const outsideDatabase = `${p.database}.backups`,
+			outsideFiles = `${f.root}.backups`;
+		await s.fs.rename(p.backups, outsideDatabase);
+		await s.fs.rename(f.backups, outsideFiles);
+		assert.equal((await pairs.listBackupHistory()).total, 0);
+		assert.throws(() => database.getBackupFile(pair.database_backup_id), { code: 'not_found' });
+		await assert.rejects(b.getFileBackup(pair.file_backup_id), { code: 'ENOENT' });
+		assert.ok(
+			(await s.fs.stat(join(outsideDatabase, `${pair.database_backup_id}.sqlite`))).isFile()
+		);
+		assert.ok((await s.fs.stat(join(outsideFiles, `${pair.file_backup_id}.zip`))).isFile());
 	});
 });
 test('combined import rejects unexpected entries without publishing artifacts', async () => {

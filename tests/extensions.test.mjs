@@ -1,5 +1,5 @@
-import { deleteJob } from '../src/lib/server/services.js';
-import { createNetwork, deleteNetwork } from '../src/lib/server/networks.js';
+import { deleteJob } from '../src/lib/server/local/jobs.js';
+import { createNetwork, deleteNetwork } from '../src/lib/server/local/people.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
@@ -12,7 +12,7 @@ import { atomicJson } from '../src/lib/server/files/store.js';
 import { installExtension, uninstallExtension } from '../scripts/extension-install.mjs';
 import * as extensions from '../src/lib/server/extensions.js';
 import { migrateDatabase, databaseIdentity } from '../src/lib/server/database.js';
-import { createJob, getJob } from '../src/lib/server/services.js';
+import { createJob, getJob } from '../src/lib/server/local/jobs.js';
 const sample = resolve('examples/extensions/interview-practice');
 test('portable extension lifecycle, shared services, retained data and guarded recovery', async () => {
 	const scratch = await fs.mkdtemp(join(tmpdir(), 'saturday-extension-'));

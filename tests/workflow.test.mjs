@@ -15,7 +15,7 @@ import {
 	reorderWorkflowStage,
 	archiveWorkflowStage,
 	restoreWorkflowStage
-} from '../src/lib/server/workflow.js';
+} from '../src/lib/server/local/workflow.js';
 import {
 	createJob,
 	getJob,
@@ -25,7 +25,7 @@ import {
 	searchJobs,
 	getDashboardStats,
 	editJob
-} from '../src/lib/server/services.js';
+} from '../src/lib/server/local/jobs.js';
 let root;
 const previous = { ...process.env };
 beforeEach(() => {
@@ -171,7 +171,7 @@ test('stage and milestone filters are distinct, include closed jobs, count repea
 test('independent clients serialize moves without losing either milestone', async () => {
 	const j = job();
 	const ids = [stage('Offer').id, stage('Rejected').id];
-	const moduleUrl = new URL('../src/lib/server/services.js', import.meta.url).href;
+	const moduleUrl = new URL('../src/lib/server/local/jobs.js', import.meta.url).href;
 	await Promise.all(
 		ids.map(
 			(stage_id) =>
@@ -245,8 +245,8 @@ test('workflow configuration changes invalidate an existing restore preview', ()
 });
 
 test('archive races with stage moves and job creation preserve available current placement', async () => {
-	const serviceUrl = new URL('../src/lib/server/services.js', import.meta.url).href;
-	const workflowUrl = new URL('../src/lib/server/workflow.js', import.meta.url).href;
+	const serviceUrl = new URL('../src/lib/server/local/jobs.js', import.meta.url).href;
+	const workflowUrl = new URL('../src/lib/server/local/workflow.js', import.meta.url).href;
 	const run = (body) =>
 		new Promise((resolve, reject) => {
 			const code = `import * as jobs from ${JSON.stringify(serviceUrl)};import * as workflow from ${JSON.stringify(workflowUrl)};try{console.log(JSON.stringify({ok:true,result:(${body})}));}catch(e){console.log(JSON.stringify({ok:false,error:e.message}));}`;
@@ -288,9 +288,9 @@ test('custom workflow restores into fresh and populated database/pair targets wi
 	const documents = await import('../src/lib/server/files/documents.js');
 	const pairs = await import('../src/lib/server/files/pairs.js');
 	const { databaseIdentity } = await import('../src/lib/server/database.js');
-	const networks = await import('../src/lib/server/networks.js');
-	const reminders = await import('../src/lib/server/reminders.js');
-	const tags = await import('../src/lib/server/tags.js');
+	const networks = await import('../src/lib/server/local/people.js');
+	const reminders = await import('../src/lib/server/local/reminders.js');
+	const tags = await import('../src/lib/server/local/tags.js');
 	addWorkflowStage({ name: 'Technical review' });
 	const custom = stage('Technical review');
 	const original = job();

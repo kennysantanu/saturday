@@ -1,4 +1,4 @@
-import { createReminder, editReminder, listReminders } from '../src/lib/server/reminders.js';
+import { createReminder, editReminder, listReminders } from '../src/lib/server/local/reminders.js';
 import { stageId, closeJob, reopenJob } from './workflow-fixture.mjs';
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,11 +9,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { spawn } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { filePaths } from '../src/lib/server/files/store.js';
-import * as n from '../src/lib/server/networks.js';
+import * as n from '../src/lib/server/local/people.js';
 import * as b from '../src/lib/server/backups.js';
 import * as pairs from '../src/lib/server/files/pairs.js';
 import { createDocument, getDocument } from '../src/lib/server/files/documents.js';
-import { createJob, getJob } from '../src/lib/server/services.js';
+import { createJob, getJob } from '../src/lib/server/local/jobs.js';
 import { migrateDatabase, withDatabase } from '../src/lib/server/database.js';
 import { applyMigrations, schemaVersion } from '../src/lib/server/migrations.js';
 import { ValidationError, localCalendarDate } from '../src/lib/server/validation.js';
@@ -453,7 +453,7 @@ test('concurrent link retries serialize into one relationship without overwritin
 		j = job();
 	const run = (notes) =>
 		new Promise((resolve, reject) => {
-			const code = `import {linkJobNetwork} from './src/lib/server/networks.js'; console.log(JSON.stringify(linkJobNetwork(${JSON.stringify({ job_id: j.id, network_id: person.id, notes })},'assistant')));`;
+			const code = `import {linkJobNetwork} from './src/lib/server/local/people.js'; console.log(JSON.stringify(linkJobNetwork(${JSON.stringify({ job_id: j.id, network_id: person.id, notes })},'assistant')));`;
 			const child = spawn(process.execPath, ['--input-type=module', '-e', code], {
 				env: process.env,
 				stdio: ['ignore', 'pipe', 'pipe']

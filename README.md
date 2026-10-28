@@ -71,6 +71,6 @@ For startup, PDF, update, or storage issues, follow [installation troubleshootin
 
 Start with the [documentation index](docs/README.md). [Contributing](docs/contributing.md) covers development, source layout, storage contracts, and verification; the [design guide](docs/design-guide.md) covers shared UI patterns.
 
-Saturday is in development toward its first `0.1.0` release. The package version is a placeholder, and compatibility between development builds is not guaranteed. Setup never silently resets existing data. See the [development and storage policy](docs/contributing.md#development-toward-010).
+Saturday is preparing its first `0.1.0` release. Setup preserves existing data and rejects unsupported storage formats without resetting them. See the [release and compatibility policy](docs/contributing.md#release-and-compatibility-policy).
 
 Saturday is released under the [MIT License](LICENSE).

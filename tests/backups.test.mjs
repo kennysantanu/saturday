@@ -23,7 +23,7 @@ import {
 	getJob,
 	getDashboardStats,
 	editJob
-} from '../src/lib/server/services.js';
+} from '../src/lib/server/local/jobs.js';
 import * as backups from '../src/lib/server/backups.js';
 import { schemaVersion } from '../src/lib/server/migrations.js';
 import { readBuildInfo } from '../scripts/build-info.mjs';
@@ -258,8 +258,8 @@ function completed(child) {
 	});
 }
 test('concurrent numeric allocations have distinct IDs and one dataset identity', async () => {
-	const code = `import {createJob,addJobUpdate} from './src/lib/server/services.js';
- import {createNetwork,addNetworkUpdate} from './src/lib/server/networks.js';
+	const code = `import {createJob,addJobUpdate} from './src/lib/server/local/jobs.js';
+ import {createNetwork,addNetworkUpdate} from './src/lib/server/local/people.js';
  import {withDatabase} from './src/lib/server/database.js';
  const job=createJob({job_title:'Concurrent',company_name:'Writer'});
  const update=addJobUpdate({job_id:job.id,event_date:'2000-01-01',note:'Concurrent'});
@@ -319,7 +319,7 @@ test('two processes coordinate concurrent migrations', async () => {
 });
 test('live snapshots remain consistent while a separate process writes', async () => {
 	const writer =
-		childScript(`import {createJob,addJobUpdate,moveJobStage} from './src/lib/server/services.js';
+		childScript(`import {createJob,addJobUpdate,moveJobStage} from './src/lib/server/local/jobs.js';
  for(let i=0;i<20;i++){const job=createJob({job_title:'Concurrent '+i,company_name:'Writer'});
  moveJobStage(job.id,{stage_id:2,event_date:'2020-01-01'});moveJobStage(job.id,{stage_id:8,event_date:'2020-01-01'});moveJobStage(job.id,{stage_id:1,event_date:'2020-01-01'});
  await new Promise(r=>setTimeout(r,3));}`);
@@ -419,7 +419,7 @@ test('development build identity handles clean, dirty and non-Git sources', () =
 	git(['add', 'untracked.txt']);
 	assert.equal(readBuildInfo(source).dirty, true);
 });
-test('built MCP preserves legacy tools and exposes document tools and complete backup/restore workflow without private paths', async () => {
+test('built MCP exposes career/document tools and complete backup/restore workflow without private paths', async () => {
 	const accessPath = join(scratch, 'access.json');
 	const protectedAccess = JSON.stringify({
 		...defaultAccessSettings(),

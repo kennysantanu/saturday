@@ -14,9 +14,9 @@ import {
 	searchJobs,
 	getDashboardStats,
 	correctJobUpdate
-} from '../src/lib/server/services.js';
-import * as people from '../src/lib/server/networks.js';
-import * as reminders from '../src/lib/server/reminders.js';
+} from '../src/lib/server/local/jobs.js';
+import * as people from '../src/lib/server/local/people.js';
+import * as reminders from '../src/lib/server/local/reminders.js';
 import * as backups from '../src/lib/server/backups.js';
 let scratch;
 const saved = {
@@ -359,7 +359,7 @@ test('parent deletion removes only its reminders and preserves linked-owner remi
 	reminders.createReminder({ network_id: p.id, scheduled_at: at });
 	const { createDocument } = await import('../src/lib/server/files/documents.js');
 	await createDocument({ scope: j.id, filename: 'owned.md', content: 'Job file' });
-	const { deleteJob } = await import('../src/lib/server/services.js');
+	const { deleteJob } = await import('../src/lib/server/local/jobs.js');
 	await deleteJob({ job_id: j.id, dataset_id: getJob(j.id).dataset_id, confirm: true });
 	assert.equal(list({ job_id: other.id }).length, 1);
 	assert.equal(list({ network_id: p.id }).length, 1);

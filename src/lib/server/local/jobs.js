@@ -209,7 +209,7 @@ export function listJobs({ includeInactive = false, query = '', limit = 100 } = 
 	return searchJobs({ view: includeInactive ? 'all' : 'active', query, limit }).jobs;
 }
 
-/** Paginated, read-only search. Status rules are shared with job detail and legacy lists. */
+/** Paginated, read-only search. Stage activity rules are shared with job detail and list summaries. */
 export function searchJobs(input = {}, { jobId } = {}) {
 	const filters = parseSchema(jobSearchSchema, input);
 	return withDatabase((db) => {

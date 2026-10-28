@@ -3,7 +3,7 @@ import {
 	editReminder,
 	dismissReminder,
 	listReminders
-} from '../src/lib/server/reminders.js';
+} from '../src/lib/server/local/reminders.js';
 import { stageId, closeJob, reopenJob } from './workflow-fixture.mjs';
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -25,7 +25,7 @@ import {
 	getDashboardStats,
 	addJobUpdate,
 	correctJobUpdate
-} from '../src/lib/server/services.js';
+} from '../src/lib/server/local/jobs.js';
 import {
 	createBackup,
 	importBackup,

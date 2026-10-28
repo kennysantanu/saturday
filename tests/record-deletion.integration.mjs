@@ -8,9 +8,9 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import puppeteer from 'puppeteer';
 import { randomUUID } from 'node:crypto';
-import { createJob, getJob, addJobUpdate } from '../src/lib/server/services.js';
+import { createJob, getJob, addJobUpdate } from '../src/lib/server/local/jobs.js';
 import { createDocument, listDocuments } from '../src/lib/server/files/documents.js';
-import * as networks from '../src/lib/server/networks.js';
+import * as networks from '../src/lib/server/local/people.js';
 
 test('parent deletion confirms current scope, preserves related records and return paths, and recovers cleanly in the browser', async (t) => {
 	assert(

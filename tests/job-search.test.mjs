@@ -1,4 +1,4 @@
-import { createReminder } from '../src/lib/server/reminders.js';
+import { createReminder } from '../src/lib/server/local/reminders.js';
 import { stageId } from './workflow-fixture.mjs';
 import { jobSearchSchema } from '../src/lib/server/validation.js';
 import { test, beforeEach, afterEach } from 'node:test';
@@ -16,7 +16,7 @@ import {
 	correctJobUpdate,
 	setJobScore,
 	ValidationError
-} from '../src/lib/server/services.js';
+} from '../src/lib/server/local/jobs.js';
 import { defaultJobFilters, searchUrl, searchFromUrl, filterChips } from '../src/lib/job-search.js';
 
 const previous = process.env.SATURDAY_DB_PATH;

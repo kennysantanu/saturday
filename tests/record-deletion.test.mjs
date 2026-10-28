@@ -14,8 +14,8 @@ import {
 	deleteJob,
 	addJobUpdate,
 	getDashboardStats
-} from '../src/lib/server/services.js';
-import * as n from '../src/lib/server/networks.js';
+} from '../src/lib/server/local/jobs.js';
+import * as n from '../src/lib/server/local/people.js';
 import * as d from '../src/lib/server/files/documents.js';
 import { withDatabase } from '../src/lib/server/database.js';
 import { filePaths } from '../src/lib/server/files/store.js';

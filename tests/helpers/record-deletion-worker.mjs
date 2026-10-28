@@ -7,7 +7,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
-import { deleteJob } from '../../src/lib/server/services.js';
+import { deleteJob } from '../../src/lib/server/local/jobs.js';
 import {
 	uploadDocument,
 	createDocument,

@@ -1,4 +1,4 @@
-import { createReminder, listReminders } from '../src/lib/server/reminders.js';
+import { createReminder, listReminders } from '../src/lib/server/local/reminders.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -9,13 +9,13 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import puppeteer from 'puppeteer';
 import { migrateDatabase } from '../src/lib/server/database.js';
-import { createJob, getJob, setJobScore, addJobUpdate } from '../src/lib/server/services.js';
+import { createJob, getJob, setJobScore, addJobUpdate } from '../src/lib/server/local/jobs.js';
 import { createDocument } from '../src/lib/server/files/documents.js';
 import {
 	listWorkflowStages,
 	addWorkflowStage,
 	archiveWorkflowStage
-} from '../src/lib/server/workflow.js';
+} from '../src/lib/server/local/workflow.js';
 import { jobReturn } from '../src/lib/job-navigation.js';
 import {
 	createNetwork,
@@ -23,7 +23,7 @@ import {
 	getNetwork,
 	listNetworkUpdates,
 	listNetworks
-} from '../src/lib/server/networks.js';
+} from '../src/lib/server/local/people.js';
 
 test('production stage/history actions, result round trips and read-only overview', async (t) => {
 	const root = await mkdtemp(join(tmpdir(), 'saturday-workflow-web-'));
@@ -166,7 +166,7 @@ test('production stage/history actions, result round trips and read-only overvie
 		assert.equal(getJob(other.id).updates.length, 1);
 		assert.equal((await post('editHistory', { update_id: 'invalid' })).status, 400);
 		// Move the fixture out of New so the existing Settings retirement checks remain valid.
-		const { moveJobStage } = await import('../src/lib/server/services.js');
+		const { moveJobStage } = await import('../src/lib/server/local/jobs.js');
 		moveJobStage(other.id, { stage_id: closed.id, event_date: '2020-01-01' });
 		assert.equal((await editPost(scheduledEntry.id, 'delete', {})).status, 303);
 		assert(!getJob(job.id).updates.some((entry) => entry.id === scheduledEntry.id));

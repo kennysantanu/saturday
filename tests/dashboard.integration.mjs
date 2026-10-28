@@ -8,12 +8,12 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import puppeteer from 'puppeteer';
 import { migrateDatabase } from '../src/lib/server/database.js';
-import { createJob, moveJobStage, addJobUpdate, getJob } from '../src/lib/server/services.js';
+import { createJob, moveJobStage, addJobUpdate, getJob } from '../src/lib/server/local/jobs.js';
 import {
 	listWorkflowStages,
 	renameWorkflowStage,
 	archiveWorkflowStage
-} from '../src/lib/server/workflow.js';
+} from '../src/lib/server/local/workflow.js';
 
 test('Dashboard pipeline HTTP and browser paging, detail returns, closed jobs and responsive layout', async (t) => {
 	const root = await mkdtemp(join(tmpdir(), 'saturday-pipeline-web-'));

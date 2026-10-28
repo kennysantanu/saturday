@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
-	import { Button } from '$lib/components/ui/button/index.js';
+	import DiscardChangesDialog from './discard-changes-dialog.svelte';
 	import type { UnsavedChanges } from '$lib/unsaved.svelte';
 	import UnsavedGuard from './unsaved-guard.svelte';
 
@@ -44,24 +44,12 @@
 	}
 >
 	{@render children(requestClose)}
-	<Dialog.Root bind:open={discardOpen}>
-		<Dialog.Content class="sm:max-w-md">
-			<Dialog.Header>
-				<Dialog.Title>Discard unsaved changes?</Dialog.Title>
-				<Dialog.Description>Your latest edits have not been saved.</Dialog.Description>
-			</Dialog.Header>
-			<Dialog.Footer>
-				<Button variant="ghost" onclick={() => (discardOpen = false)}>Keep editing</Button>
-				<Button
-					variant="destructive"
-					onclick={() => {
-						guard.dirty = false;
-						discardOpen = false;
-						open = false;
-					}}>Discard changes</Button
-				>
-			</Dialog.Footer>
-		</Dialog.Content>
-	</Dialog.Root>
+	<DiscardChangesDialog
+		bind:open={discardOpen}
+		ondiscard={() => {
+			guard.dirty = false;
+			open = false;
+		}}
+	/>
 	<UnsavedGuard {guard} />
 </Dialog.Root>

@@ -24,7 +24,19 @@ export function withPending(
 	return async (input) => {
 		const { formElement } = input;
 		formElement.setAttribute('aria-busy', 'true');
-		const callback = await handler(input);
+		let callback: Awaited<ReturnType<SubmitFunction>>;
+		try {
+			callback = await handler({
+				...input,
+				cancel: () => {
+					formElement.removeAttribute('aria-busy');
+					input.cancel();
+				}
+			});
+		} catch (error) {
+			formElement.removeAttribute('aria-busy');
+			throw error;
+		}
 		return async (result) => {
 			try {
 				if (result.result.type === 'failure' && result.result.status === 401) {
