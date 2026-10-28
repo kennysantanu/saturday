@@ -10,6 +10,7 @@ These guides describe implemented behavior. Development status and platform veri
 | [Assistant guide](assistant-guide.md)                           | Users: connect a local MCP client, verify access, and troubleshoot                            |
 | [MCP reference](mcp-reference.md)                               | Agents and developers: tool inputs, filters, IDs, conflict tokens, and mutation safeguards    |
 | [Agent setup and recovery guide](agent-guide.md)                | Agents: workspace preservation, verification/reporting, and CLI/offline data recovery         |
+| [Release notes](release-notes.md)                               | Users and testers: version 0.1.0 features, limits and release status                          |
 | [Contributing](contributing.md)                                 | Developers: source map, development commands, storage contracts, and checks                   |
 | [Application architecture](application-architecture.md)         | Developers: shared operations, local adapters, capabilities, assistant and storage boundaries |
 | [Cloudflare and hosted storage](cloudflare-storage-contract.md) | Developers: local runtime checks and PostgreSQL/private-storage contract requirements         |

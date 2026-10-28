@@ -302,7 +302,8 @@ for (const point of ['before-commit', 'after-commit']) {
 			let ready = false;
 			for (let i = 0; i < 150; i++) {
 				try {
-					if ((await fetch(`http://127.0.0.1:${port}/jobs`)).ok) {
+					// The owned web child can answer before the foreground wrapper installs its stop handler.
+					if ((await fetch(`http://127.0.0.1:${port}/jobs`)).ok && logs.includes('Press Ctrl-C')) {
 						ready = true;
 						break;
 					}

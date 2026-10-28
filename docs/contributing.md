@@ -204,3 +204,33 @@ Optional `runtime: {version, hashes: {"darwin-arm64": "<sha256>", ...}}` pins of
 Follow the [design guide](design-guide.md#building-a-new-page-or-feature) and reuse shared components. `tests/ui-conventions.test.mjs` enforces these patterns. Update the user guide for UI behavior, the MCP reference for tool contracts, and the installation guide for setup/maintenance commands. Keep assistant connection instructions in the assistant guide and advanced recovery in the agent guide. Keep current behavior separate from unverified support claims; avoid repeating instructions across guides.
 
 Documentation images belong in `docs/images/`, with relative links, descriptive alt text, and reasonably sized PNGs. Run Prettier on changed documentation. Extension API changes must also update the [extension guide](extension-guide.md); generated extension registries are ignored outputs and must not be edited manually.
+
+## Development branches
+
+After the first release, `main` contains verified stable releases and `develop` integrates upcoming work. Start short-lived `feature/<topic>`, `fix/<topic>` or `docs/<topic>` branches from `develop`, merge reviewed and tested changes back, then prepare a release from that integration state. Merge the verified release into `main` and tag its exact published commit. Carry any release preparation changes back to `develop`.
+
+For an urgent released-version fix, branch `hotfix/<topic>` from released `main`, test and release a patch, then merge the fix into both `main` and `develop`. Released installations discover verified numeric GitHub releases; `develop` and topic branches are not updater channels. Until the first release, local preparation commits may remain on the current branch.
+
+Repository setup requires separate authorized actions:
+
+- Create `develop` from the verified first-release commit and push it.
+- Protect `main` and `develop` with reviewed changes and the agreed required verification, while retaining an explicit emergency process.
+- Set the repository's default/contribution branch deliberately and verify permissions and merge settings.
+- Confirm the official release tag/asset still resolves to the verified `main` commit. Branch creation/protection alone does not publish an update.
+
+## Prepare a release
+
+The package/lockfile root versions must agree. Storage/API versions are separate and released migrations remain immutable. Update the [release notes](release-notes.md), then:
+
+1. Run relevant checks and commit the release source. Keep generated release assets outside the source tree; an asset cannot contain the SHA of a commit that also contains that asset.
+2. Run `npm run verify` against the exact clean commit, rebuilding web/MCP and their embedded guides. Record its full SHA, environment, results and manual/platform limitations. A source fix requires a new candidate and another verification of affected behavior.
+3. Generate metadata with the commands below, replacing the full SHA and output paths. `--verified-commit` explicitly attests that verification was completed for that revision; the generator does not run tests or infer human acceptance.
+4. Check the generated asset and retain its printed SHA-256 digest. The checker requires the same clean source, matching package/storage/API declarations and release/tag identity. It never overwrites an existing output.
+5. After separate publication authorization, prepare the matching numeric tag and ordinary GitHub release titled **Saturday 0.1.0 — Private Beta**, uploading `saturday-release.json`. The updater ignores GitHub drafts/prereleases and suffixed versions. Verify GitHub's asset digest, tag commit, package version and actual installed discovery after publication. No helper here creates or pushes a tag/release.
+
+```sh
+node scripts/release.mjs generate --commit <full-sha> --verified-commit <full-sha> --tag v0.1.0 --output /absolute/outside/source/saturday-release.json
+node scripts/release.mjs check --commit <full-sha> --verified-commit <full-sha> --tag v0.1.0 --metadata /absolute/outside/source/saturday-release.json
+```
+
+Generation/checking uses only Node built-ins and the same distribution validator as the updater. It refuses dirty/unidentified revisions, package/lockfile disagreement, unsupported declarations and mismatched tag/package/source metadata. It preserves the updater's existing asset-digest and exact-commit checks. Core commands and privacy boundaries stay the same after release; rebuild and reconnect local MCP after updating, then compare identities and use its bundled help tools.
