@@ -7,3 +7,9 @@ bun.lockb
 
 # Miscellaneous
 /static/
+
+# Released storage fixture bytes and metadata must remain unchanged.
+tests/fixtures/release-*/files/
+tests/fixtures/release-*/backups/
+tests/fixtures/release-*/database.sqlite
+tests/fixtures/release-*/expected.json

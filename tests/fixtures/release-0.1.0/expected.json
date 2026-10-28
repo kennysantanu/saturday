@@ -1,0 +1,411 @@
+{
+	"format": "saturday.release-fixture",
+	"version": 1,
+	"app_version": "0.1.0",
+	"source_commit": "688e1456f9e5e398bfb57aa7b206ec6fbb76d4e5",
+	"producer_mode": "source services from verified snapshot",
+	"storage": {
+		"database": {
+			"format": "saturday.database",
+			"minimumVersion": 1,
+			"currentVersion": 1
+		},
+		"manifest": {
+			"format": "saturday.files",
+			"minimumVersion": 1,
+			"version": 1
+		}
+	},
+	"dataset_id": "92c25000-609e-4cba-9947-c2c41381ad90",
+	"tables": {
+		"app_metadata": [
+			{
+				"id": 1,
+				"format": "saturday.database",
+				"dataset_id": "92c25000-609e-4cba-9947-c2c41381ad90"
+			}
+		],
+		"job_networks": [
+			{
+				"job_id": 1,
+				"network_id": 1,
+				"notes": "Fictional introduction.",
+				"created_via": "manual",
+				"created_at": "2026-10-28T17:18:39.383Z",
+				"updated_at": "2026-10-28T17:18:39.383Z"
+			}
+		],
+		"job_tag_assignments": [
+			{
+				"job_id": 1,
+				"tag_id": 1
+			}
+		],
+		"job_tags": [
+			{
+				"id": 1,
+				"name": "release_fixture",
+				"color": "#336699",
+				"created_at": "2026-10-28T17:18:39.396Z",
+				"updated_at": "2026-10-28T17:18:39.396Z"
+			}
+		],
+		"job_updates": [
+			{
+				"id": 1,
+				"job_id": 1,
+				"stage_id": 1,
+				"event_date": "2026-10-28",
+				"note": null,
+				"created_via": "manual",
+				"created_at": "2026-10-28T17:18:39.371Z",
+				"updated_at": "2026-10-28T17:18:39.371Z"
+			},
+			{
+				"id": 2,
+				"job_id": 2,
+				"stage_id": 1,
+				"event_date": "2026-10-28",
+				"note": null,
+				"created_via": "assistant",
+				"created_at": "2026-10-28T17:18:39.373Z",
+				"updated_at": "2026-10-28T17:18:39.373Z"
+			},
+			{
+				"id": 3,
+				"job_id": 1,
+				"stage_id": 9,
+				"event_date": "2026-10-20",
+				"note": "Technical discussion recorded.",
+				"created_via": "manual",
+				"created_at": "2026-10-28T17:18:39.375Z",
+				"updated_at": "2026-10-28T17:18:39.375Z"
+			},
+			{
+				"id": 4,
+				"job_id": 2,
+				"stage_id": 6,
+				"event_date": "2026-10-20",
+				"note": null,
+				"created_via": "manual",
+				"created_at": "2026-10-28T17:18:39.377Z",
+				"updated_at": "2026-10-28T17:18:39.377Z"
+			},
+			{
+				"id": 5,
+				"job_id": 1,
+				"stage_id": null,
+				"event_date": "2026-10-21",
+				"note": "Independent historical note.",
+				"created_via": "manual",
+				"created_at": "2026-10-28T17:18:39.378Z",
+				"updated_at": "2026-10-28T17:18:39.378Z"
+			}
+		],
+		"jobs": [
+			{
+				"id": 1,
+				"job_title": "Fictional engineer",
+				"company_name": "Example Labs",
+				"posting_url": null,
+				"job_description": null,
+				"notes": "Release compatibility fixture only",
+				"current_stage_id": 9,
+				"created_via": "manual",
+				"created_at": "2026-10-28T17:18:39.371Z",
+				"updated_at": "2026-10-28T17:18:39.398Z",
+				"location": "Example City",
+				"work_arrangement": null,
+				"employment_type": null,
+				"compensation": null,
+				"source": null,
+				"application_deadline": null,
+				"is_starred": 1,
+				"score": 0,
+				"score_comment": "Fictional zero score verifies missing-versus-zero handling."
+			},
+			{
+				"id": 2,
+				"job_title": "Fictional analyst",
+				"company_name": "Example Company",
+				"posting_url": null,
+				"job_description": null,
+				"notes": null,
+				"current_stage_id": 6,
+				"created_via": "assistant",
+				"created_at": "2026-10-28T17:18:39.373Z",
+				"updated_at": "2026-10-28T17:18:39.377Z",
+				"location": null,
+				"work_arrangement": null,
+				"employment_type": null,
+				"compensation": null,
+				"source": null,
+				"application_deadline": null,
+				"is_starred": 0,
+				"score": null,
+				"score_comment": null
+			}
+		],
+		"network_tag_assignments": [
+			{
+				"network_id": 1,
+				"tag_id": 1
+			}
+		],
+		"network_tags": [
+			{
+				"id": 1,
+				"name": "example_contact",
+				"color": "#885522",
+				"created_at": "2026-10-28T17:18:39.399Z",
+				"updated_at": "2026-10-28T17:18:39.399Z"
+			}
+		],
+		"network_updates": [
+			{
+				"id": 1,
+				"network_id": 1,
+				"interaction_date": "2026-10-20",
+				"note": "Fictional conversation.",
+				"created_via": "manual",
+				"created_at": "2026-10-28T17:18:39.386Z",
+				"updated_at": "2026-10-28T17:18:39.386Z"
+			}
+		],
+		"networks": [
+			{
+				"id": 1,
+				"name": "Example Person",
+				"role": "Recruiter",
+				"organization": "Example Labs",
+				"phone": null,
+				"email": "person@example.invalid",
+				"link": null,
+				"notes": null,
+				"created_via": "manual",
+				"created_at": "2026-10-28T17:18:39.381Z",
+				"updated_at": "2026-10-28T17:18:39.400Z"
+			}
+		],
+		"reminders": [
+			{
+				"id": 1,
+				"job_id": 1,
+				"network_id": null,
+				"note": "Date-only reminder.",
+				"scheduled_at": "2026-11-01T00:00",
+				"is_active": 1,
+				"dismissed_at": null,
+				"created_via": "manual",
+				"created_at": "2026-10-28T17:18:39.388Z",
+				"updated_at": "2026-10-28T17:18:39.388Z"
+			},
+			{
+				"id": 2,
+				"job_id": null,
+				"network_id": 1,
+				"note": "Fixed-time reminder.",
+				"scheduled_at": "2026-11-02T14:30",
+				"is_active": 1,
+				"dismissed_at": null,
+				"created_via": "assistant",
+				"created_at": "2026-10-28T17:18:39.392Z",
+				"updated_at": "2026-10-28T17:18:39.392Z"
+			},
+			{
+				"id": 3,
+				"job_id": 2,
+				"network_id": null,
+				"note": null,
+				"scheduled_at": "2026-10-20T00:00",
+				"is_active": 0,
+				"dismissed_at": "2026-10-28T17:18:39.394Z",
+				"created_via": "manual",
+				"created_at": "2026-10-28T17:18:39.393Z",
+				"updated_at": "2026-10-28T17:18:39.394Z"
+			}
+		],
+		"schema_migrations": [
+			{
+				"version": 1,
+				"name": "create_initial_schema",
+				"applied_at": "2026-10-28T17:18:39.361Z"
+			}
+		],
+		"sqlite_sequence": [
+			{
+				"name": "workflow_stages",
+				"seq": 9
+			},
+			{
+				"name": "jobs",
+				"seq": 2
+			},
+			{
+				"name": "job_updates",
+				"seq": 5
+			},
+			{
+				"name": "networks",
+				"seq": 1
+			},
+			{
+				"name": "network_updates",
+				"seq": 1
+			},
+			{
+				"name": "reminders",
+				"seq": 3
+			},
+			{
+				"name": "job_tags",
+				"seq": 1
+			},
+			{
+				"name": "network_tags",
+				"seq": 1
+			}
+		],
+		"workflow_stages": [
+			{
+				"id": 1,
+				"name": "Research",
+				"sort_order": 0,
+				"is_closed": 0,
+				"is_archived": 0,
+				"created_at": "2026-10-28T17:18:39.361Z",
+				"updated_at": "2026-10-28T17:18:39.366Z"
+			},
+			{
+				"id": 2,
+				"name": "Applied",
+				"sort_order": 1,
+				"is_closed": 0,
+				"is_archived": 0,
+				"created_at": "2026-10-28T17:18:39.361Z",
+				"updated_at": "2026-10-28T17:18:39.361Z"
+			},
+			{
+				"id": 3,
+				"name": "Screening",
+				"sort_order": 2,
+				"is_closed": 0,
+				"is_archived": 0,
+				"created_at": "2026-10-28T17:18:39.361Z",
+				"updated_at": "2026-10-28T17:18:39.361Z"
+			},
+			{
+				"id": 4,
+				"name": "Interview",
+				"sort_order": 3,
+				"is_closed": 0,
+				"is_archived": 0,
+				"created_at": "2026-10-28T17:18:39.361Z",
+				"updated_at": "2026-10-28T17:18:39.361Z"
+			},
+			{
+				"id": 5,
+				"name": "Offer",
+				"sort_order": 4,
+				"is_closed": 0,
+				"is_archived": 0,
+				"created_at": "2026-10-28T17:18:39.361Z",
+				"updated_at": "2026-10-28T17:18:39.361Z"
+			},
+			{
+				"id": 6,
+				"name": "Accepted",
+				"sort_order": 6,
+				"is_closed": 1,
+				"is_archived": 0,
+				"created_at": "2026-10-28T17:18:39.361Z",
+				"updated_at": "2026-10-28T17:18:39.361Z"
+			},
+			{
+				"id": 7,
+				"name": "Rejected",
+				"sort_order": 7,
+				"is_closed": 1,
+				"is_archived": 0,
+				"created_at": "2026-10-28T17:18:39.361Z",
+				"updated_at": "2026-10-28T17:18:39.361Z"
+			},
+			{
+				"id": 8,
+				"name": "Dismissed",
+				"sort_order": 8,
+				"is_closed": 1,
+				"is_archived": 0,
+				"created_at": "2026-10-28T17:18:39.361Z",
+				"updated_at": "2026-10-28T17:18:39.361Z"
+			},
+			{
+				"id": 9,
+				"name": "Technical review",
+				"sort_order": 5,
+				"is_closed": 0,
+				"is_archived": 0,
+				"created_at": "2026-10-28T17:18:39.368Z",
+				"updated_at": "2026-10-28T17:18:39.368Z"
+			}
+		]
+	},
+	"documents": [
+		{
+			"id": "f89863bc-e4cf-44ba-b6ea-2898f3ce7324",
+			"key": "documents/fictional-cv.md",
+			"size": 41,
+			"sha256": "91dea2037edf9ee6e8f6ba9d1af41f8d48bffa5dd7d0fc430df5065fd8dcb5e4"
+		},
+		{
+			"id": "bbda2fa4-e3bb-4943-9c69-3716ab356ee1",
+			"key": "documents/resume.html",
+			"size": 69,
+			"sha256": "e0892f669771202c5b710a863c8502ad4cfcd6ab3932ebf5b10ba62a3fb8d438"
+		},
+		{
+			"id": "d9cf266c-5111-4018-a0aa-384eff78704d",
+			"key": "documents/cover-letter.html",
+			"size": 75,
+			"sha256": "188fc61d472dc5a59007c3b78365a97cc60ae85144c1791b95479ee97edda87c"
+		},
+		{
+			"id": "da4ad4f5-5f18-4b47-be23-cc1732b159fb",
+			"key": "documents/direction.md",
+			"size": 42,
+			"sha256": "2540ea81a19616720ad812f77d9e073911902cfa9c9f4698d97f0ffba1af7bb3"
+		},
+		{
+			"id": "957d2c61-3161-4e6f-ba02-462c416316af",
+			"key": "documents/preferences.md",
+			"size": 49,
+			"sha256": "686bd4706fa636ea045ae887fe1ffcd337c1b9d136baa2993dd6fd475a48e2c6"
+		},
+		{
+			"id": "fdf17c5a-f4cb-4b0a-b5cf-73780928cba6",
+			"key": "jobs/1/job-note.md",
+			"size": 50,
+			"sha256": "4b454212f9bd4741459677ca9d7366e4cf826cfbdceeb1ed3ebc6ed9abd08a55"
+		}
+	],
+	"designations": {
+		"master_cv": "f89863bc-e4cf-44ba-b6ea-2898f3ce7324",
+		"resume_template": "bbda2fa4-e3bb-4943-9c69-3716ab356ee1",
+		"cover_letter_template": "d9cf266c-5111-4018-a0aa-384eff78704d",
+		"career_direction": "da4ad4f5-5f18-4b47-be23-cc1732b159fb",
+		"assistant_preferences": "957d2c61-3161-4e6f-ba02-462c416316af"
+	},
+	"hashes": {
+		"backups/combined.zip": "10d78eb62669a9bb91bd3849d5e672c069f07d3f564c13deb2ff366e74c5b7aa",
+		"backups/database.sqlite": "44c13a61d7cd26fcdf9fd0647d7124a78aac471e1fdd8577cf892b8be21d6ef6",
+		"backups/files.zip": "cdd4416364f93167f658ffb64f4fb1a602a3faca6621dec592ef91ab354f2a1c",
+		"database.sqlite": "af926f9a8dba86103ec8bc14cde8892126f1acca9263ed843cdddd7971930fbd",
+		"files/documents/cover-letter.html": "188fc61d472dc5a59007c3b78365a97cc60ae85144c1791b95479ee97edda87c",
+		"files/documents/direction.md": "2540ea81a19616720ad812f77d9e073911902cfa9c9f4698d97f0ffba1af7bb3",
+		"files/documents/fictional-cv.md": "91dea2037edf9ee6e8f6ba9d1af41f8d48bffa5dd7d0fc430df5065fd8dcb5e4",
+		"files/documents/preferences.md": "686bd4706fa636ea045ae887fe1ffcd337c1b9d136baa2993dd6fd475a48e2c6",
+		"files/documents/resume.html": "e0892f669771202c5b710a863c8502ad4cfcd6ab3932ebf5b10ba62a3fb8d438",
+		"files/jobs/1/job-note.md": "4b454212f9bd4741459677ca9d7366e4cf826cfbdceeb1ed3ebc6ed9abd08a55",
+		"files/manifest.json": "9875d378db034ff61c3aee09a89c5c15a5095804bf1b163efa85c4fcdfce1461"
+	}
+}

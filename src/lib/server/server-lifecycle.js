@@ -306,6 +306,10 @@ async function freePort(preferred, host = '127.0.0.1') {
 				]))
 					await check(address, port);
 				await check(host, port);
+			} else {
+				// A loopback bind can coexist with an occupied wildcard on macOS.
+				// Refuse that port instead of probing another installation's readiness.
+				await check('0.0.0.0', port);
 			}
 			return port;
 		} catch {

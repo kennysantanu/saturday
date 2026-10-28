@@ -190,6 +190,25 @@ test('fresh managed installation uses its descriptor for runtime preparation and
 		const health = await fetch(new URL('/health', receipt.url));
 		assert.equal(health.status, 200);
 		assert.equal((await health.json()).installation_id, receipt.installation_id);
+		const repeatEnv = { ...process.env };
+		for (const key of ['SATURDAY_BUILD_ID', 'SATURDAY_BUILD_COMMIT', 'SATURDAY_BUILD_DIRTY'])
+			delete repeatEnv[key];
+		await run(
+			config.node_path,
+			[
+				join(config.code_root, 'scripts/setup.mjs'),
+				'--skip-dependencies',
+				'--skip-build',
+				'--skip-pdf',
+				'--json'
+			],
+			{ env: repeatEnv }
+		);
+		assert.deepEqual(
+			JSON.parse(await fs.readFile(descriptor)).build,
+			config.build,
+			'skipped builds retain the identity of installed artifacts'
+		);
 	} finally {
 		try {
 			if (existsSync(join(root, 'app', 'scripts', 'start.mjs')) && existsSync(descriptor))
@@ -406,6 +425,56 @@ test('uninstall refuses a connected client then deletes only separately confirme
 		assert.equal(await fs.readFile(external, 'utf8'), 'external export');
 		assert.equal(getInstallation().data_deleted, true);
 		assert.equal((await fs.readdir(desktop)).length, 0);
+		const resumed = await install({
+			root: f.root,
+			source: resolve('.'),
+			desktop,
+			'skip-pdf': true,
+			'no-open': true
+		});
+		assert.equal(resumed.installation_id, config.installation_id);
+		const fresh = await run(
+			getInstallation().node_path,
+			[
+				'--input-type=module',
+				'-e',
+				`import {withDatabase} from ${JSON.stringify(join(f.app, 'src/lib/server/database.js'))};console.log(JSON.stringify(withDatabase(db=>({jobs:db.prepare('SELECT count(*) n FROM jobs').get().n,stages:db.prepare('SELECT count(*) n FROM workflow_stages').get().n}))));`
+			],
+			{ env: f.env }
+		);
+		assert.deepEqual(JSON.parse(fresh.stdout), { jobs: 0, stages: 8 });
+		assert.equal(
+			JSON.parse(await fs.readFile(join(getInstallation().data_root, 'access.json'))).password,
+			null
+		);
+		assert.equal(await fs.readFile(external, 'utf8'), 'external export');
+		const pid = serverSummary().managed
+			? JSON.parse(await fs.readFile(join(getInstallation().data_root, 'server.state/server.json')))
+					.pid
+			: null;
+		await run(getInstallation().node_path, [
+			join(f.app, 'scripts/start.mjs'),
+			'stop',
+			'--installation',
+			f.descriptor,
+			'--json'
+		]);
+		if (pid) {
+			let stopped = false;
+			for (let i = 0; i < 150; i++) {
+				try {
+					process.kill(pid, 0);
+				} catch (e) {
+					if (e.code === 'ESRCH') {
+						stopped = true;
+						break;
+					}
+					throw e;
+				}
+				await wait(100);
+			}
+			assert(stopped);
+		}
 	} finally {
 		for (const key of Object.keys(process.env)) if (!(key in prior)) delete process.env[key];
 		Object.assign(process.env, prior);

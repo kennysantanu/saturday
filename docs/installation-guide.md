@@ -58,7 +58,7 @@ npm run setup
 npm run open
 ```
 
-Setup installs dependencies, prepares optional PDF support, builds both web/MCP, and initializes or validates storage. Repeating it preserves data and records step results/logs for retry. `npm run dev` starts the loopback development server; `npm run open` opens the production build in the background.
+Setup installs dependencies, prepares optional PDF support, builds both web/MCP, and initializes or validates storage. Repeating it preserves data and records step results/logs for retry. A configured missing descriptor or existing managed storage without a descriptor stops setup for recovery rather than creating a replacement identity. `npm run dev` starts the loopback development server; `npm run open` opens the production build in the background.
 
 `npm run setup:pdf` installs Puppeteer's Chrome. Source setup options `--skip-dependencies`, `--skip-build`, and `--skip-pdf` deliberately skip those steps; they do not establish readiness. Production needs its runtime dependencies, including Puppeteer/ZIP packages, alongside the build. Development and verification commands are in [Contributing](contributing.md#commands-and-verification).
 
