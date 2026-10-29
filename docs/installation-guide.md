@@ -6,6 +6,8 @@ Saturday is preparing its first `0.1.0` release. Setup preserves existing data a
 
 ## Requirements
 
+Version `0.1.0` remains a release candidate. Automated macOS checks and an isolated managed installation have passed; Windows/Ubuntu and real desktop/client/device acceptance remain user tests. Public upstream installation/update discovery requires a separately published release.
+
 The managed installer targets macOS 14+ (Apple silicon/x64), Windows 11 x64, and Ubuntu 22.04/24.04 x64 with graphical GNOME. Platform, reboot/login and accessibility certification remains pending.
 
 Installation needs network access for runtime/dependency downloads. The bootstrap provisions a verified private Node/npm runtime without replacing global tools or requiring administrator access. Git is unnecessary for app installation, but required for Git-sourced extensions.
@@ -34,6 +36,8 @@ install.bat --source .
 The installer prepares its private runtime, installs dependencies, builds web/MCP, initializes or validates storage, prepares optional PDF export, and opens Dashboard after readiness. It reports the actual URL, data/descriptor paths, and desktop shortcut or exact reopen command.
 
 Use **Open Saturday** on the desktop afterward. Linux may require **Allow Launching** on the generated desktop file. If shortcut creation is blocked, use the printed fallback; installation does not bypass OS protections. Closing the browser or launch terminal leaves the background UI running.
+
+Fresh storage seeds the eight default workflow stages and internal metadata only; jobs, people, tags and documents start empty. Keep the same descriptor/data paths when reopening or repeating setup.
 
 Repeating installation reuses the installed code, data, and login settings. Use the [update workflow](#updates) to change builds. After uninstall, reinstall reuses retained data, or creates a fresh workspace if data was explicitly deleted.
 

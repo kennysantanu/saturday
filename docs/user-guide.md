@@ -1,5 +1,7 @@
 # Using Saturday
 
+A normal new installation starts empty; use its desktop shortcut to return to the same workspace. Keep paired backups before restore/update experiments and reconnect your assistant after an application update.
+
 Saturday keeps your job records and documents on your computer. Use the web app on its own or connect an optional assistant. For installation, start with the [README](../README.md#install-and-start).
 
 ## Add and find jobs

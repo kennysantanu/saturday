@@ -30,7 +30,7 @@ Run `npm run build` to rebuild both artifacts; restart Vite to refresh a dev ser
 | Area                  | Implementation target / verification limit                                                                                                      |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Managed installation  | Private Node/npm, source staging, desktop launcher, optional login startup, manual update/repair/uninstall                                      |
-| macOS                 | 14+, Apple silicon/x64; local source and limited disposable managed-install evidence on Apple silicon                                           |
+| macOS                 | 14+, Apple silicon/x64 target; isolated managed installation and automated source/browser checks passed on 26.4.1 arm64; other targets pending  |
 | Windows               | Windows 11 x64; native runtime, paths/processes, desktop/login, PDF, and failure workflows still need full verification                         |
 | Linux                 | Ubuntu 22.04/24.04 x64 with graphical GNOME; runtime, Chrome libraries/fonts, desktop/login, and failure workflows still need full verification |
 | Source runtime        | Node.js 22.13+ and npm 10+; verify each advertised runtime explicitly                                                                           |
@@ -236,3 +236,7 @@ node scripts/release.mjs check --commit <full-sha> --verified-commit <full-sha> 
 ```
 
 Generation/checking uses only Node built-ins and the same distribution validator as the updater. It refuses dirty/unidentified revisions, package/lockfile disagreement, unsupported declarations and mismatched tag/package/source metadata. It preserves the updater's existing asset-digest and exact-commit checks. Core commands and privacy boundaries stay the same after release; rebuild and reconnect local MCP after updating, then compare identities and use its bundled help tools.
+
+Keep a candidate receipt alongside the generated asset, outside committed source: full source commit/tree, application/storage/API versions, OS/CPU/runtime/browser, verification command/results/skips, log and artifact hashes, known limitations and pending manual checks. The receipt and asset identify the committed revision; adding their own final SHA to that same commit is impossible. Rebuild and repeat affected checks after a source change, then run full verification on the final clean candidate before generating its asset. Preserve earlier receipts as historical evidence rather than relabeling them.
+
+Once a candidate is frozen, limit changes to reproduced blockers until its release decision. Local automated completion and manual acceptance are separate: real desktop/login, Windows/Ubuntu, actual assistant clients, physical phones, PDF appearance and accessibility remain pending until observed. Publication and remote branch/protection changes require separate authorization. A checkout without a hosted CI workflow cannot claim enforced remote verification; configure and observe actual checks before making them required branch-protection checks.
