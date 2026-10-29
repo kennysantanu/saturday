@@ -19,7 +19,9 @@ Database schema 1 and file manifest 1 are independent of app version `0.1.0`. Su
 
 ## Verification and known limits
 
-Automated service/protocol, Cloudflare-core, production browser and recovery checks are available through `npm run verify`. This does not certify a platform or assistant client. macOS local installation evidence is recorded separately after the isolated installation check. Windows 11 x64, Ubuntu 22.04/24.04 x64 GNOME, other Mac architectures/minimum OS versions, real desktop/login behavior, physical phones, screen readers and actual assistant-client connections require hands-on acceptance before advertising support.
+Automated service/protocol, Cloudflare-core, production browser and recovery checks have passed on macOS 26.4.1 arm64 with Node 25.9.0 and Chrome 154.0.8037.57. A separate isolated managed macOS installation exercised private Node 24.21.0, PDF generation, populated backup/restore and launcher-process readiness. Its earlier snapshot is recorded in `tests/verification/macos-0.1.0.json`; it is not a fresh installation of every later candidate. Run `npm run verify` on the exact final clean revision and retain its receipt before preparing distribution metadata.
+
+These automated results do not certify a platform or assistant client. Windows 11 x64, Ubuntu 22.04/24.04 x64 GNOME, other Mac architectures/minimum OS versions, real desktop/login behavior, physical phones, screen readers and actual assistant-client connections require hands-on acceptance before advertising support. Headless PDF checks exercise generation/download and source retention; embedded-preview navigation, appearance and selectable content remain manual checks.
 
 Cloudflare/Supabase deployment, Docker packaging, native mobile apps, remote MCP, built-in AI/provider sign-in, synchronization and multi-user hosting are unavailable. The portable application/storage foundations and local workerd harness do not establish those deployment capabilities.
 
@@ -27,4 +29,6 @@ Reminders use fixed date/time values and the server's local clock; they do not c
 
 ## Release status
 
-The package is `0.1.0`. A verified source commit, matching metadata asset and publication approval are still required before distribution. See the [release procedure](contributing.md#prepare-a-release) and [support matrix](contributing.md#provisional-support-matrix). No tag, remote branch or public release is created by the local preparation commands.
+**Code complete — User tests deferred.** The `0.1.0` candidate is frozen for verification and user acceptance; subsequent changes should address reproduced blockers and require a new source receipt and matching metadata. Database schema and file manifest remain at version 1. This status does not mark the beta published or manually accepted.
+
+A verified source commit, matching metadata asset, applicable user-test results and publication approval are still required before distribution. See the [release procedure](contributing.md#prepare-a-release) and [support matrix](contributing.md#provisional-support-matrix). No tag, remote branch or public release is created by the local preparation commands.
