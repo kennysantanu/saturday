@@ -6,6 +6,7 @@
 	import Briefcase from '@lucide/svelte/icons/briefcase';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import PageHeader from '$lib/components/app/page-header.svelte';
+	import RecentMenu from '$lib/components/app/recent-menu.svelte';
 	import PageShell from '$lib/components/app/page-shell.svelte';
 	import FilterBar from '$lib/components/app/filter-bar.svelte';
 	import FilterChips from '$lib/components/app/filter-chips.svelte';
@@ -123,12 +124,11 @@
 <PageShell title="Jobs">
 	<PageHeader title="Jobs" description="Find jobs and review their latest progress.">
 		{#snippet actions()}
-			{#if data.totalJobs > 0 || invalid}
-				<Button
-					href={'/jobs/new?return_to=' + encodeURIComponent(page.url.pathname + page.url.search)}
-					size="lg"><Plus data-icon="inline-start" />Add job</Button
-				>
-			{/if}
+			<RecentMenu kind="jobs" enabled={Boolean(data.navigationSettings?.enabled)} />
+			<Button
+				href={'/jobs/new?return_to=' + encodeURIComponent(page.url.pathname + page.url.search)}
+				size="lg"><Plus data-icon="inline-start" />Add job</Button
+			>
 		{/snippet}
 	</PageHeader>
 

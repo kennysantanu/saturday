@@ -4,7 +4,11 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { applyMigrations, assertMigrationHistory } from '../src/lib/server/migrations.js';
+import {
+	applyMigrations,
+	assertMigrationHistory,
+	schemaVersion
+} from '../src/lib/server/migrations.js';
 import { migrateDatabase, withDatabase } from '../src/lib/server/database.js';
 import {
 	createJob,
@@ -388,7 +392,7 @@ test('failed initialization rolls back the complete baseline, seeds and version 
 		db.exec = exec;
 		applyMigrations(db);
 		assertMigrationHistory(db);
-		assert.equal(db.prepare('SELECT COUNT(*) n FROM schema_migrations').get().n, 1);
+		assert.equal(db.prepare('SELECT COUNT(*) n FROM schema_migrations').get().n, schemaVersion);
 		assert.equal(db.prepare('SELECT COUNT(*) n FROM workflow_stages').get().n, 8);
 		assert.equal(db.prepare('SELECT COUNT(*) n FROM reminders').get().n, 0);
 	} finally {

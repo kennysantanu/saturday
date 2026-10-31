@@ -150,7 +150,25 @@ CREATE TABLE ${kind}_tag_assignments (
 CREATE INDEX ${kind}_tags_reverse ON ${kind}_tag_assignments(tag_id,${kind}_id);
 `;
 				})
-				.join('')
+				.join('') +
+			`
+CREATE TABLE navigation_settings (
+ id INTEGER PRIMARY KEY CHECK(id=1),
+ recents_enabled INTEGER NOT NULL DEFAULT 1 CHECK(recents_enabled IN (0,1)),
+ recent_limit INTEGER NOT NULL DEFAULT 10 CHECK(recent_limit IN (5,10,20))
+);
+INSERT INTO navigation_settings(id) VALUES(1);
+CREATE TABLE recent_job_views (
+ job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+ viewed_at INTEGER NOT NULL CHECK(viewed_at>0)
+);
+CREATE INDEX recent_jobs_order ON recent_job_views(viewed_at DESC,job_id DESC);
+CREATE TABLE recent_network_views (
+ network_id INTEGER PRIMARY KEY REFERENCES networks(id) ON DELETE CASCADE,
+ viewed_at INTEGER NOT NULL CHECK(viewed_at>0)
+);
+CREATE INDEX recent_networks_order ON recent_network_views(viewed_at DESC,network_id DESC);
+`
 	}
 ];
 

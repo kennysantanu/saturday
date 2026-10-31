@@ -5,6 +5,11 @@ import { assessmentJobFields } from '../job-fields.js';
 // An implementation owns each complete operation, including its transaction.
 // No connection, statement or transaction callback crosses this boundary.
 const records = [
+	'getNavigationSettings',
+	'setNavigationSettings',
+	'listRecentViews',
+	'recordRecentView',
+	'clearRecentViews',
 	'createJob',
 	'editJob',
 	'setJobScore',

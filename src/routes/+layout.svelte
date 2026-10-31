@@ -7,6 +7,8 @@
 	import { page } from '$app/state';
 	import { setLucideProps } from '@lucide/svelte';
 	import Logo from '$lib/components/app/logo.svelte';
+	import { recentViewForPage } from '$lib/recent-navigation.js';
+	import { recordRecentView } from '$lib/recents';
 	import SessionActivity from '$lib/components/app/session-activity.svelte';
 	import { authNotice } from '$lib/auth-notice.svelte';
 	import Toast from '$lib/components/app/toast.svelte';
@@ -43,6 +45,14 @@
 	// remove the parameter so a reload does not repeat it.
 	afterNavigate((navigation) => {
 		const url = navigation.to?.url ?? page.url;
+		if (
+			data.navigationSettings?.enabled &&
+			data.access?.authenticated &&
+			navigation.from?.url.pathname !== url.pathname
+		) {
+			const view = recentViewForPage(url.pathname, page.data, page.status);
+			if (view) recordRecentView(view);
+		}
 		const key = url.searchParams.get('saved');
 		if (!key) return;
 		if (SAVED_MESSAGES[key]) toast.show(SAVED_MESSAGES[key]);
@@ -95,7 +105,8 @@
 <div class="app-shell" style:visibility={authNotice.restoring ? 'hidden' : undefined}>
 	<header class="app-topbar glass-surface">
 		<Logo class="topbar-brand" />
-		{#if page.url.pathname !== '/signin'}<nav aria-label="Primary" class="desktop-navigation">
+		{#if page.url.pathname !== '/signin'}
+			<nav aria-label="Primary" class="desktop-navigation">
 				{#each links as link (link.href)}
 					<a
 						href={link.href}
@@ -106,7 +117,8 @@
 						<span>{link.label}</span>
 					</a>
 				{/each}
-			</nav>{/if}
+			</nav>
+		{/if}
 	</header>
 
 	<main id="main" tabindex="-1" class="app-main">
