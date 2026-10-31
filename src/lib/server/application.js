@@ -22,6 +22,11 @@ export const assistantApplication = createApplication(
 );
 export const { getBackupMetadata, downloadFileBackup, openRecoveryDocument } = webApplication;
 export const {
+	getNavigationSettings,
+	setNavigationSettings,
+	listRecentViews,
+	recordRecentView,
+	clearRecentViews,
 	createJob,
 	editJob,
 	setJobScore,

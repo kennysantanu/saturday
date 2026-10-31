@@ -4,6 +4,7 @@ import * as people from './local/people.js';
 import * as workflow from './local/workflow.js';
 import * as reminders from './local/reminders.js';
 import * as tags from './local/tags.js';
+import * as recents from './local/recents.js';
 import * as documents from './files/documents.js';
 import * as databaseBackups from './backups.js';
 import * as fileBackups from './files/backups.js';
@@ -27,6 +28,11 @@ function publicStorageSummary({ root, ...summary }) {
 	return summary;
 }
 export const localOperations = {
+	getNavigationSettings: () => recents.getNavigationSettings(),
+	setNavigationSettings: (context, input) => recents.setNavigationSettings(input),
+	listRecentViews: () => recents.listRecentViews(),
+	recordRecentView: (context, input) => recents.recordRecentView(input),
+	clearRecentViews: () => recents.clearRecentViews(),
 	createJob: (context, input) => jobs.createJob(input, context.actor),
 	editJob: (context, id, input) => jobs.editJob(id, input),
 	setJobScore: (context, id, input) => jobs.setJobScore(id, input),

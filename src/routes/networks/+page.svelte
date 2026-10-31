@@ -5,6 +5,7 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import Users from '@lucide/svelte/icons/users';
 	import PageHeader from '$lib/components/app/page-header.svelte';
+	import RecentMenu from '$lib/components/app/recent-menu.svelte';
 	import PageShell from '$lib/components/app/page-shell.svelte';
 	import EmptyState from '$lib/components/app/empty-state.svelte';
 	import FilterBar from '$lib/components/app/filter-bar.svelte';
@@ -73,8 +74,9 @@
 
 <PageShell title="Network">
 	<PageHeader title="Network" description="People who can help with your search.">
-		{#snippet actions()}<Button href="/networks/new" size="lg"
-				><Plus data-icon="inline-start" />Add person</Button
+		{#snippet actions()}
+			<RecentMenu kind="people" enabled={Boolean(data.navigationSettings?.enabled)} />
+			<Button href="/networks/new" size="lg"><Plus data-icon="inline-start" />Add person</Button
 			>{/snippet}
 	</PageHeader>
 

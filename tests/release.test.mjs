@@ -147,7 +147,7 @@ test('package/lock/storage/API mismatches and altered metadata reject before pub
 			],
 			[
 				(pkg) => {
-					pkg.saturday.storage.database.currentVersion = 2;
+					pkg.saturday.storage.database.currentVersion += 1;
 				},
 				/storage declarations/
 			],

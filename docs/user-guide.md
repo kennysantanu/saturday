@@ -141,6 +141,14 @@ To export a resume, save self-contained HTML and choose **Generate PDF** from it
 
 Open **Settings → Appearance → Theme** and choose **System**, **Light**, or **Dark**. Changes apply immediately and are remembered in this browser for this Saturday address; other devices can use different choices. System is the default and follows your device’s appearance as it changes. Tabs at the same address stay in sync. No restart is needed. If JavaScript or browser storage is unavailable, Saturday follows the system theme.
 
+## Recently viewed
+
+Use **Recent** beside **Add job** on the Jobs page or beside **Add person** on the Network page. Each button opens only that page’s recently viewed records, with no Jobs/People switch. Desktop opens a popover; on a phone, it opens a bottom sheet. Lists show unique records, most recently viewed first. Viewing never changes a record's update date or activity history.
+
+In **Settings → Navigation → Recently viewed**, enable or disable recording, choose **5, 10, or 20** items per list (default **10**), or clear both lists. Disabling hides Recent and stops recording while keeping existing history until cleared. These preferences and lists are shared across devices accessing the workspace. Saturday retains up to 50 records per type and removes deleted records automatically. Recording requires JavaScript and a successfully opened detail page; assistant reads and preloaded links do not count.
+
+Database backups include navigation preferences and recents.
+
 ## Data and assistant connection
 
 **Settings → Local database** shows the actual data path and **Open folder** action. Expand **Diagnostics** for build, storage versions, descriptor, backup/recovery, and log paths. Source setup normally uses the repository's `data/`; managed installs use a separate [per-user installation root](installation-guide.md#data-locations-and-installation-descriptor). Repeating setup preserves data. Missing initialized storage requires repair/recovery, not a reset.

@@ -115,11 +115,19 @@ test('source setup persists identity and shared paths, repeated setup preserves 
 			'network_tags',
 			'network_updates',
 			'networks',
+			'recent_job_views',
+			'recent_network_views',
 			'reminders'
 		];
 		assert.deepEqual(
 			tables,
-			[...emptyTables, 'app_metadata', 'schema_migrations', 'workflow_stages'].sort()
+			[
+				...emptyTables,
+				'app_metadata',
+				'navigation_settings',
+				'schema_migrations',
+				'workflow_stages'
+			].sort()
 		);
 		for (const table of emptyTables)
 			assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 0, table);

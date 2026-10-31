@@ -1,4 +1,7 @@
 import {
+	getNavigationSettings,
+	setNavigationSettings,
+	clearRecentViews,
 	getBackupMetadata,
 	listTags,
 	listWorkflowStages,
@@ -121,6 +124,12 @@ export async function load(event) {
 	}
 	let workflowStages = [],
 		workflowError = null;
+	let navigationSettings = null;
+	try {
+		navigationSettings = await getNavigationSettings();
+	} catch {
+		// Keep diagnostics and recovery available when storage cannot be opened normally.
+	}
 	try {
 		workflowStages = await listWorkflowStages();
 	} catch {
@@ -128,6 +137,7 @@ export async function load(event) {
 			'Workflow is unavailable. Repair storage before editing stages; diagnostics and recovery remain available.';
 	}
 	return {
+		navigationSettings,
 		tagCollections: workflowError
 			? null
 			: {
@@ -209,6 +219,31 @@ function installationAuthorized(event) {
 	);
 }
 export const actions = {
+	navigation: async (event) => {
+		if (!sameOrigin(event))
+			return fail(403, {
+				navigationError: 'Use Saturday’s own page to change navigation settings.'
+			});
+		try {
+			const form = await event.request.formData();
+			if (form.get('kind') === 'clear') {
+				await clearRecentViews();
+				return { navigationMessage: 'Recently viewed cleared.' };
+			}
+			await setNavigationSettings({
+				enabled: form.get('enabled') === '1',
+				limit: Number(form.get('limit'))
+			});
+			return { navigationMessage: 'Navigation settings saved.' };
+		} catch (e) {
+			return fail(400, {
+				navigationError:
+					e instanceof ValidationError
+						? 'Choose 5, 10, or 20 items per list.'
+						: 'Navigation settings could not be saved. Try again.'
+			});
+		}
+	},
 	workflow: async (event) => {
 		if (!sameOrigin(event))
 			return fail(403, { workflowError: 'Use this Saturday browser to save workflow changes.' });

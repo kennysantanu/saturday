@@ -1,6 +1,7 @@
 <script lang="ts">
 	import TagCollectionSettings from '$lib/components/app/tag-collection-settings.svelte';
 	import ThemeSettings from '$lib/components/app/theme-settings.svelte';
+	import NavigationSettings from '$lib/components/app/navigation-settings.svelte';
 	import WorkflowSettings from '$lib/components/app/workflow-settings.svelte';
 	import { checkAuthResponse } from '$lib/auth-notice.svelte';
 	import { tick } from 'svelte';
@@ -61,6 +62,7 @@
 	// Order matches the page order below.
 	const sections = [
 		{ id: 'appearance', label: 'Appearance' },
+		{ id: 'navigation', label: 'Navigation' },
 		{ id: 'updates', label: 'Updates' },
 		{ id: 'server', label: 'Server' },
 		{ id: 'password', label: 'Password' },
@@ -284,6 +286,11 @@
 
 		<div class="settings-sections space-y-8">
 			<ThemeSettings />
+			<NavigationSettings
+				settings={data.navigationSettings}
+				error={form?.navigationError}
+				message={form?.navigationMessage}
+			/>
 			<SectionCard
 				id="updates"
 				title="Updates and installation"

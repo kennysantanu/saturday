@@ -208,6 +208,11 @@ const columns = {
 		'updated_at'
 	]
 };
+const navigationColumns = {
+	navigation_settings: ['id', 'recents_enabled', 'recent_limit'],
+	recent_job_views: ['job_id', 'viewed_at'],
+	recent_network_views: ['network_id', 'viewed_at']
+};
 const allocatedTables = [
 	'workflow_stages',
 	'jobs',
@@ -244,6 +249,12 @@ function allocatorState(db) {
 function dataset(db) {
 	return {
 		...Object.fromEntries(
+			Object.entries(navigationColumns).map(([table, fields]) => [
+				table,
+				db.prepare(`SELECT ${fields.join(',')} FROM ${table} ORDER BY ${fields[0]}`).all()
+			])
+		),
+		...Object.fromEntries(
 			Object.entries(columns).map(([table, fields]) => [
 				table,
 				db
@@ -260,7 +271,12 @@ function dataHash(db) {
 	return createHash('sha256')
 		.update(
 			JSON.stringify(
-				Object.fromEntries(Object.entries(dataset(db)).filter(([key]) => key !== '$sequence'))
+				// Browsing during a restore preview must not make the career records stale.
+				Object.fromEntries(
+					Object.entries(dataset(db)).filter(
+						([key]) => key !== '$sequence' && !key.startsWith('recent_')
+					)
+				)
 			)
 		)
 		.digest('hex');
@@ -331,6 +347,20 @@ function validate(db) {
 		)
 			fail('invalid_backup', 'The backup failed database integrity or relationship checks.');
 		const data = dataset(db);
+		if (
+			data.navigation_settings.length !== 1 ||
+			data.navigation_settings[0].id !== 1 ||
+			![0, 1].includes(data.navigation_settings[0].recents_enabled) ||
+			![5, 10, 20].includes(data.navigation_settings[0].recent_limit)
+		)
+			throw new Error('navigation settings');
+		for (const table of ['recent_job_views', 'recent_network_views']) {
+			if (
+				data[table].length > 50 ||
+				data[table].some((row) => !Number.isSafeInteger(row.viewed_at) || row.viewed_at <= 0)
+			)
+				throw new Error('recent views');
+		}
 		const jobIds = new Set();
 		const stageIds = new Map(data.workflow_stages.map((row) => [row.id, row]));
 		const names = new Set();
@@ -438,6 +468,7 @@ function validate(db) {
 				([table]) =>
 					![
 						'app_metadata',
+						...Object.keys(navigationColumns),
 						'$sequence',
 						'workflow_stages',
 						'job_tags',
@@ -629,6 +660,15 @@ function insertData(db, data, preserveCounters = false) {
 	const previous = preserveCounters && sameDataset ? allocatorState(db) : {};
 	db.exec('DELETE FROM app_metadata; DELETE FROM workflow_stages');
 	for (const [table, fields] of Object.entries(columns)) {
+		const statement = db.prepare(
+			`INSERT INTO ${table} (${fields.join(',')}) VALUES (${fields.map(() => '?').join(',')})`
+		);
+		for (const row of data[table]) statement.run(...fields.map((key) => row[key]));
+	}
+	db.exec(
+		'DELETE FROM recent_job_views; DELETE FROM recent_network_views; DELETE FROM navigation_settings;'
+	);
+	for (const [table, fields] of Object.entries(navigationColumns)) {
 		const statement = db.prepare(
 			`INSERT INTO ${table} (${fields.join(',')}) VALUES (${fields.map(() => '?').join(',')})`
 		);
