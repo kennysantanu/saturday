@@ -112,6 +112,21 @@ export async function copySource(source, target) {
 		}
 	});
 }
+function archiveListingLines(stdout) {
+	// tar.exe can emit CRLF. Remove line endings, not whitespace in archive names.
+	return stdout.replace(/\r?\n$/, '').split(/\r?\n/);
+}
+export function validateSourceArchiveListing(paths, details, allowed) {
+	const seen = new Set();
+	for (const name of archiveListingLines(paths)) {
+		const key = name.replace(/\/$/, '');
+		if (!allowed.has(key) || seen.has(key))
+			throw new Error(`Unexpected or duplicate source archive path: ${JSON.stringify(name)}`);
+		seen.add(key);
+	}
+	if (archiveListingLines(details).some((line) => !['-', 'd'].includes(line[0])))
+		throw new Error('Source archives cannot contain links or special files.');
+}
 export async function downloadSource(stage, commit) {
 	const selected = await (
 		await request(`https://api.github.com/repos/${repo}/commits/${commit || 'main'}`)
@@ -151,20 +166,16 @@ export async function downloadSource(stage, commit) {
 				'tar',
 				args,
 				{ encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true },
-				(e, stdout) => (e ? rej(e) : res(stdout.trim().split('\n')))
+				(e, stdout) => (e ? rej(e) : res(stdout))
 			)
 		);
 	const prefix = `saturday-${selected.sha}`,
-		allowed = new Set([prefix, ...tree.tree.map((entry) => `${prefix}/${entry.path}`)]),
-		seen = new Set();
-	for (const name of await listing(['-tzf', archive])) {
-		const key = name.replace(/\/$/, '');
-		if (!allowed.has(key) || seen.has(key))
-			throw new Error('Unexpected or duplicate source archive path.');
-		seen.add(key);
-	}
-	if ((await listing(['-tvzf', archive])).some((line) => !['-', 'd'].includes(line[0])))
-		throw new Error('Source archives cannot contain links or special files.');
+		allowed = new Set([prefix, ...tree.tree.map((entry) => `${prefix}/${entry.path}`)]);
+	validateSourceArchiveListing(
+		await listing(['-tzf', archive]),
+		await listing(['-tvzf', archive]),
+		allowed
+	);
 	await run('tar', ['-xzf', archive, '-C', extract]);
 	const entries = await fs.readdir(extract);
 	if (entries.length !== 1 || entries[0] !== `saturday-${selected.sha}`)
