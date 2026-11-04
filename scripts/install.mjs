@@ -184,6 +184,63 @@ export async function downloadSource(stage, commit) {
 	await verifySource(source, tree);
 	return { source, commit: selected.sha };
 }
+export async function captureBuildDiagnostics(project, logs, { node, build, error } = {}) {
+	await fs.mkdir(logs, { recursive: true, mode: 0o700 });
+	const destination = await fs.mkdtemp(join(logs, 'failed-build-'));
+	const report = {
+		format: 'saturday.build-diagnostics',
+		version: 1,
+		platform: process.platform,
+		arch: process.arch,
+		installer_node: { path: process.execPath, version: process.version },
+		build_node: node,
+		build,
+		project,
+		error: error?.message,
+		packages: {},
+		artifacts: {}
+	};
+	try {
+		report.real_project = await fs.realpath(project);
+		report.route = await fs.realpath(join(project, 'src/routes/api/documents/+server.js'));
+	} catch (e) {
+		report.path_error = e.message;
+	}
+	for (const name of ['vite', 'rolldown', '@sveltejs/kit', '@sveltejs/vite-plugin-svelte']) {
+		try {
+			report.packages[name] = JSON.parse(
+				await fs.readFile(join(project, 'node_modules', name, 'package.json'), 'utf8')
+			).version;
+		} catch (e) {
+			report.packages[name] = { error: e.code || e.message };
+		}
+	}
+	// Keep only build metadata, never workspace databases, documents or access settings.
+	for (const [name, source] of [
+		['server-manifest.json', '.svelte-kit/output/server/.vite/manifest.json'],
+		['client-manifest.json', '.svelte-kit/output/client/.vite/manifest.json'],
+		['route-meta-data.json', '.svelte-kit/types/route_meta_data.json']
+	]) {
+		try {
+			const path = join(project, source),
+				stat = await fs.lstat(path);
+			if (!stat.isFile() || stat.size > 16 * 1024 * 1024)
+				throw new Error('Build metadata is not an ordinary file of at most 16 MiB.');
+			await fs.writeFile(join(destination, name), await fs.readFile(path), {
+				flag: 'wx',
+				mode: 0o600
+			});
+			report.artifacts[name] = { source, status: 'saved' };
+		} catch (e) {
+			report.artifacts[name] = { source, status: 'unavailable', error: e.code || e.message };
+		}
+	}
+	await fs.writeFile(join(destination, 'report.json'), JSON.stringify(report, null, 2) + '\n', {
+		flag: 'wx',
+		mode: 0o600
+	});
+	return destination;
+}
 export async function recoverPublication(root) {
 	const journal = join(root, 'install-publication.json');
 	if (!existsSync(journal)) return;
@@ -420,17 +477,31 @@ export async function install(values, services = {}) {
 				SATURDAY_BUILD_DIRTY: ''
 			};
 			say('Building Saturday before activation…');
-			await execute(
-				preparedRuntime.node_path,
-				[
-					join(candidate, 'scripts', 'setup.mjs'),
-					'--managed',
-					'--root',
-					join(stage, 'workspace'),
-					...(values['skip-pdf'] ? ['--skip-pdf'] : [])
-				],
-				{ cwd: candidate, env }
-			);
+			try {
+				await execute(
+					preparedRuntime.node_path,
+					[
+						join(candidate, 'scripts', 'setup.mjs'),
+						'--managed',
+						'--root',
+						join(stage, 'workspace'),
+						...(values['skip-pdf'] ? ['--skip-pdf'] : [])
+					],
+					{ cwd: candidate, env }
+				);
+			} catch (error) {
+				try {
+					const diagnostics = await captureBuildDiagnostics(candidate, join(root, 'logs'), {
+						node: preparedRuntime.node_path,
+						build: { commit: selected.commit, id: env.SATURDAY_BUILD_ID },
+						error
+					});
+					say(`Build diagnostics saved: ${diagnostics}`);
+				} catch (diagnosticError) {
+					say(`Build diagnostics could not be saved: ${diagnosticError.message}`);
+				}
+				throw error;
+			}
 			config = JSON.parse(await fs.readFile(join(stage, 'workspace', 'installation.json'), 'utf8'));
 			config.installation_id = preparedRuntime.installation_id;
 			config.code_root = app;

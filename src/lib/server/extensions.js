@@ -1,5 +1,5 @@
 import { withServerActivity } from './server-lifecycle.js';
-import { getInstallation, assertInstallationStorage } from './installation.js';
+import { getInstallation, assertInstallationStorage, syncDirectory } from './installation.js';
 // Shared extension lifecycle, database, and recovery. Extension code is trusted, not sandboxed.
 import * as fs from 'node:fs/promises';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
@@ -990,7 +990,8 @@ export async function syncExtensionPath(path, { recursive = true } = {}) {
 	if (stat.isSymbolicLink()) return;
 	if (stat.isDirectory() && recursive)
 		for (const name of await fs.readdir(path)) await syncExtensionPath(join(path, name));
-	const handle = await fs.open(path, 'r');
+	if (stat.isDirectory()) return syncDirectory(path);
+	const handle = await fs.open(path, 'r+');
 	try {
 		await handle.sync();
 	} finally {

@@ -26,7 +26,7 @@ import {
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 async function syncFile(path) {
-	const handle = await fs.open(path, 'r');
+	const handle = await fs.open(path, 'r+');
 	try {
 		await handle.sync();
 	} finally {
