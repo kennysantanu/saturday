@@ -153,7 +153,7 @@ export class LocalFileStore {
 		const temp = `${path}.${randomUUID()}.tmp`;
 		try {
 			await pipeline(stream, createWriteStream(temp, { flags: 'wx', mode: 0o600 }));
-			const handle = await fs.open(temp, 'r');
+			const handle = await fs.open(temp, 'r+');
 			try {
 				await handle.sync();
 			} finally {
@@ -366,7 +366,7 @@ export async function commitManifest(manifest, changes = [], { restore = false }
 	}
 	for (let i = 0; i < changes.length; i++)
 		if (!changes[i].remove) {
-			const h = await fs.open(join(p.state, 'pending', String(i)), 'r');
+			const h = await fs.open(join(p.state, 'pending', String(i)), 'r+');
 			try {
 				await h.sync();
 			} finally {
