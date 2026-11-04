@@ -3,8 +3,13 @@ setlocal DisableDelayedExpansion
 rem No PowerShell, administrator privileges or global runtime changes.
 set "NODE_VERSION=24.21.0"
 if /I not "%PROCESSOR_ARCHITECTURE%"=="AMD64" if /I not "%PROCESSOR_ARCHITEW6432%"=="AMD64" goto unsupported
-if not defined LOCALAPPDATA goto unsupported
-set "SATURDAY_ROOT=%LOCALAPPDATA%\Saturday"
+if not defined USERPROFILE goto unsupported
+set "SATURDAY_ROOT=%USERPROFILE%\Saturday"
+rem Reuse existing workspaces without moving or replacing their data.
+for %%P in (installation.json data app install-publication.json) do if exist "%SATURDAY_ROOT%\%%P" goto rootSelected
+if not defined LOCALAPPDATA goto rootSelected
+for %%P in (installation.json data app install-publication.json) do if exist "%LOCALAPPDATA%\Saturday\%%P" set "SATURDAY_ROOT=%LOCALAPPDATA%\Saturday"
+:rootSelected
 if defined SATURDAY_INSTALL_ROOT set "SATURDAY_ROOT=%SATURDAY_INSTALL_ROOT%"
 set "RUNTIME=node-v%NODE_VERSION%-win-x64"
 set "HASH=158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541"

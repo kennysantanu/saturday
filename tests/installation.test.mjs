@@ -49,8 +49,8 @@ test('default roots are explicit for all OS families without filesystem changes'
 		'/Users/example/Library/Application Support/Saturday'
 	);
 	assert.equal(
-		defaultInstallationRoot('win32', { LOCALAPPDATA: 'C:\\Users\\Example\\AppData\\Local' }),
-		'C:\\Users\\Example\\AppData\\Local\\Saturday'
+		defaultInstallationRoot('win32', { USERPROFILE: 'C:\\Users\\Example' }),
+		'C:\\Users\\Example\\Saturday'
 	);
 	assert.equal(
 		defaultInstallationRoot('linux', { XDG_DATA_HOME: '/custom/data' }, '/home/example'),

@@ -11,12 +11,24 @@ import { createHash, randomUUID } from 'node:crypto';
 export function defaultInstallationRoot(
 	platform = process.platform,
 	env = process.env,
-	home = homedir()
+	home = homedir(),
+	exists = existsSync
 ) {
 	if (platform === 'win32') {
-		if (!env.LOCALAPPDATA || !win32.isAbsolute(env.LOCALAPPDATA))
-			throw new Error('LOCALAPPDATA must identify an absolute per-user directory.');
-		return win32.join(env.LOCALAPPDATA, 'Saturday');
+		if (!env.USERPROFILE || !win32.isAbsolute(env.USERPROFILE))
+			throw new Error('USERPROFILE must identify an absolute per-user directory.');
+		const root = win32.join(env.USERPROFILE, 'Saturday');
+		const occupied = (dir) =>
+			['installation.json', 'data', 'app', 'install-publication.json'].some((name) =>
+				exists(win32.join(dir, name))
+			);
+		// Keep an existing workspace in place; new installs avoid virtualized LocalAppData.
+		if (occupied(root)) return root;
+		if (env.LOCALAPPDATA && win32.isAbsolute(env.LOCALAPPDATA)) {
+			const previous = win32.join(env.LOCALAPPDATA, 'Saturday');
+			if (occupied(previous)) return previous;
+		}
+		return root;
 	}
 	if (platform === 'darwin') return posix.join(home, 'Library', 'Application Support', 'Saturday');
 	if (platform === 'linux')
@@ -425,6 +437,7 @@ async function windowsShortcut(value, artifact, action, folder) {
 	const state = join(value.data_root, 'server.state');
 	await fs.mkdir(state, { recursive: true, mode: 0o700 });
 	const release = await acquireDirectoryLock(join(state, 'shortcut.lock'));
+	const response = join(state, `shortcut-result-${randomUUID()}.txt`);
 	try {
 		const launcher = join(state, folder === 'Desktop' ? 'open-saturday.js' : 'login-saturday.js');
 		const command = [value.node_path, ...artifact.args(folder === 'Desktop' ? 'open' : 'login')]
@@ -436,9 +449,9 @@ async function windowsShortcut(value, artifact, action, folder) {
 			artifact.marker
 		);
 		const helper = join(state, 'shortcut-helper.js');
-		const helperContent = `// ${artifact.marker}\nvar a=WScript.Arguments, s=new ActiveXObject("WScript.Shell"), f=new ActiveXObject("Scripting.FileSystemObject");\nvar p=s.SpecialFolders(a(1))+"\\\\"+a(2), target=s.ExpandEnvironmentStrings("%SystemRoot%\\\\System32\\\\wscript.exe"), args=${JSON.stringify(windowsArg(launcher))};\nif(f.FileExists(p)){var old=s.CreateShortcut(p);if(old.Description!==a(3)||old.TargetPath.toLowerCase()!==target.toLowerCase()||old.Arguments!==args){WScript.Echo("foreign");WScript.Quit(0);}}\nif(a(0)==="read"){WScript.Echo(f.FileExists(p)?"enabled":"disabled");}\nelse if(a(0)==="remove"){if(f.FileExists(p))f.DeleteFile(p);WScript.Echo("disabled");}\nelse {var l=s.CreateShortcut(p);l.TargetPath=target;l.Arguments=args;l.Description=a(3);l.WorkingDirectory=${JSON.stringify(value.code_root)};l.Save();WScript.Echo(p);}\n`;
+		const helperContent = `// ${artifact.marker}\nvar a=WScript.Arguments, s=new ActiveXObject("WScript.Shell"), f=new ActiveXObject("Scripting.FileSystemObject");\nfunction reply(value){var r=f.CreateTextFile(a(4),false,true);r.Write(value);r.Close();}\nvar p=s.SpecialFolders(a(1))+"\\\\"+a(2), target=s.ExpandEnvironmentStrings("%SystemRoot%\\\\System32\\\\wscript.exe"), args=${JSON.stringify(windowsArg(launcher))};\nif(f.FileExists(p)){var old=s.CreateShortcut(p);if(old.Description!==a(3)||old.TargetPath.toLowerCase()!==target.toLowerCase()||old.Arguments!==args){reply("foreign");WScript.Quit(0);}}\nif(a(0)==="read"){reply(f.FileExists(p)?"enabled":"disabled");}\nelse if(a(0)==="remove"){if(f.FileExists(p))f.DeleteFile(p);reply("disabled");}\nelse {var l=s.CreateShortcut(p);l.TargetPath=target;l.Arguments=args;l.Description=a(3);l.WorkingDirectory=${JSON.stringify(value.code_root)};l.Save();reply(p);}\n`;
 		await ownedText(helper, helperContent, artifact.marker);
-		const result = await native(
+		await native(
 			'cscript.exe',
 			[
 				'//Nologo',
@@ -447,15 +460,33 @@ async function windowsShortcut(value, artifact, action, folder) {
 				action,
 				folder,
 				folder === 'Desktop' ? artifact.desktop : artifact.login,
-				artifact.marker
+				artifact.marker,
+				response
 			],
 			'utf16le'
 		);
+		// Keep helper results independent of stdout so an empty capture cannot erase the saved path.
+		const result = (await fs.readFile(response, 'utf16le')).trim();
+		if (!result) throw new Error('Windows shortcut helper returned no result.');
 		if (result === 'foreign')
 			throw new Error('An unrelated shortcut occupies the path and was preserved.');
+		if (action === 'create') {
+			if (
+				!win32.isAbsolute(result) ||
+				win32.basename(result) !== (folder === 'Desktop' ? artifact.desktop : artifact.login)
+			)
+				throw new Error('Windows shortcut helper returned an invalid path.');
+			return win32.normalize(result);
+		}
+		if (!['enabled', 'disabled'].includes(result))
+			throw new Error('Windows shortcut helper returned an invalid status.');
 		return result;
 	} finally {
-		await release();
+		try {
+			await fs.rm(response, { force: true });
+		} finally {
+			await release();
+		}
 	}
 }
 export async function createDesktopShortcut({ desktop } = {}) {
