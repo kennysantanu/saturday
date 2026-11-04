@@ -1,7 +1,7 @@
 // Dependency-free bootstrap engine. Entry wrappers prepare a verified private Node runtime.
 import * as fs from 'node:fs/promises';
 import { existsSync, writeFileSync, lstatSync } from 'node:fs';
-import { join, resolve, dirname, relative, sep } from 'node:path';
+import { join, resolve, dirname, relative, sep, win32, posix, isAbsolute } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
@@ -15,6 +15,39 @@ export const runtimeHashes = {
 	'linux-x64': '6e1db87ef58b8819e5d5402eff1536491b18edd8eb7bee5ef7897876e88dc5ff',
 	'win32-x64': '158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541'
 };
+// Keep root selection aligned with installation.js; this downloaded bootstrap cannot import it.
+export function defaultInstallationRoot(
+	platform = process.platform,
+	env = process.env,
+	home = homedir(),
+	exists = existsSync
+) {
+	if (platform === 'win32') {
+		if (!env.USERPROFILE || !win32.isAbsolute(env.USERPROFILE))
+			throw new Error('USERPROFILE must identify an absolute per-user directory.');
+		const root = win32.join(env.USERPROFILE, 'Saturday');
+		const occupied = (dir) =>
+			['installation.json', 'data', 'app', 'install-publication.json'].some((name) =>
+				exists(win32.join(dir, name))
+			);
+		// Keep an existing workspace in place; new installs avoid virtualized LocalAppData.
+		if (occupied(root)) return root;
+		if (env.LOCALAPPDATA && win32.isAbsolute(env.LOCALAPPDATA)) {
+			const previous = win32.join(env.LOCALAPPDATA, 'Saturday');
+			if (occupied(previous)) return previous;
+		}
+		return root;
+	}
+	if (platform === 'darwin') return posix.join(home, 'Library', 'Application Support', 'Saturday');
+	if (platform === 'linux')
+		return posix.join(
+			env.XDG_DATA_HOME && posix.isAbsolute(env.XDG_DATA_HOME)
+				? env.XDG_DATA_HOME
+				: posix.join(home, '.local', 'share'),
+			'saturday'
+		);
+	throw new Error('Saturday installation supports macOS, Windows and Linux.');
+}
 let logPath,
 	logText = '';
 const output = (chunk) => {
@@ -306,18 +339,7 @@ export async function install(values, services = {}) {
 		throw new Error('This OS/CPU is outside the initial installation matrix. See README.');
 	if (process.versions.node.split('.')[0] < 24)
 		throw new Error('Use the pinned private Node runtime from install.sh or install.bat.');
-	const root = values.root
-		? resolve(values.root)
-		: process.platform === 'darwin'
-			? join(homedir(), 'Library', 'Application Support', 'Saturday')
-			: process.platform === 'win32'
-				? join(process.env.LOCALAPPDATA || '', 'Saturday')
-				: join(
-						process.env.XDG_DATA_HOME && process.env.XDG_DATA_HOME.startsWith('/')
-							? process.env.XDG_DATA_HOME
-							: join(homedir(), '.local', 'share'),
-						'saturday'
-					);
+	const root = values.root ? resolve(values.root) : defaultInstallationRoot();
 	if (/[\r\n\0]/.test(root)) throw new Error('Installation paths cannot contain line breaks.');
 	await fs.mkdir(root, { recursive: true, mode: 0o700 });
 	if ((await fs.lstat(root)).isSymbolicLink())
@@ -421,6 +443,13 @@ export async function install(values, services = {}) {
 				'Data exists without an installation descriptor. Inspect/recover it before installing; no replacement workspace was created.'
 			);
 		if (!config) {
+			if (values.source) {
+				const insideSource = relative(resolve(values.source), root);
+				if (!isAbsolute(insideSource) && insideSource.split(sep)[0] !== '..')
+					throw new Error(
+						'Choose SATURDAY_INSTALL_ROOT outside the source checkout for a managed install, or use npm run setup for source development. Existing files were preserved.'
+					);
+			}
 			stage = await fs.mkdtemp(join(root, 'install-stage-'));
 			say('Preparing an exact Saturday source snapshot…');
 			let selected = values.source
