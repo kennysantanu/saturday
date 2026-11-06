@@ -47,7 +47,7 @@
 			>
 		</p>
 		<p class="mt-1 text-sm text-muted-foreground">{company}</p>
-		<TagList {tags} />
+		<TagList {tags} wideLimit={3} />
 	</div>
 	<div class="list-row-status">
 		<StatusBadge {status} />

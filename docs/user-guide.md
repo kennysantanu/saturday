@@ -86,11 +86,11 @@ Reminder and Network interaction dialogs, plus **Edit link note** on either side
 
 ## Tags
 
-Job tags and People tags are separate collections. Add tags while creating/editing a record, or choose **Edit tags** below its detail header. Search existing tags, select several, and save. Removing a selected chip removes only that assignment. Linking a person to a job keeps their tags independent.
+Job tags and People tags are separate collections. Add tags while creating/editing a record, or choose **Edit tags** below its detail header. Every tag appears as one chip you can switch on or off: selected tags are tinted with a check mark. With more than a dozen tags a search box appears and filters as you type; if nothing matches, choose **Create “name”** to make it. Unchecking a tag removes only that assignment. Linking a person to a job keeps their tags independent.
 
 Names use letters and numbers with spaces between words. `Career faIR` is saved as `career_fair` and displayed as **career fair**. Underscores pasted into a name/search are treated as spaces. Names are limited to 50 characters after normalization; punctuation and non-ASCII letters are not supported. Names must be unique within their collection. Search ignores capitalization and treats spaces/underscores equally.
 
-Choose a custom color using the browser's native color picker or enter a six-digit hex value such as `#12abcd`. Saturday chooses readable text automatically. Tags sort alphabetically; selected tags appear first in pickers. Record lists show two tags and a count for the rest; open detail to see all. Dashboard pipeline cards remain compact.
+Pick a tag color from the ten swatches, or choose a custom color with the browser's color picker or a six-digit hex value such as `#12abcd`. Tags show the color as a soft tint with a dot, and the text stays easy to read on any color. Tags sort alphabetically; selected tags appear first in pickers. Record lists show two tags (three on wide screens) and a +N chip for the rest, whose tooltip names them; open detail to see all. Dashboard pipeline cards remain compact.
 
 **Create a tag** inside a picker immediately saves its reusable name/color. The surrounding job/person is saved only when you submit its own form. Cancelling the editor leaves the new tag available. For a duplicate name, choose **Use existing tag**; its saved color is preserved. Without JavaScript, ordinary form submission supports the choices already shown; enhanced search, paging and inline creation require JavaScript.
 

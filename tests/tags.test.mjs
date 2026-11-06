@@ -16,7 +16,7 @@ import {
 } from '../src/lib/server/local/people.js';
 import * as tags from '../src/lib/server/local/tags.js';
 import * as backups from '../src/lib/server/backups.js';
-import { normalizeTagName, displayTagName, tagTextColor } from '../src/lib/tags.js';
+import { normalizeTagName, displayTagName, tagPalette, tagColorPattern } from '../src/lib/tags.js';
 let scratch;
 const saved = {
 	SATURDAY_DB_PATH: process.env.SATURDAY_DB_PATH,
@@ -85,8 +85,6 @@ test('canonical names, derived labels, colors and duplicate recovery stay scoped
 	assert.equal(displayTagName('x_y'), 'x y');
 	for (const color of ['red', '#abc', '#12345678', 'rgb(0,0,0)'])
 		assert.throws(() => make('job', 'invalid', color));
-	assert.equal(tagTextColor('#000000'), '#ffffff');
-	assert.equal(tagTextColor('#ffffff'), '#000000');
 });
 test('tag search treats separators literally, paginates and rejects unsupported queries without broadening', () => {
 	make('job');
@@ -390,4 +388,10 @@ test('built MCP supports scoped tags, normalized names, parent assignments and c
 		child.kill();
 		await new Promise((resolve) => child.once('exit', resolve));
 	}
+});
+
+test('the tag palette offers distinct valid colors starting with the default', () => {
+	assert.equal(tagPalette[0].color, '#64748b');
+	assert.equal(new Set(tagPalette.map((swatch) => swatch.color)).size, tagPalette.length);
+	for (const swatch of tagPalette) assert.match(swatch.color, tagColorPattern);
 });
