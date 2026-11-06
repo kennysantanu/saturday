@@ -1,15 +1,16 @@
 <script lang="ts">
 	import { setTheme, theme } from '$lib/theme.svelte';
-	import SectionCard from './section-card.svelte';
 	import Field from './field.svelte';
 	import NativeSelect from './native-select.svelte';
 </script>
 
-<SectionCard
-	id="appearance"
-	title="Appearance"
-	description="Choose how Saturday looks in this browser. Changes apply immediately."
->
+<section id="appearance" class="settings-subsection space-y-4" aria-labelledby="appearance-heading">
+	<div class="space-y-1">
+		<h3 id="appearance-heading" class="text-sm font-semibold">Appearance</h3>
+		<p class="text-sm text-muted-foreground">
+			Choose how Saturday looks in this browser. Changes apply immediately.
+		</p>
+	</div>
 	<Field id="theme" label="Theme" hint="System follows this device’s light or dark appearance.">
 		{#snippet control(attrs)}
 			<NativeSelect
@@ -34,4 +35,4 @@
 			Enable JavaScript to choose a theme. Saturday follows your system theme.
 		</p></noscript
 	>
-</SectionCard>
+</section>

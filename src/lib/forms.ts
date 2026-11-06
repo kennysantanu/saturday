@@ -59,3 +59,38 @@ export const enhanceWithFocus: SubmitFunction = withPending(() => async ({ updat
 	await tick();
 	focusFirstError();
 });
+
+/**
+ * Svelte action for settings forms that save with a button: reports whether any field differs from
+ * its value when the form was last saved, so the button can stay disabled until there is
+ * something to save. Pass a `key` that changes when saved data reloads to reset the baseline.
+ * Without JavaScript the action never runs, so the button stays enabled.
+ */
+export function trackChanges(
+	form: HTMLFormElement,
+	options: { set: (dirty: boolean) => void; key?: unknown }
+) {
+	let { set } = options;
+	const snapshot = () =>
+		JSON.stringify([...new FormData(form)].filter(([, value]) => typeof value === 'string'));
+	let baseline = snapshot();
+	const sync = () => set(snapshot() !== baseline);
+	set(false);
+	form.addEventListener('input', sync);
+	form.addEventListener('change', sync);
+	form.addEventListener('reset', () => setTimeout(sync));
+	return {
+		update(next: { set: (dirty: boolean) => void; key?: unknown }) {
+			set = next.set;
+			// Saved data has reloaded: what the form shows now is the new baseline.
+			void tick().then(() => {
+				baseline = snapshot();
+				set(false);
+			});
+		},
+		destroy() {
+			form.removeEventListener('input', sync);
+			form.removeEventListener('change', sync);
+		}
+	};
+}

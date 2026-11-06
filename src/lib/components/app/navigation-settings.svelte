@@ -3,7 +3,6 @@
 	import { withPending, focusFirstError } from '$lib/forms';
 	import { tick } from 'svelte';
 	import { waitForRecentViews } from '$lib/recents';
-	import SectionCard from './section-card.svelte';
 	import Field from './field.svelte';
 	import NativeSelect from './native-select.svelte';
 	import Checkbox from './checkbox.svelte';
@@ -21,12 +20,13 @@
 	} = $props();
 </script>
 
-<SectionCard
-	id="navigation"
-	title="Navigation"
-	description="Recently viewed is shared across devices accessing this Saturday workspace."
->
-	<h3 class="text-sm font-medium">Recently viewed</h3>
+<section id="navigation" class="settings-subsection space-y-4" aria-labelledby="navigation-heading">
+	<div class="space-y-1">
+		<h3 id="navigation-heading" class="text-sm font-semibold">Recently viewed</h3>
+		<p class="text-sm text-muted-foreground">
+			Shared across devices accessing this Saturday workspace. Changes save as you make them.
+		</p>
+	</div>
 	{#if !settings}<Notice tone="error"
 			>Navigation settings are unavailable. Repair storage before changing recently viewed.</Notice
 		>{/if}
@@ -39,11 +39,12 @@
 			use:enhance={withPending(async () => {
 				await waitForRecentViews();
 				return async ({ update }) => {
-					await update();
+					await update({ reset: false });
 					await tick();
 					focusFirstError();
 				};
 			})}
+			onchange={(event) => event.currentTarget.requestSubmit()}
 			class="space-y-4"
 		>
 			<Checkbox
@@ -66,9 +67,12 @@
 					</NativeSelect>
 				{/snippet}
 			</Field>
-			<Button type="submit">Save navigation settings</Button>
+			<noscript><Button type="submit">Save recently viewed settings</Button></noscript>
 		</form>
-		<div class="space-y-2 border-t pt-4">
+		<div class="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+			<p class="min-w-0 flex-1 text-sm text-muted-foreground">
+				Clears both lists across devices. Jobs and people are kept.
+			</p>
 			<form
 				method="POST"
 				action="?/navigation"
@@ -84,9 +88,6 @@
 				<input type="hidden" name="kind" value="clear" />
 				<Button type="submit" variant="outline">Clear recently viewed</Button>
 			</form>
-			<p class="text-sm text-muted-foreground">
-				Clears both lists across devices. Jobs and people are kept.
-			</p>
 		</div>
 	{/if}
-</SectionCard>
+</section>

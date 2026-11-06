@@ -118,6 +118,7 @@ test('browser password controls, responsive sign-in and expired-write draft pres
 			}
 		}
 		await page.goto(base + '/settings#password', { waitUntil: 'networkidle0' });
+		await page.click('details:has(#enable-password) > summary');
 		await page.type('#enable-password', password);
 		await page.type('#enable-confirm', password);
 		await page.click('form[action="?/password"] button[type="submit"]');
@@ -136,6 +137,7 @@ test('browser password controls, responsive sign-in and expired-write draft pres
 		await page.waitForSelector('#enable-password');
 		assert.equal(JSON.parse(await readFile(join(root, 'access.json'))).password, null);
 		assert.equal(await page.$('#logout-all'), null);
+		await page.click('details:has(#enable-password) > summary');
 		await page.type('#enable-password', password);
 		await page.type('#enable-confirm', password);
 		await page.click('form[action="?/password"] button[type="submit"]');

@@ -796,7 +796,7 @@ test('production stage/history actions, result round trips and read-only overvie
 		);
 		assert.equal(getJob(job.id).updates.length, beforeRetry + 1);
 		await page.goto(base + '/settings#workflow', { waitUntil: 'networkidle0' });
-		await page.click(`#workflow-stage-${custom.id} summary`);
+		await page.click(`#workflow-stage-${custom.id} a[href*="edit_stage"]`);
 		await page.locator(`#workflow-name-${custom.id}`).fill('Conversation again');
 		await page.click(
 			`#workflow-stage-${custom.id} form:has(input[value="rename"]) button[type="submit"]`

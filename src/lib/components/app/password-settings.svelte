@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { enhanceWithFocus } from '$lib/forms';
+	import { tick } from 'svelte';
+	import { enhanceWithFocus, focusFirstError, trackChanges, withPending } from '$lib/forms';
 	import SectionCard from './section-card.svelte';
 	import Field from './field.svelte';
 	import Notice from './notice.svelte';
@@ -10,6 +11,7 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	let { access, error, setupRequired = false, lanActive = false } = $props();
 	let noExpiration = $state(false);
+	let dirty = $state<boolean | null>(null);
 	let logoutAll = $state(false),
 		disablePassword = $state(false);
 	$effect(() => {
@@ -42,36 +44,56 @@
 
 <SectionCard
 	id="password"
-	title="Password login"
+	title="Password"
 	description="Optional password protection for this installation’s browser UI."
 >
 	{#if error}<Notice tone="error" title="Sign-in setting was not saved">{error}</Notice>{/if}
-	{#if setupRequired}
-		<Notice title="Finish Saturday setup">
-			Reload Settings after setup to enable password login. Setup preserves existing records and
-			files.
-		</Notice>
-	{/if}
+	<div class="status-row">
+		<p class="status-label">Browser password</p>
+		<p class="status-value" role="status">
+			<strong class="text-foreground">{access.password_enabled ? 'On' : 'Off'}</strong>
+		</p>
+	</div>
 	<p class="text-sm text-muted-foreground">
-		Password login is {access.password_enabled ? 'enabled' : 'off'}. Your local assistant connection
-		works independently.
+		Your local assistant connection works independently of the browser password.
 	</p>
 	{#if !access.local}<p class="text-sm text-muted-foreground">
 			Change sign-in settings from Open Saturday on the host computer.
 		</p>{/if}
 	{#if !access.password_enabled}
-		<form method="POST" action="?/password" use:enhance={enhanceWithFocus} class="space-y-4">
-			<input type="hidden" name="operation" value="enable" />
-			<p class="required-note">* Required</p>
-			{@render newPasswordFields('enable')}
-			<div class="form-actions">
-				<Button type="submit" disabled={!access.local || setupRequired}
-					>Enable password login</Button
+		{#if access.local && !setupRequired}
+			<details class="disclosure disclosure-quiet">
+				<summary>Set a password</summary>
+				<form
+					method="POST"
+					action="?/password"
+					use:enhance={enhanceWithFocus}
+					class="disclosure-body space-y-4"
 				>
-			</div>
-		</form>
+					<input type="hidden" name="operation" value="enable" />
+					<p class="required-note">* Required</p>
+					{@render newPasswordFields('enable')}
+					<div class="form-actions">
+						<Button type="submit">Enable password login</Button>
+					</div>
+				</form>
+			</details>
+		{/if}
 	{:else if access.authenticated}
-		<form method="POST" action="?/password" use:enhance={enhanceWithFocus} class="space-y-4">
+		<form
+			method="POST"
+			action="?/password"
+			use:enhance={withPending(() => async ({ update }) => {
+				await update({ reset: false });
+				await tick();
+				focusFirstError();
+			})}
+			use:trackChanges={{
+				set: (value) => (dirty = value),
+				key: [access.idle_timeout_seconds, access.password_enabled]
+			}}
+			class="space-y-4"
+		>
 			<input type="hidden" name="operation" value="timeout" />
 			<Field
 				id="idle-hours"
@@ -103,12 +125,12 @@
 				signed in; a new login at that limit signs out the oldest.
 			</p>
 			<div class="form-actions">
-				<Button type="submit" variant="outline" disabled={!access.local}
+				<Button type="submit" variant="outline" disabled={!access.local || dirty === false}
 					>Save inactivity setting</Button
 				>
 			</div>
 		</form>
-		<details class="disclosure">
+		<details class="disclosure disclosure-quiet">
 			<summary>Change password</summary>
 			<form
 				method="POST"
@@ -135,7 +157,7 @@
 				</div>
 			</form>
 		</details>
-		<details class="disclosure">
+		<details class="disclosure disclosure-quiet">
 			<summary>Disable password login</summary>
 			<form
 				id="disable-password"

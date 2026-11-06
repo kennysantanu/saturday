@@ -225,26 +225,25 @@ test('page-specific Recent buttons precede Add actions without tabs and preserve
 				document.getAnimations().map((animation) => animation.finished.catch(() => {}))
 			);
 		});
-		await phone.select('#recent-limit', '5');
+		// Changes save as they are made; there is no Save button.
 		await Promise.all([
 			phone.waitForResponse(
 				(response) =>
 					response.url().includes('?/navigation') && response.request().method() === 'POST'
 			),
-			phone.click('#navigation button[type="submit"]')
+			phone.select('#recent-limit', '5')
 		]);
 		await phone.waitForNetworkIdle();
 		await phone.waitForFunction(() =>
 			document.querySelector('#navigation [role="status"]')?.textContent.includes('saved')
 		);
 		assert.equal((await app.getNavigationSettings()).limit, 5);
-		await phone.click('#navigation input[name="enabled"]');
 		await Promise.all([
 			phone.waitForResponse(
 				(response) =>
 					response.url().includes('?/navigation') && response.request().method() === 'POST'
 			),
-			phone.click('#navigation button[type="submit"]')
+			phone.click('#navigation input[name="enabled"]')
 		]);
 		await phone.waitForNetworkIdle();
 		assert.equal((await app.getNavigationSettings()).enabled, false);
@@ -253,13 +252,12 @@ test('page-specific Recent buttons precede Add actions without tabs and preserve
 		await phone.goto(base + `/jobs/${b.id}`, { waitUntil: 'networkidle0' });
 		assert.equal((await app.listRecentViews()).jobs.length, 0);
 		await phone.goto(base + '/settings#navigation', { waitUntil: 'networkidle0' });
-		await phone.click('#navigation input[name="enabled"]');
 		await Promise.all([
 			phone.waitForResponse(
 				(response) =>
 					response.url().includes('?/navigation') && response.request().method() === 'POST'
 			),
-			phone.click('#navigation button[type="submit"]')
+			phone.click('#navigation input[name="enabled"]')
 		]);
 		await phone.waitForNetworkIdle();
 		assert.equal((await app.getNavigationSettings()).enabled, true);
