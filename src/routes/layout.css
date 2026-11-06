@@ -1055,6 +1055,8 @@ details[open] > summary > .collapse-label {
 	width: 100%;
 	height: 100%;
 	margin: 0;
+	appearance: none;
+	-webkit-appearance: none;
 	opacity: 0;
 	cursor: pointer;
 }
@@ -1086,23 +1088,47 @@ details[open] > summary > .collapse-label {
 	}
 }
 @media (forced-colors: active) {
+	/* Forced colors paint a Canvas backplate behind text, so keep text CanvasText and mark the
+	   selection with a thicker Highlight border plus the check mark. */
 	.choice-pills .check-field:has(input:checked) {
-		border-width: 2px;
-		background: Highlight;
-		color: HighlightText;
+		border: 2px solid Highlight;
+		background: Canvas;
+		color: CanvasText;
 	}
 }
 
 /* ---- Filter toolbar (FilterBar) ---- */
-/* Primary row: search and the Filters toggle share the first line on narrow screens. */
+/* Primary row. DOM order is search, two quick controls, toggle, matching the focus order. */
 .filter-row {
 	display: grid;
 	align-items: end;
 	gap: 16px;
-	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+	/* Sort (the longer labels) gets the wider column so "Recently updated" is not cut off. */
+	grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
 	grid-template-areas:
-		'search search toggle'
-		'one two two';
+		'search search'
+		'one two'
+		'toggle toggle';
+}
+.filter-row-toggle .filter-toggle {
+	width: 100%;
+}
+@media (width < 24rem) {
+	.filter-row {
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-areas: 'search' 'one' 'two' 'toggle';
+	}
+}
+@media (width >= 40rem) {
+	.filter-row {
+		grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) auto;
+		grid-template-areas:
+			'search search search'
+			'one two toggle';
+	}
+	.filter-row-toggle .filter-toggle {
+		width: auto;
+	}
 }
 .filter-row-search {
 	grid-area: search;
@@ -1168,21 +1194,6 @@ details[open] > summary > .collapse-label {
 .filter-toggle[aria-expanded='true'] .filter-toggle-chevron {
 	rotate: 180deg;
 }
-@media (width < 40rem) {
-	.filter-toggle {
-		position: relative;
-		padding: 0;
-	}
-	/* The badge floats over the icon so the button stays 44px wide. */
-	.filter-toggle .filter-badge {
-		position: absolute;
-		top: -6px;
-		right: -6px;
-		min-width: 22px;
-		height: 22px;
-		padding-inline: 5px;
-	}
-}
 .filter-badge {
 	display: inline-grid;
 	place-items: center;
@@ -1195,8 +1206,10 @@ details[open] > summary > .collapse-label {
 	font-size: 0.8125rem;
 	font-weight: 600;
 }
-.filter-panel[hidden],
-.filter-footer[hidden] {
+/* A class, not the hidden attribute: Tailwind's preflight hides [hidden] with !important in a
+   layer, which a no-JavaScript override could not beat. */
+.filter-panel.is-collapsed,
+.filter-footer.is-collapsed {
 	display: none;
 }
 .filter-panel {
@@ -1210,6 +1223,16 @@ details[open] > summary > .collapse-label {
 .filter-panel > section + section {
 	padding-top: 24px;
 	border-top: 1px solid var(--border);
+}
+.filter-inline {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: 12px;
+}
+.filter-inline-fields {
+	flex: 1 1 16rem;
+	min-width: 0;
 }
 .filter-chips-row {
 	padding: 16px 24px 0;
@@ -1275,7 +1298,7 @@ details[open] > summary > .collapse-label {
 		flex: 1;
 	}
 	/* While the tall panel is open, keep the count and Apply within reach above the tab bar. */
-	.filter-card:has(.filter-panel:not([hidden])) .filter-footer {
+	.filter-card:has(.filter-panel:not(.is-collapsed)) .filter-footer {
 		position: sticky;
 		bottom: calc(var(--tabbar-h) + max(12px, env(safe-area-inset-bottom)) + 12px);
 		z-index: 5;

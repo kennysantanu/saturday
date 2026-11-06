@@ -5,10 +5,10 @@
 	import { filterBarKey, type FilterBarContext } from './filter-bar-context';
 
 	/**
-	 * The button that opens a FilterBar's advanced panel. Place it inside the primary row (as the
-	 * last cell) so it shares a line with the controls. Below 40rem it shrinks to an icon with a
-	 * count badge; the label stays available to assistive technology. Without scripts it is hidden
-	 * and the panel is always shown.
+	 * The button that opens a FilterBar's advanced panel. Put it last in the primary row (inside
+	 * `.filter-row-toggle`) so tab order matches the visual order: it spans its own row on a phone,
+	 * sits beside the selects on a tablet and ends the row on a desktop. Without scripts it is
+	 * hidden and the panel is always shown.
 	 */
 	const bar = getContext<FilterBarContext>(filterBarKey);
 </script>
@@ -20,8 +20,7 @@
 	aria-controls={bar.panelId}
 	onclick={bar.toggle}
 >
-	<SlidersHorizontal class="size-4" aria-hidden="true" /><span class="max-sm:sr-only"
-		>{bar.label}</span
+	<SlidersHorizontal class="size-4" aria-hidden="true" /><span>{bar.label}</span
 	>{#if bar.count}<span class="filter-badge">{bar.count}<span class="sr-only"> applied</span></span
-		>{/if}<ChevronDown class="filter-toggle-chevron size-4 max-sm:hidden" aria-hidden="true" />
+		>{/if}<ChevronDown class="filter-toggle-chevron size-4" aria-hidden="true" />
 </button>

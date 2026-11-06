@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { stageJobsUrl } from '$lib/job-search.js';
 	import RecordTags from '$lib/components/app/record-tags.svelte';
 	import RemindersSection from '$lib/components/app/reminders-section.svelte';
 	import RecordDeleteAction from '$lib/components/app/record-delete-action.svelte';
@@ -252,7 +253,7 @@
 		{#if data.outsideResults}<Notice title="This job is outside the original results"
 				>Its current details no longer match those filters. <a
 					class="link"
-					href={'/jobs?view=all&current_stage=' + job.currentStageId}>View current-stage jobs</a
+					href={stageJobsUrl(job.currentStageId)}>View current-stage jobs</a
 				>, or return using the original results link.</Notice
 			>{/if}
 		{#if pageError}

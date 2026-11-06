@@ -13,7 +13,7 @@
 	import FilterBar from './filter-bar.svelte';
 	import SearchField from './search-field.svelte';
 	import SearchEmpty from './search-empty.svelte';
-	import { filterLabels, resultCount } from '$lib/filter-labels.js';
+	import { filterLabels, resultCount, noMatchHint } from '$lib/filter-labels.js';
 	import Field from './field.svelte';
 	import Pagination from './pagination.svelte';
 	import RadioOption from './radio-option.svelte';
@@ -283,7 +283,7 @@
 			<EmptyState
 				title={data.query ? 'No matching documents' : 'No documents yet'}
 				description={data.query
-					? 'Try a different search, or clear it to see every document.'
+					? noMatchHint.search
 					: 'Upload a file or create a Markdown document.'}
 			>
 				{#snippet icon()}<FileText class="size-5" />{/snippet}

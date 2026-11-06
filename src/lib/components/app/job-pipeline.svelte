@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { stageJobsUrl } from '$lib/job-search.js';
 	import { afterNavigate } from '$app/navigation';
 	import { navigating } from '$app/state';
 	import { onMount, tick } from 'svelte';
@@ -310,7 +311,7 @@
 								: 'pipeline-heading text-base font-semibold'}
 						>
 							<a
-								href={`/jobs?view=all&current_stage=${column.id}`}
+								href={stageJobsUrl(column.id)}
 								class="link"
 								title={column.name}
 								aria-describedby={preview ? undefined : 'pipeline-instructions'}>{column.name}</a

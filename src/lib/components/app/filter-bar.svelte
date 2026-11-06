@@ -144,11 +144,10 @@
 <svelte:head>
 	<noscript
 		><style>
-			.filter-panel[hidden],
-			.filter-footer[hidden] {
+			.filter-panel.is-collapsed {
 				display: grid !important;
 			}
-			.filter-footer[hidden] {
+			.filter-footer.is-collapsed {
 				display: flex !important;
 			}
 			.filter-toggle {
@@ -157,6 +156,13 @@
 		</style></noscript
 	>
 </svelte:head>
+
+{#snippet actions()}
+	<div class="form-actions">
+		{#if showClear && clearHref}<Button href={clearHref} variant="ghost">{clearLabel}</Button>{/if}
+		<Button type="submit" variant="outline">{applyLabel}</Button>
+	</div>
+{/snippet}
 
 <form
 	method="GET"
@@ -170,21 +176,25 @@
 	{@render before?.()}
 	<Card.Root class="filter-card gap-0 overflow-visible py-0">
 		<Card.Content class="space-y-4 py-5">
-			<div class="filter-primary">{@render children()}</div>
 			{#if advanced}
-				<div id={panelId} class="filter-panel" hidden={!open}>{@render advanced()}</div>
+				<div class="filter-primary">{@render children()}</div>
+				<div id={panelId} class="filter-panel" class:is-collapsed={!open}>{@render advanced()}</div>
+			{:else}
+				<!-- A single field: the buttons sit beside it instead of in a footer of their own. -->
+				<div class="filter-primary filter-inline">
+					<div class="filter-inline-fields">{@render children()}</div>
+					{@render actions()}
+				</div>
 			{/if}
 		</Card.Content>
 		{#if chips.length}<div class="filter-chips-row"><FilterChips {chips} /></div>{/if}
-		<div class="filter-footer" hidden={!showFooter}>
-			{#if pending}<p class="meta-text text-muted-foreground" role="status">
-					Changes not applied yet
-				</p>{/if}
-			<div class="form-actions">
-				{#if showClear && clearHref}<Button href={clearHref} variant="ghost">{clearLabel}</Button
-					>{/if}
-				<Button type="submit" variant="outline">{applyLabel}</Button>
+		{#if advanced}
+			<div class="filter-footer" class:is-collapsed={!showFooter}>
+				{#if pending}<p class="meta-text text-muted-foreground" role="status">
+						Changes not applied yet
+					</p>{/if}
+				{@render actions()}
 			</div>
-		</div>
+		{/if}
 	</Card.Root>
 </form>

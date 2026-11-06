@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { allJobsUrl, milestoneJobsUrl } from '$lib/job-search.js';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Briefcase from '@lucide/svelte/icons/briefcase';
 	import Bell from '@lucide/svelte/icons/bell';
@@ -76,7 +77,7 @@
 						Where each job is now, most recently updated first.
 					</p>
 				</div>
-				<a href="/jobs?view=all" class="link text-sm">View all jobs</a>
+				<a href={allJobsUrl()} class="link text-sm">View all jobs</a>
 			</div>
 			{#if data.errors.pipeline}
 				<Notice tone="error" title="Job pipeline unavailable">{data.errors.pipeline}</Notice>
@@ -192,7 +193,7 @@
 				{:else}
 					<div class="milestone-counts">
 						{#each history as stage (stage.id)}
-							<a href="/jobs?view=all&milestone_stage={stage.id}" class="milestone-count"
+							<a href={milestoneJobsUrl(stage.id)} class="milestone-count"
 								><span
 									>{stage.name}{#if stage.is_closed}<span
 											class="meta-text ml-2 text-muted-foreground">Closed</span
@@ -206,7 +207,7 @@
 							<summary>Archived milestones</summary>
 							<div class="disclosure-body milestone-counts">
 								{#each archivedHistory as stage (stage.id)}
-									<a href="/jobs?view=all&milestone_stage={stage.id}" class="milestone-count"
+									<a href={milestoneJobsUrl(stage.id)} class="milestone-count"
 										><span
 											>{stage.name}
 											<span class="meta-text text-muted-foreground">Archived</span></span

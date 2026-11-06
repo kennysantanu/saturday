@@ -26,10 +26,11 @@
 		sortOptions,
 		statusValue,
 		applyStatus,
-		searchUrl
+		searchUrl,
+		allJobsUrl
 	} from '$lib/job-search.js';
 	import { jobDetailUrl } from '$lib/job-navigation.js';
-	import { readableKey, resultCount, reminderLabel } from '$lib/filter-labels.js';
+	import { readableKey, resultCount, reminderLabel, noMatchHint } from '$lib/filter-labels.js';
 	import SearchField from '$lib/components/app/search-field.svelte';
 	import { page } from '$app/state';
 	import { focusFirstError } from '$lib/forms';
@@ -360,15 +361,16 @@
 							<Field id={group.key} label={group.label} error={errors[group.key]}>
 								{#snippet control(attrs)}
 									<NativeSelect {...attrs} name={group.key} bind:value={values[group.key]}>
-										<option value="any">Any</option><option value="unset"
+										<option value="any">{reminderLabel('any')}</option><option value="unset"
 											>{group.key === 'follow_up'
 												? reminderLabel('unset')
 												: 'Not specified'}</option
 										><option value="set"
 											>{group.key === 'follow_up' ? 'Scheduled' : 'Specified'}</option
-										><option value="overdue">Overdue</option><option value="today">Today</option
-										><option value="upcoming">Upcoming</option><option value="range"
-											>Date range</option
+										><option value="overdue">{reminderLabel('overdue')}</option><option
+											value="today">{reminderLabel('today')}</option
+										><option value="upcoming">{reminderLabel('upcoming')}</option><option
+											value="range">{reminderLabel('range')}</option
 										>
 									</NativeSelect>
 								{/snippet}
@@ -486,7 +488,7 @@
 					description={data.totalJobs === 0
 						? 'Add a job to start tracking it. Only a title and company are needed.'
 						: data.chips.length
-							? 'Try fewer filters or clear them to see active jobs.'
+							? noMatchHint.filters
 							: 'View all jobs to review closed opportunities.'}
 				>
 					{#snippet icon()}<Briefcase class="size-5" />{/snippet}
@@ -495,7 +497,7 @@
 									encodeURIComponent(page.url.pathname + page.url.search)}
 								size="lg"><Plus data-icon="inline-start" />Add job</Button
 							>{:else}<Button
-								href={data.chips.length ? '/jobs' : '/jobs?view=all'}
+								href={data.chips.length ? '/jobs' : allJobsUrl()}
 								variant="outline"
 								size="lg">{data.chips.length ? 'Clear filters' : 'Show all jobs'}</Button
 							>{/if}{/snippet}
