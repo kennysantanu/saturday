@@ -1,4 +1,4 @@
-import { documentDesignations } from '../../file-types.js';
+import { documentDesignations, documentKinds, documentSorts } from '../../file-types.js';
 import { fail, redirect, error } from '@sveltejs/kit';
 import * as documents from '../application.js';
 import { generateDocumentPdf } from '../application.js';
@@ -13,9 +13,17 @@ function fileFailure(e, values = {}) {
 }
 export async function listLoad(event) {
 	const scope = pageScope(event);
+	const param = (name) => event.url.searchParams.get(name) ?? '';
+	// Unknown values (an old bookmark) fall back to "any type" and the default order.
+	const type = documentKinds.some((kind) => kind.value === param('type')) ? param('type') : '';
+	const sort = documentSorts.some((option) => option.value === param('sort'))
+		? param('sort')
+		: 'name';
 	try {
 		const result = await documents.listDocuments({
 			scope,
+			type,
+			sort,
 			query: event.url.searchParams.get('query') ?? '',
 			page: Number(event.url.searchParams.get('page') || 1)
 		});
@@ -24,6 +32,8 @@ export async function listLoad(event) {
 			scope,
 			base: listUrl(scope),
 			query: event.url.searchParams.get('query') ?? '',
+			type,
+			sort,
 			fileError: null
 		};
 	} catch (e) {
@@ -37,6 +47,8 @@ export async function listLoad(event) {
 			base: listUrl(scope),
 			catalog_token: '',
 			query: '',
+			type: '',
+			sort: 'name',
 			fileError: e.code ? e.message : 'File store is unavailable.'
 		};
 	}

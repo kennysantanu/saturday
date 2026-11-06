@@ -521,7 +521,7 @@ test('built MCP exposes career/document tools and complete backup/restore workfl
 		])
 			assert.ok(listing.tools.some((t) => t.name === name));
 		for (const [name, fields] of [
-			['list_documents', ['scope', 'query', 'page', 'limit', 'catalog_token']],
+			['list_documents', ['scope', 'query', 'type', 'sort', 'page', 'limit', 'catalog_token']],
 			['create_document', ['scope', 'filename', 'content']],
 			['edit_document', ['id', 'scope', 'token', 'filename', 'content']]
 		])

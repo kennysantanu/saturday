@@ -172,7 +172,7 @@ The local MCP process shares `SATURDAY_FILES_PATH` with the app. Recopy Settings
 
 | Tool                                                 | Use                                                            |
 | ---------------------------------------------------- | -------------------------------------------------------------- |
-| `list_documents`                                     | Filename search, pagination and explicit scope                 |
+| `list_documents`                                     | Filename search, type filter, sort, paging and explicit scope  |
 | `get_document`                                       | Metadata or complete bounded text; ID or a Profile designation |
 | `create_document`                                    | Create Markdown/HTML/TXT source                                |
 | `edit_document`                                      | Full text replacement or filename changes                      |
