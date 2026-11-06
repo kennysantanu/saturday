@@ -9,14 +9,15 @@
 	import PageHeader from '$lib/components/app/page-header.svelte';
 	import SectionCard from '$lib/components/app/section-card.svelte';
 	import Notice from '$lib/components/app/notice.svelte';
-	import Field from '$lib/components/app/field.svelte';
 	import FilterBar from '$lib/components/app/filter-bar.svelte';
+	import SearchField from '$lib/components/app/search-field.svelte';
+	import SearchEmpty from '$lib/components/app/search-empty.svelte';
+	import { filterLabels } from '$lib/filter-labels.js';
 	import Pagination from '$lib/components/app/pagination.svelte';
 	import RadioOption from '$lib/components/app/radio-option.svelte';
 	import ActionMenu from '$lib/components/app/action-menu.svelte';
 	import ConfirmDialog from '$lib/components/app/confirm-dialog.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import Upload from '@lucide/svelte/icons/upload';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -175,18 +176,13 @@
 			label="Search eligible documents"
 			action="/profile"
 			clearHref={`/profile?select=${data.select}`}
-			applyLabel="Search"
-			clearLabel="Clear search"
+			applyLabel={filterLabels.search}
+			clearLabel={filterLabels.clearSearch}
 			showClear={Boolean(data.query)}
+			navigate
 		>
 			<input type="hidden" name="select" value={data.select ?? ''} />
-			<Field id="profile_query" label="Search filenames"
-				>{#snippet control(attrs)}<Input
-						{...attrs}
-						name="query"
-						value={data.query}
-					/>{/snippet}</Field
-			>
+			<SearchField id="profile_query" label="Search filenames" value={data.query} />
 		</FilterBar>
 		<form method="POST" action="?/select" use:enhance={enhanceWithFocus} class="space-y-4">
 			<input type="hidden" name="designation" value={data.select ?? ''} /><input
@@ -210,9 +206,10 @@
 							pickedToken = doc.token;
 						}}
 					/>{/each}
-				{#if !data.choices?.documents.length}<p class="text-sm text-muted-foreground">
-						No matching files. Upload or create a document from Profile.
-					</p>{/if}
+				{#if !data.choices?.documents.length}<SearchEmpty
+						noun="documents"
+						hint="Upload or create a document from Profile."
+					/>{/if}
 			</fieldset>
 			<Pagination
 				label="Eligible document pages"

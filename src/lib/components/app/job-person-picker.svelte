@@ -8,11 +8,12 @@
 	import { UnsavedChanges } from '$lib/unsaved.svelte';
 	import UnsavedDialog from './unsaved-dialog.svelte';
 	import Field from './field.svelte';
+	import SearchField from './search-field.svelte';
+	import SearchEmpty from './search-empty.svelte';
 	import Notice from './notice.svelte';
 	import Pagination from './pagination.svelte';
 	import RadioOption from './radio-option.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import { Input } from '$lib/components/ui/input/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import UserPlus from '@lucide/svelte/icons/user-plus';
@@ -143,16 +144,14 @@
 						>{/if}
 					<input type="hidden" name="link_person" value="1" />
 					<input type="hidden" name="return_to" value={data.returnTo} />
-					<Field id="person_query" label="Search people">
-						{#snippet control(attrs)}<Input
-								{...attrs}
-								type="search"
-								name="person_query"
-								maxlength={200}
-								placeholder="Name, role or organization"
-								value={data.networkQuery.person_query ?? ''}
-							/>{/snippet}
-					</Field>
+					<SearchField
+						id="person_query"
+						label="Search people"
+						name="person_query"
+						maxlength={200}
+						placeholder="Name, role or organization"
+						value={data.networkQuery.person_query ?? ''}
+					/>
 					<div class="flex flex-wrap gap-2">
 						<Button type="submit" variant="outline" disabled={guard.saving}>Search people</Button>
 						<Button
@@ -200,9 +199,10 @@
 								/>
 							{/each}
 						</div>
-						{#if !data.personPicker?.networks.length}<p class="text-sm text-muted-foreground">
-								No matching people. Add a person or change the search.
-							</p>{/if}
+						{#if !data.personPicker?.networks.length}<SearchEmpty
+								noun="people"
+								hint="Add a person or change the search."
+							/>{/if}
 					</fieldset>
 					{#if data.personPicker}<Pagination
 							label="Person picker pages"

@@ -78,6 +78,21 @@ const rules = [
 		skip: (f) => f.path.endsWith('filter-chips.svelte')
 	},
 	{
+		name: 'Use SearchField for search inputs, not a raw type="search" input',
+		test: /<Input[^>]*type="search"|^\s*type="search"/,
+		skip: (f) => f.path.endsWith('search-field.svelte')
+	},
+	{
+		name: 'Omit FilterBar action instead of passing an empty string (submits to the current page)',
+		test: /\baction=""/,
+		skip: () => false
+	},
+	{
+		name: 'Use filterLabels or resultCount from $lib/filter-labels.js instead of ad hoc "matching filters" text',
+		test: /\} matching (filters|search)/,
+		skip: () => false
+	},
+	{
 		name: 'Wrap use:enhance in enhanceWithFocus, withPending or a guard so the form shows progress',
 		test: /use:enhance(?!=\{(enhanceWithFocus|enhanceNetwork|(?:guard|[A-Za-z_$][\w$]*Guard)\.enhance|withPending\())/,
 		skip: () => false

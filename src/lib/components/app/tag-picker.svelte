@@ -4,13 +4,12 @@
 	import type { Tag, TagPickerData, TagCollection } from '$lib/tag-types';
 	import { tagRequest, TagRequestError } from '$lib/tag-client';
 	import { tagTextColor, validTagSelection } from '$lib/tags.js';
-	import Field from './field.svelte';
+	import TagSearch from './tag-search.svelte';
 	import Checkbox from './checkbox.svelte';
 	import TagChip from './tag-chip.svelte';
 	import TagDefinitionFields from './tag-definition-fields.svelte';
 	import Pagination from './pagination.svelte';
 	import Notice from './notice.svelte';
-	import { Input } from '$lib/components/ui/input/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { focusFirstError } from '$lib/forms';
 	let {
@@ -217,31 +216,16 @@
 					><TagChip {tag} onremove={() => remove(String(tag.id))} /></span
 				>{/each}
 		</div>{/if}
-	<div class="flex items-end gap-2">
-		<div class="min-w-0 flex-1">
-			<Field id={`${uid}-search`} label={`Search ${label.toLowerCase()}`}>
-				{#snippet control(attrs)}<Input
-						{...attrs}
-						type="search"
-						bind:value={query}
-						maxlength={200}
-						onkeydown={(event) => {
-							if (event.key === 'Enter') {
-								event.preventDefault();
-								void search();
-							}
-						}}
-					/>{/snippet}
-			</Field>
-		</div>
-		<Button type="button" variant="outline" disabled={loading || creating} onclick={() => search()}
-			>{loading ? 'Searching…' : 'Search tags'}</Button
-		>
-	</div>
+	<TagSearch
+		id={`${uid}-search`}
+		label={`Search ${label.toLowerCase()}`}
+		bind:query
+		{loading}
+		disabled={creating}
+		invalid={listing.invalid_query}
+		onsearch={() => search()}
+	/>
 	{#if message}<Notice tone="error" title="Tags need attention">{message}</Notice>{/if}
-	{#if listing.invalid_query}<p class="text-sm text-muted-foreground">
-			Search using letters, numbers, spaces or underscores.
-		</p>{/if}
 	<div class="flex flex-wrap gap-2" aria-busy={loading}>
 		{#each options as tag (tag.id)}
 			<div

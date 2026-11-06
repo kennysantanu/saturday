@@ -5,6 +5,8 @@
 	import EmptyState from '$lib/components/app/empty-state.svelte';
 	import Field from '$lib/components/app/field.svelte';
 	import FilterBar from '$lib/components/app/filter-bar.svelte';
+	import SearchField from '$lib/components/app/search-field.svelte';
+	import { filterLabels } from '$lib/filter-labels.js';
 	import NativeSelect from '$lib/components/app/native-select.svelte';
 	import Notice from '$lib/components/app/notice.svelte';
 	import PageHeader from '$lib/components/app/page-header.svelte';
@@ -24,16 +26,8 @@
 			>{form.fileError}</Notice
 		>{/if}
 
-	<FilterBar
-		label="Find destination job"
-		action=""
-		clearHref=""
-		applyLabel="Find job"
-		showClear={false}
-	>
-		<Field id="query" label="Search destination jobs">
-			{#snippet control(attrs)}<Input {...attrs} name="query" />{/snippet}
-		</Field>
+	<FilterBar label="Find destination job" applyLabel={filterLabels.search} showClear={false}>
+		<SearchField id="query" label="Search destination jobs" value={data.query} />
 	</FilterBar>
 
 	{#each data.documents as doc (doc.id)}

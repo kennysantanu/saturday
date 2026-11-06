@@ -17,7 +17,14 @@ import {
 	setJobScore,
 	ValidationError
 } from '../src/lib/server/local/jobs.js';
-import { defaultJobFilters, searchUrl, searchFromUrl, filterChips } from '../src/lib/job-search.js';
+import {
+	defaultJobFilters,
+	searchUrl,
+	searchFromUrl,
+	filterChips,
+	statusValue,
+	applyStatus
+} from '../src/lib/job-search.js';
 
 const previous = process.env.SATURDAY_DB_PATH;
 const previousFiles = process.env.SATURDAY_FILES_PATH;
@@ -267,4 +274,46 @@ test('URL state round trips, deduplicates categories, and chip removal preserves
 	assert.ok(filterChips(filters).some((chip) => chip.label === 'Minimum score: 0'));
 	assert.deepEqual(jobSearchSchema.parse({}), defaultJobFilters);
 	assert.equal(searchUrl(jobSearchSchema.parse({})), '/jobs');
+});
+
+test('Status control maps to view and current_stage and canonicalizes to the legacy URL', () => {
+	const stage = stageId('Applied');
+	assert.equal(statusValue({ view: 'closed', current_stage: [] }), 'closed');
+	assert.equal(statusValue({ view: 'all', current_stage: [stage] }), `stage-${stage}`);
+	assert.equal(statusValue({ view: 'all', current_stage: ['1', '2'] }), 'custom');
+	const fromStage = searchFromUrl(new URLSearchParams(`status=stage-${stage}`));
+	assert.equal(fromStage.view, 'all');
+	assert.deepEqual(fromStage.current_stage, [String(stage)]);
+	const closed = searchFromUrl(new URLSearchParams('status=closed&current_stage=9'));
+	assert.equal(closed.view, 'closed');
+	assert.deepEqual(closed.current_stage, []);
+	// Older URLs keep working, and `custom` leaves the legacy parameters alone.
+	const legacy = searchFromUrl(new URLSearchParams(`view=all&current_stage=${stage}`));
+	assert.equal(legacy.view, 'all');
+	assert.deepEqual(legacy.current_stage, [String(stage)]);
+	const custom = searchFromUrl(
+		new URLSearchParams('status=custom&current_stage=1&current_stage=2')
+	);
+	assert.deepEqual(custom.current_stage, ['1', '2']);
+	assert.equal(
+		searchUrl(applyStatus({ ...defaultJobFilters, status: `stage-${stage}` })),
+		`/jobs?view=all&current_stage=${stage}`
+	);
+	assert.equal(
+		searchUrl(applyStatus({ ...defaultJobFilters, status: 'closed' })),
+		'/jobs?view=closed'
+	);
+	assert.equal(searchUrl({ ...defaultJobFilters, score_min: null }), '/jobs');
+});
+
+test('Status chips read "Status: ..." with readable names', () => {
+	const stages = [{ id: stageId('Applied'), name: 'Applied' }];
+	const closed = filterChips({ ...defaultJobFilters, view: 'closed' }, stages);
+	assert.equal(closed[0].label, 'Status: Closed');
+	const staged = filterChips(
+		{ ...defaultJobFilters, view: 'all', current_stage: [String(stageId('Applied'))] },
+		stages
+	);
+	assert.equal(staged[0].label, 'Status: Applied');
+	assert.equal(staged[0].href, '/jobs');
 });

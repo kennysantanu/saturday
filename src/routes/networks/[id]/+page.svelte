@@ -17,6 +17,8 @@
 	import PageHeader from '$lib/components/app/page-header.svelte';
 	import PageShell from '$lib/components/app/page-shell.svelte';
 	import Field from '$lib/components/app/field.svelte';
+	import SearchField from '$lib/components/app/search-field.svelte';
+	import SearchEmpty from '$lib/components/app/search-empty.svelte';
 	import Notice from '$lib/components/app/notice.svelte';
 	import ConfirmDialog from '$lib/components/app/confirm-dialog.svelte';
 	import UnsavedDialog from '$lib/components/app/unsaved-dialog.svelte';
@@ -459,14 +461,14 @@
 					name="updates_page"
 					value={data.query.updates_page}
 				/>{/if}
-			<Field id="job_query" label="Job title or company">
-				{#snippet control(attrs)}<Input
-						{...attrs}
-						name="job_query"
-						value={data.query.job_query ?? ''}
-						maxlength={200}
-					/>{/snippet}
-			</Field>
+			<SearchField
+				id="job_query"
+				label="Search jobs"
+				name="job_query"
+				value={data.query.job_query ?? ''}
+				maxlength={200}
+				placeholder="Title or company"
+			/>
 			<Button type="submit" variant="outline">Search jobs</Button>
 		</form>
 		<form method="POST" action={formAction('link')} use:enhance={enhanceNetwork} class="space-y-4">
@@ -489,9 +491,9 @@
 						description={`${job.company}${!job.isActive ? ' · Closed' : ''}${data.linkedIds.includes(job.id) ? ' · Already linked' : ''}`}
 					/>
 				{/each}
-				{#if !data.picker?.jobs.length}<p class="text-sm text-muted-foreground">
-						No matching jobs. <a href="/jobs/new" class="link">Add a job</a>
-					</p>{/if}
+				{#if !data.picker?.jobs.length}<SearchEmpty noun="jobs"
+						><a href="/jobs/new" class="link">Add a job</a></SearchEmpty
+					>{/if}
 			</fieldset>
 			{#if errors.job_id}<p class="text-sm text-destructive" role="alert" tabindex="-1">
 					{errors.job_id}
