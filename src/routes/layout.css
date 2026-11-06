@@ -444,24 +444,108 @@ p {
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
-.person-picker[data-slot='dialog-content'] {
+.link-picker[data-slot='dialog-content'] {
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
 }
-.person-picker > [data-slot='dialog-header'],
-.person-picker > [data-slot='dialog-footer'] {
+.link-picker > [data-slot='dialog-header'],
+.link-picker > [data-slot='dialog-footer'] {
 	flex-shrink: 0;
 }
-.person-picker-body {
+.link-picker-body {
 	min-height: 0;
+	/* overflow-y makes the box clip sideways too. Focus draws a 3px ring plus a 3px outline offset
+	   4px (7px out), so pad the box by 8px and pull it back out with a negative margin. */
+	padding: 0 8px 8px;
+	margin: 0 -8px -8px;
 	overflow-y: auto;
 	overscroll-behavior: contain;
 }
-.person-picker-results {
-	max-height: 176px;
+.link-picker-results {
+	/* Five full cards (one page); never cuts a card in half. */
+	max-height: 25rem;
 	overflow-y: auto;
 	overscroll-behavior: contain;
+}
+.picker-option {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	min-height: 56px;
+	padding: 10px 12px;
+	border: 1px solid var(--border);
+	border-radius: var(--r-group);
+	background: var(--card);
+	cursor: pointer;
+}
+.picker-option input {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	appearance: none;
+	-webkit-appearance: none;
+	opacity: 0;
+	cursor: pointer;
+}
+.picker-mark {
+	flex-shrink: 0;
+	width: 36px;
+	height: 36px;
+	border-radius: 11px;
+	font-size: 1rem;
+}
+.picker-text {
+	display: grid;
+	min-width: 0;
+	flex: 1;
+	font-size: 0.875rem;
+	overflow-wrap: anywhere;
+}
+.picker-title {
+	font-weight: 600;
+}
+.picker-meta {
+	color: var(--muted-foreground);
+}
+.picker-badges {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 6px;
+}
+.picker-check {
+	flex-shrink: 0;
+	color: var(--primary);
+	opacity: 0;
+}
+.picker-option:has(input:checked) {
+	border-color: var(--primary);
+	background: var(--selection);
+}
+.picker-option:has(input:checked) .picker-check {
+	opacity: 1;
+}
+.picker-option:has(input:focus-visible) {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
+}
+.picker-option:has(input:disabled) {
+	cursor: not-allowed;
+	opacity: 0.65;
+}
+@media (hover: hover) {
+	.picker-option:not(:has(input:checked), :has(input:disabled)):hover {
+		background: var(--muted);
+	}
+}
+@media (forced-colors: active) {
+	.picker-option:has(input:checked) {
+		border: 2px solid Highlight;
+	}
 }
 .compact-card {
 	--card-spacing: 12px;
@@ -892,7 +976,7 @@ details[open] > summary > .collapse-label {
 	grid-template-columns: minmax(0, 1fr);
 	min-width: 0;
 	gap: 8px;
-	max-height: 22rem;
+	max-height: 25rem;
 	overflow-y: auto;
 	margin: -4px;
 	padding: 4px;
