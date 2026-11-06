@@ -54,7 +54,7 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		const settingsResponse = await fetch(`${base}/settings`);
 		assert.equal(settingsResponse.headers.get('x-saturday-build'), readBuildInfo().id);
 		const settings = await settingsResponse.text();
-		assert.ok(settings.includes('Backup and restore'));
+		assert.ok(settings.includes('Back up now'));
 		assert.ok(settings.includes('Diagnostics'));
 		assert.ok(settings.includes('Database schema'));
 		assert.ok(settings.includes('saturday.database'));

@@ -32,7 +32,7 @@ Updates from an assistant use the same rules. Refresh to see other-client change
 
 ## Configure workflow stages
 
-Open **Settings → Workflow**. One stage list shows open progression first, closed destinations next, and archived stages last. The Starting stage cue identifies where new jobs begin. Add a stage with a unique name and optional **Closes the job**; use Up/Down to reorder within its type. A starting-stage change asks for confirmation and affects future jobs only.
+Open **Settings → Workflow**. Stages are listed in compact rows grouped as Open, Closed and Archived. The Starting stage cue identifies where new jobs begin, and each row links to its current jobs. Use the up and down arrows to reorder within a type. **Edit** opens a row to rename it, change whether it closes the job, or archive it (archiving needs the stage to be empty). Add a stage with a unique name and optional **Closes the job**. A starting-stage change asks for confirmation and affects future jobs only.
 
 Use **Edit stage** on a row to rename it or change whether it closes jobs. Closure is locked while jobs or history reference that stage; create a replacement stage if you need different behavior. Renaming updates labels throughout existing history without changing IDs or counts.
 
@@ -139,27 +139,27 @@ To export a resume, save self-contained HTML and choose **Generate PDF** from it
 
 ## Appearance
 
-Open **Settings → Appearance → Theme** and choose **System**, **Light**, or **Dark**. Changes apply immediately and are remembered in this browser for this Saturday address; other devices can use different choices. System is the default and follows your device’s appearance as it changes. Tabs at the same address stay in sync. No restart is needed. If JavaScript or browser storage is unavailable, Saturday follows the system theme.
+Open **Settings → Preferences → Appearance → Theme** and choose **System**, **Light**, or **Dark**. Changes apply immediately and are remembered in this browser for this Saturday address; other devices can use different choices. System is the default and follows your device’s appearance as it changes. Tabs at the same address stay in sync. No restart is needed. If JavaScript or browser storage is unavailable, Saturday follows the system theme.
 
 ## Recently viewed
 
 Use **Recent** beside **Add job** on the Jobs page or beside **Add person** on the Network page. Each button opens only that page’s recently viewed records, with no Jobs/People switch. Desktop opens a popover; on a phone, it opens a bottom sheet. Lists show unique records, most recently viewed first. Viewing never changes a record's update date or activity history.
 
-In **Settings → Navigation → Recently viewed**, enable or disable recording, choose **5, 10, or 20** items per list (default **10**), or clear both lists. Disabling hides Recent and stops recording while keeping existing history until cleared. These preferences and lists are shared across devices accessing the workspace. Saturday retains up to 50 records per type and removes deleted records automatically. Recording requires JavaScript and a successfully opened detail page; assistant reads and preloaded links do not count.
+In **Settings → Preferences → Recently viewed**, enable or disable recording, choose **5, 10, or 20** items per list (default **10**), or clear both lists. These save as soon as you change them; there is no Save button. Disabling hides Recent and stops recording while keeping existing history until cleared. These preferences and lists are shared across devices accessing the workspace. Saturday retains up to 50 records per type and removes deleted records automatically. Recording requires JavaScript and a successfully opened detail page; assistant reads and preloaded links do not count.
 
 Database backups include navigation preferences and recents.
 
 ## Data and assistant connection
 
-**Settings → Local database** shows the actual data path and **Open folder** action. Expand **Diagnostics** for build, storage versions, descriptor, backup/recovery, and log paths. Source setup normally uses the repository's `data/`; managed installs use a separate [per-user installation root](installation-guide.md#data-locations-and-installation-descriptor). Repeating setup preserves data. Missing initialized storage requires repair/recovery, not a reset.
+**Settings → Storage** shows the data directory (with **Open folder**), the database file (with **Copy path**) and the number and size of your documents. Expand **Diagnostics** for build, storage versions, descriptor, backup/recovery, and log paths. Source setup normally uses the repository's `data/`; managed installs use a separate [per-user installation root](installation-guide.md#data-locations-and-installation-descriptor). Repeating setup preserves data. Missing initialized storage requires repair/recovery, not a reset.
 
-**Settings → Connect an assistant** generates configuration for a supported local MCP client. Reconnect the client, call `get_saturday_info`, and compare installation, dataset, and build identities with Settings. Read a known job when available. Copying configuration alone does not verify access. See the [assistant guide](assistant-guide.md) for connection steps and the [MCP reference](mcp-reference.md) for tools.
+**Settings → Assistant** shows connection status first, then **Copy configuration** for a supported local MCP client (use **Show configuration** to read it). It generates configuration for a supported local MCP client. Reconnect the client, call `get_saturday_info`, and compare installation, dataset, and build identities with Settings. Read a known job when available. Copying configuration alone does not verify access. See the [assistant guide](assistant-guide.md) for connection steps and the [MCP reference](mcp-reference.md) for tools.
 
 Jobs and people show numbers such as **#123** in lists, headings, and relationship pickers. Their sequences are separate; say “job #123” or “person #123” when asking your assistant to change a record. Refresh the browser after assistant writes. The assistant can correct history and change stages using the same safeguards as the browser. Closing/reopening uses an ordinary closed/open stage; permanent history deletion requires explicit authorization and confirmation. Assistant scores are read-only in the UI.
 
 ## Backup and restore
 
-In **Settings → Backup and restore**, choose what to include, then **Back up now**:
+In **Settings → Backups**, choose what to include, then **Back up now**. Saved backups are listed with Download, Restore and Delete; **Import a backup** and **Advanced file recovery** hold the less common options:
 
 | Contents                     | Saves                                                                            | Download                    |
 | ---------------------------- | -------------------------------------------------------------------------------- | --------------------------- |
@@ -215,7 +215,7 @@ LAN/password preferences, installation/server/start-at-login controls, and openi
 
 ## Password login
 
-Open Saturday with its desktop shortcut, then go to **Settings → Password login**. Protection is optional and off by default. Choose **Enable password login**, enter and confirm a password, and save. Any non-empty password is accepted, with no minimum length or required character mix. The current browser stays signed in; other browsers must enter the same password. No username or online account is needed. Password login applies to local and LAN browsers; it does not enable LAN access by itself.
+Open Saturday with its desktop shortcut, then go to **Settings → Password**. Protection is optional and off by default. Choose **Set a password**, enter and confirm a password, then **Enable password login**. Any non-empty password is accepted, with no minimum length or required character mix. The current browser stays signed in; other browsers must enter the same password. No username or online account is needed. Password login applies to local and LAN browsers; it does not enable LAN access by itself.
 
 **Sign out after inactivity (hours)** accepts 0.25–720 hours, including fractions such as 0.5 for 30 minutes. The default is 1 hour. Navigation, actions, scrolling, and typing keep the session active; passive reading without interaction eventually counts as inactivity. Background polling does not keep you signed in. Without JavaScript, only navigation and form requests count. Each browser session has its own timer; tabs sharing a session share its activity.
 

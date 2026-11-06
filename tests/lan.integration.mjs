@@ -231,6 +231,7 @@ test('LAN opt-in, pending restart, all password modes, actual network origins, a
 		await blockHostControls();
 		stage = 'protect LAN';
 		await desktop.goto(local + '/settings#password', { waitUntil: 'networkidle0' });
+		await desktop.click('details:has(#enable-password) > summary');
 		await desktop.type('#enable-password', '7');
 		await desktop.type('#enable-confirm', '7');
 		await desktop.click('form[action="?/password"] button[type="submit"]');
@@ -250,7 +251,13 @@ test('LAN opt-in, pending restart, all password modes, actual network origins, a
 		await phone.click('button[type="submit"]');
 		await phone.waitForFunction(() => location.pathname === '/settings');
 		await phone.waitForNetworkIdle();
-		assert.equal(await phone.$eval('#lan button', (b) => b.disabled), true);
+		// A LAN client sees LAN status read-only: no enable/disable controls at all.
+		assert.equal(
+			await phone.evaluate(() =>
+				[...document.querySelectorAll('#lan button')].some((b) => /LAN access/.test(b.textContent))
+			),
+			false
+		);
 		assert.equal(
 			await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
 			true

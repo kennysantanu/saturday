@@ -334,8 +334,8 @@ test('colored job and people tags support creation, assignment, filters, Setting
 		await closed();
 		step = 'confirmed tag deletion preserves people';
 		const pg = '[role="group"][aria-label="People tags"]';
-		await fill('Search people tags', 'campus fair', pg);
-		await searched();
+		// A short people list needs no search, so the field stays hidden.
+		assert.equal(await page.$(`${pg} input[type="search"]`), null);
 		await page.click(`${pg} button[aria-label="Edit campus fair"]`);
 		await button('Delete tag');
 		await page.evaluate(() => {

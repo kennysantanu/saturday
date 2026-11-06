@@ -717,6 +717,47 @@ details[open] > summary > .collapse-label {
 	padding: 20px 24px 24px;
 	border-top: 1px solid var(--border);
 }
+/* Quiet expander: a chevron and a label instead of a bordered bar, for optional extras. */
+.disclosure.disclosure-quiet {
+	border: 0;
+	background: none;
+}
+.disclosure-quiet > summary {
+	justify-content: flex-start;
+	gap: 10px;
+	min-height: 44px;
+	padding: 0 8px;
+	border-radius: var(--r-control);
+	color: var(--foreground);
+}
+.disclosure-quiet > summary::before {
+	content: '';
+	flex: none;
+	width: 7px;
+	height: 7px;
+	margin-inline: 3px 2px;
+	border-right: 2px solid currentColor;
+	border-bottom: 2px solid currentColor;
+	transform: rotate(-45deg);
+	transition: transform 160ms;
+}
+.disclosure-quiet[open] > summary::before {
+	transform: rotate(45deg);
+}
+.disclosure-quiet > .disclosure-body {
+	border-top: 0;
+	padding: 8px 8px 8px 28px;
+}
+@media (hover: hover) {
+	.disclosure-quiet > summary:hover {
+		background: var(--hover-fill);
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.disclosure-quiet > summary::before {
+		transition: none;
+	}
+}
 
 /* ---- Fields ---- */
 [data-slot='input'],
@@ -1700,6 +1741,12 @@ html {
 	.disclosure-body {
 		padding: 20px;
 	}
+	.disclosure-quiet > summary {
+		padding: 0 8px;
+	}
+	.disclosure-quiet > .disclosure-body {
+		padding: 8px 4px 8px 20px;
+	}
 	/* Dialogs become bottom sheets on narrow screens, anchored within reach of the thumb. */
 	[data-slot='dialog-content'] {
 		inset: auto max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom))
@@ -1871,7 +1918,7 @@ form[aria-busy='true'] [data-slot='button'][type='submit']::after {
 		transform: rotate(360deg);
 	}
 }
-/* Settings: sticky chip row on narrow screens, sticky sidebar from 64rem. */
+/* Settings: below 64rem a sticky picker opens a grouped bottom sheet; from 64rem a sticky sidebar. */
 .settings-layout {
 	display: grid;
 	gap: 16px;
@@ -1880,53 +1927,167 @@ form[aria-busy='true'] [data-slot='button'][type='submit']::after {
 	min-width: 0;
 }
 .section-nav {
+	display: none;
+}
+.section-nav-group {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.section-nav-group + .section-nav-group {
+	margin-top: 8px;
+	padding-top: 10px;
+	border-top: 1px solid var(--border);
+}
+/* A label, not a link: small, muted, uppercase, no icon and no hover. */
+.section-nav-heading {
+	display: block;
+	padding: 0 12px 6px;
+	color: var(--muted-foreground);
+	font-size: 0.8125rem;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	cursor: default;
+	user-select: none;
+}
+.section-nav a,
+.section-picker-sheet a {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-height: 44px;
+	padding: 0 12px;
+	border-radius: var(--r-control);
+	color: var(--foreground);
+	font-size: 0.875rem;
+	font-weight: 500;
+}
+.section-nav a > svg,
+.section-picker-sheet a > svg {
+	width: 16px;
+	height: 16px;
+	flex: none;
+	color: var(--muted-foreground);
+}
+/* Current section follows the app-wide selection style: tinted fill, bold label, accent icon. */
+.section-nav a[aria-current='location'],
+.section-picker-sheet a[aria-current='location'] {
+	background: var(--selection);
+	font-weight: 650;
+}
+.section-nav a[aria-current='location'] > svg,
+.section-picker-sheet a[aria-current='location'] > svg {
+	color: var(--primary);
+}
+@media (hover: hover) {
+	.section-nav a:hover,
+	.section-picker-sheet a:hover {
+		background: var(--hover-fill);
+	}
+	.section-nav a[aria-current='location']:hover,
+	.section-picker-sheet a[aria-current='location']:hover {
+		background: var(--selection);
+	}
+}
+/* Picker: one sticky bar naming the current section; it opens the grouped list as a sheet. */
+.section-picker {
 	position: sticky;
 	top: 0;
 	z-index: 30;
-	display: flex;
-	gap: 8px;
 	padding-block: max(8px, env(safe-area-inset-top)) 8px;
-	overflow-x: auto;
 	background: var(--background);
-	scrollbar-width: none;
 }
-.section-nav::-webkit-scrollbar {
+.section-picker-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	min-height: 48px;
+	padding: 0 16px;
+	border: 1px solid var(--border);
+	border-radius: var(--r-control);
+	background: var(--card);
+	font-size: 0.9375rem;
+	cursor: pointer;
+	list-style: none;
+}
+.section-picker-bar::-webkit-details-marker {
 	display: none;
 }
-.section-nav a {
-	display: inline-flex;
+.section-picker-label {
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+.section-picker-group {
+	color: var(--muted-foreground);
+}
+.section-picker-bar > svg {
 	flex: none;
-	align-items: center;
-	min-height: 40px;
-	padding: 0 16px;
-	border-radius: 999px;
-	background: var(--secondary);
-	color: var(--secondary-foreground);
+	color: var(--muted-foreground);
+	transition: transform 160ms;
+}
+.section-picker-details[open] .section-picker-bar > svg {
+	transform: rotate(180deg);
+}
+.section-picker-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 55;
+	border: 0;
+	background: rgb(0 0 0 / 35%);
+	cursor: default;
+}
+.section-picker-sheet {
+	position: fixed;
+	z-index: 60;
+	left: max(8px, env(safe-area-inset-left));
+	right: max(8px, env(safe-area-inset-right));
+	bottom: calc(var(--tabbar-h) + max(12px, env(safe-area-inset-bottom)) + 12px);
+	max-width: 28rem;
+	max-height: min(70dvh, 34rem);
+	margin-inline: auto;
+	padding: 12px;
+	overflow-y: auto;
+	border: 1px solid var(--border);
+	border-radius: var(--r-card);
+	background: var(--card);
+	box-shadow: 0 12px 40px rgb(0 0 0 / 25%);
+}
+.settings-top-link {
+	justify-self: end;
+	padding: 10px 4px;
+	color: var(--primary);
 	font-size: 0.875rem;
 	font-weight: 550;
-	white-space: nowrap;
 }
-.section-nav a[aria-current='location'] {
-	background: var(--selection);
-	color: var(--primary);
-	font-weight: 650;
-}
-@media (hover: hover) {
-	.section-nav a:hover {
-		background: var(--hover-fill);
+@media (prefers-reduced-motion: reduce) {
+	.section-picker-bar > svg {
+		transition: none;
 	}
-	.section-nav a[aria-current='location']:hover {
-		background: var(--selection);
+}
+@media (width < 48rem) {
+	.settings-sections [data-slot='card'][id],
+	.settings-subsection,
+	.settings-group {
+		scroll-margin-top: 4.5rem;
 	}
 }
 @media (48rem <= width < 64rem) {
 	/* Clears the sticky top bar. */
-	.section-nav {
+	.section-picker {
 		top: 5.5rem;
 		padding-block: 6px;
 	}
-	.settings-sections [data-slot='card'][id] {
-		scroll-margin-top: 3rem;
+	.section-picker-sheet {
+		bottom: max(16px, env(safe-area-inset-bottom));
+	}
+	.settings-sections [data-slot='card'][id],
+	.settings-subsection,
+	.settings-group {
+		scroll-margin-top: 9rem;
 	}
 }
 @media (width >= 64rem) {
@@ -1936,22 +2097,17 @@ form[aria-busy='true'] [data-slot='button'][type='submit']::after {
 		align-items: start;
 	}
 	.section-nav {
+		position: sticky;
 		top: 7rem;
+		display: flex;
 		flex-direction: column;
-		gap: 2px;
-		padding: 0;
-		overflow: visible;
-		background: none;
 	}
 	.section-nav a {
 		min-height: 40px;
-		padding: 0 12px;
-		border-radius: var(--r-control);
-		background: none;
-		color: var(--muted-foreground);
 	}
-	.section-nav a[aria-current='location'] {
-		color: var(--foreground);
+	.section-picker,
+	.settings-top-link {
+		display: none;
 	}
 }
 .editor-toolbar [aria-pressed='true'] {
@@ -2030,5 +2186,106 @@ form[aria-busy='true'] [data-slot='button'][type='submit']::after {
 	}
 	.tab-bar:has(a[href='/extensions']) .tab-item {
 		flex: 0 0 64px;
+	}
+}
+
+/* ---- Settings content ---- */
+.settings-subsection {
+	scroll-margin-top: 7rem;
+}
+.settings-subsection + .settings-subsection {
+	margin-top: 8px;
+	padding-top: 20px;
+	border-top: 1px solid var(--border);
+}
+.status-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px 16px;
+}
+.status-row > dt,
+.status-row > .status-label {
+	font-size: 0.875rem;
+	font-weight: 550;
+}
+.status-value {
+	color: var(--muted-foreground);
+	font-size: 0.875rem;
+}
+.settings-danger {
+	border-color: color-mix(in oklab, var(--destructive) 35%, var(--border));
+}
+/* Workflow: grouped compact stage rows. */
+.stage-group-title {
+	font-size: 0.8125rem;
+	font-weight: 650;
+	color: var(--muted-foreground);
+}
+.stage-list {
+	display: grid;
+	border: 1px solid var(--border);
+	border-radius: var(--r-group);
+	background: var(--card);
+	overflow: hidden;
+}
+.stage-list > li + li {
+	border-top: 1px solid var(--border);
+}
+.stage-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 4px 16px;
+	padding: 6px 8px 6px 16px;
+	min-height: 56px;
+}
+.stage-name {
+	min-width: 0;
+	flex: 1 1 8rem;
+	overflow-wrap: anywhere;
+}
+.stage-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 2px;
+}
+.stage-panel {
+	display: grid;
+	gap: 20px;
+	padding: 16px;
+	border-top: 1px solid var(--border);
+	background: var(--muted);
+}
+@media (forced-colors: active) {
+	.stage-list,
+	.stage-list > li + li {
+		border-color: ButtonText;
+	}
+}
+
+.settings-group {
+	display: grid;
+	gap: 32px;
+}
+.settings-group-label {
+	padding-bottom: 8px;
+	border-bottom: 1px solid var(--border);
+	color: var(--muted-foreground);
+	font-size: 0.75rem;
+	font-weight: 650;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+.settings-group {
+	scroll-margin-top: 7rem;
+}
+@media (forced-colors: active) {
+	.settings-group-label,
+	.section-nav-group + .section-nav-group {
+		border-color: ButtonText;
 	}
 }

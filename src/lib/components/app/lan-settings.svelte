@@ -80,14 +80,13 @@
 	{#if !local}<p class="text-sm text-muted-foreground">
 			Change access settings and restart Saturday from Open Saturday on the server computer.
 		</p>{/if}
-	{#if setupRequired}<Notice title="Finish Saturday setup"
-			>Reload Settings after setup to configure LAN access.</Notice
-		>{/if}
-	{#if !network.saved_allow_lan}
+	{#if !local || setupRequired}
+		<!-- Read-only: changing access needs the host computer (see the page banner for setup). -->
+	{:else if !network.saved_allow_lan}
 		<Button
 			type="button"
 			variant="outline"
-			disabled={!local || setupRequired || Boolean(lifecycle)}
+			disabled={Boolean(lifecycle)}
 			onclick={() => (allowing = true)}>Allow LAN access</Button
 		>
 		<form id="allow-lan" method="POST" action="?/lan" use:enhance={withPending(save)}>
@@ -112,7 +111,7 @@
 	{:else}
 		<form method="POST" action="?/lan" use:enhance={withPending(save)}>
 			<input type="hidden" name="operation" value="disable" />
-			<Button type="submit" variant="outline" disabled={!local || Boolean(lifecycle)}
+			<Button type="submit" variant="outline" disabled={Boolean(lifecycle)}
 				>Disable LAN access</Button
 			>
 		</form>

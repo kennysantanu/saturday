@@ -16,7 +16,10 @@
 		message = $state(''),
 		loading = $state(false),
 		editor = $state<'create' | 'edit' | 'merge' | null>(null),
-		current = $state<Tag | undefined>();
+		current = $state<Tag | undefined>(),
+		// The unfiltered tag count: search appears once the list is long enough to need it.
+		tagTotal = $state(untrack(() => initial.total));
+	const showSearch = $derived(query !== '' || listing.invalid_query || tagTotal >= 12);
 	let requestSequence = 0;
 	async function search(page = 1) {
 		const sequence = ++requestSequence;
@@ -24,7 +27,10 @@
 		message = '';
 		try {
 			const result = await tagRequest('list', { collection, query, page });
-			if (sequence === requestSequence) listing = result;
+			if (sequence === requestSequence) {
+				listing = result;
+				if (!query) tagTotal = result.total;
+			}
 		} catch (error) {
 			if (sequence === requestSequence)
 				message = error instanceof Error ? error.message : 'Tags could not be loaded.';
@@ -50,7 +56,7 @@
 				}}><Plus data-icon="inline-start" aria-hidden="true" />Create tag</Button
 			><Button
 				variant="outline"
-				disabled={initial.total < 2}
+				disabled={tagTotal < 2}
 				onclick={() => {
 					current = undefined;
 					editor = 'merge';
@@ -58,14 +64,14 @@
 			>
 		</div>
 	</div>
-	<TagSearch
-		id={`settings-${collection}-search`}
-		label={`Search ${collection === 'job' ? 'job' : 'people'} tags`}
-		bind:query
-		{loading}
-		invalid={listing.invalid_query}
-		onsearch={() => search()}
-	/>
+	{#if showSearch}<TagSearch
+			id={`settings-${collection}-search`}
+			label={`Search ${collection === 'job' ? 'job' : 'people'} tags`}
+			bind:query
+			{loading}
+			invalid={listing.invalid_query}
+			onsearch={() => search()}
+		/>{/if}
 	{#if message}<Notice tone="error" title="Tags unavailable">{message}</Notice>{/if}
 	<ul class="divide-y">
 		{#each listing.tags as tag (tag.id)}<li
