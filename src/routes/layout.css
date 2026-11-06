@@ -1237,42 +1237,65 @@ details[open] > summary > .collapse-label {
 	border-radius: var(--r-group);
 }
 /* ---- Job lists ---- */
+/* Dense two-line rows: a head (title, #id, badge), one muted meta line, then any tags. */
 .list-row {
 	display: grid;
-	grid-template-columns: 44px minmax(0, 1fr) auto 16px;
+	grid-template-columns: minmax(0, 1fr) 16px;
 	align-items: center;
 	gap: 16px;
-	padding: 22px 24px;
+	padding: 14px 20px;
 	transition: background-color 160ms;
 }
 .list-row[data-static] {
-	grid-template-columns: 44px minmax(0, 1fr) auto;
+	grid-template-columns: 20px minmax(0, 1fr) auto;
+	gap: 14px;
 }
-.row-mark {
+.list-row-body {
 	display: grid;
-	place-items: center;
-	width: 44px;
-	height: 44px;
-	border-radius: 14px;
-	background: var(--muted);
-	color: var(--muted-foreground);
-	font-size: 1.125rem;
-	font-weight: 650;
-}
-.list-row-title {
+	min-width: 0;
+	gap: 4px;
 	overflow-wrap: anywhere;
 }
-.list-row-status {
+.list-row-head {
 	display: flex;
-	flex-direction: column;
-	align-items: flex-end;
-	gap: 6px;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 12px;
 }
-.list-row-status [data-slot='badge'] {
-	max-width: 100%;
+.list-row-head > :first-child {
+	min-width: 0;
+}
+.list-row-head [data-slot='badge'] {
+	flex: none;
+	max-width: 12rem;
 	height: auto;
-	min-height: 26px;
+	min-height: 24px;
 	white-space: normal;
+}
+.list-row-meta {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 2px 14px;
+	color: var(--muted-foreground);
+	font-size: 0.875rem;
+}
+.list-row-tags {
+	min-width: 0;
+}
+.list-row-primary {
+	color: var(--foreground);
+	font-weight: 500;
+}
+.list-row-icon {
+	display: grid;
+	place-items: center;
+	color: var(--muted-foreground);
+}
+.list-row-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
 }
 @media (hover: hover) {
 	a.list-row:hover {
@@ -1707,29 +1730,12 @@ html {
 		gap: 8px;
 	}
 	.list-row {
-		grid-template-columns: 36px minmax(0, 1fr) 16px;
-		column-gap: 12px;
-		row-gap: 10px;
-		padding: 20px;
-	}
-	.row-mark {
-		width: 36px;
-		height: 36px;
-		border-radius: 11px;
-	}
-	.list-row-status {
-		grid-column: 2;
-		grid-row: 2;
-		align-items: flex-start;
-		min-width: 0;
-		overflow-wrap: anywhere;
-	}
-	.list-row > svg {
-		grid-column: 3;
-		grid-row: 1;
+		gap: 12px;
+		padding: 14px 16px;
 	}
 	.list-row[data-static] {
-		grid-template-columns: 36px minmax(0, 1fr);
+		grid-template-columns: 20px minmax(0, 1fr) auto;
+		gap: 12px;
 	}
 	[data-slot='card-header'],
 	[data-slot='card-content'] {

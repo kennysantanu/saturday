@@ -4,8 +4,8 @@
 	import { formatReminder } from '$lib/format';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Star from '@lucide/svelte/icons/star';
+	import Bell from '@lucide/svelte/icons/bell';
 	import StatusBadge from './status-badge.svelte';
-	import { initialOf } from '$lib/format';
 	import type { StatusInfo } from '$lib/status';
 
 	let {
@@ -31,34 +31,47 @@
 		nextReminder?: string | null;
 		score?: number | null;
 	} = $props();
+	// The badge already names the current stage; say "Updated" when the latest entry repeats it.
+	const updateText = $derived(
+		latestUpdate.startsWith(`${status.label} · `)
+			? `Updated ${latestUpdate.slice(status.label.length + 3)}`
+			: latestUpdate
+	);
 </script>
 
 <a {href} class="list-row group">
-	<div class="row-mark" aria-hidden="true">{initialOf(company)}</div>
-	<div class="list-row-title min-w-0">
-		<p class="font-semibold">
-			{#if isStarred}<Star class="mr-1 inline size-4 fill-current text-primary" /><span
-					class="sr-only"
-					>Starred:
-				</span>{/if}{title}
-			<span
-				class="meta-text ml-2 font-normal whitespace-nowrap text-muted-foreground"
-				aria-label={`Job number ${recordNumber}`}>#{recordNumber}</span
-			>
-		</p>
-		<p class="mt-1 text-sm text-muted-foreground">{company}</p>
-		<TagList {tags} wideLimit={3} />
-	</div>
-	<div class="list-row-status">
-		<StatusBadge {status} />
-		{#if score !== null}<span class="meta-text text-muted-foreground">Assistant score: {score}</span
-			>{/if}
-		<span class="meta-text text-muted-foreground">{latestUpdate}</span>
-		{#if nextReminder}<span class="meta-text text-muted-foreground"
-				>Reminder: {formatReminder(nextReminder)}</span
-			>{/if}
+	<div class="list-row-body">
+		<div class="list-row-head">
+			<p class="font-semibold">
+				{#if isStarred}<Star class="mr-1 inline size-4 fill-current text-primary" /><span
+						class="sr-only"
+						>Starred:
+					</span>{/if}{title}
+				<span
+					class="meta-text ml-2 font-normal whitespace-nowrap text-muted-foreground"
+					aria-label={`Job number ${recordNumber}`}>#{recordNumber}</span
+				>
+			</p>
+			<StatusBadge {status} />
+		</div>
+		<div class="list-row-meta">
+			<span class="list-row-primary">{company}</span>
+			<span>{updateText}</span>
+			{#if nextReminder}<span class="inline-flex items-center gap-1"
+					><Bell class="size-3.5" aria-hidden="true" /><span class="sr-only"
+						>Reminder:
+					</span>{formatReminder(nextReminder)}</span
+				>{/if}
+			{#if score !== null}<span
+					><span aria-hidden="true">Score {score}</span><span class="sr-only"
+						>Assistant score: {score}</span
+					></span
+				>{/if}
+			<span class="list-row-tags"><TagList {tags} wideLimit={3} /></span>
+		</div>
 	</div>
 	<ChevronRight
 		class="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+		aria-hidden="true"
 	/>
 </a>
