@@ -115,6 +115,14 @@ export function searchUrl(values, page = 1) {
 	return `/jobs${params.size ? `?${params}` : ''}`;
 }
 
+// Links into the Jobs list from elsewhere (Dashboard, Settings, job detail). Build them here so
+// they follow the canonical URL format instead of repeating query strings.
+export const allJobsUrl = () => searchUrl({ ...defaultJobFilters, view: 'all' });
+export const stageJobsUrl = (stageId) =>
+	searchUrl({ ...defaultJobFilters, view: 'all', current_stage: [String(stageId)] });
+export const milestoneJobsUrl = (stageId) =>
+	searchUrl({ ...defaultJobFilters, view: 'all', milestone_stage: [String(stageId)] });
+
 export function filterChips(values, stages = [], tags = []) {
 	const defaults = defaultJobFilters;
 	const labels = {

@@ -1,6 +1,7 @@
 import { tagPickerData } from '$lib/server/tag-forms.js';
 import { localScheduleNow } from '$lib/domain/reminders.js';
 import { redirect } from '@sveltejs/kit';
+import { normalizeNetworkReminder } from '$lib/filter-labels.js';
 import { listNetworks } from '$lib/server/application.js';
 import { ValidationError, localCalendarDate } from '$lib/server/validation.js';
 export async function load({ url }) {
@@ -9,6 +10,7 @@ export async function load({ url }) {
 			.filter((key) => url.searchParams.has(key))
 			.map((key) => [key, url.searchParams.get(key)])
 	);
+	if (filters.follow_up) filters.follow_up = normalizeNetworkReminder(filters.follow_up);
 	filters.tag_ids = url.searchParams.getAll('tag_ids');
 	function href(page) {
 		const params = new URLSearchParams();

@@ -8,6 +8,12 @@ export const filterLabels = {
 	clearSearch: 'Clear search'
 };
 
+// One hint under every "No matching ..." empty state.
+export const noMatchHint = {
+	filters: 'Try fewer filters or clear them.',
+	search: 'Try a different search or clear it.'
+};
+
 // Reminder and date modes. Older URLs used `unset` (Jobs) and `not_scheduled` (Network) for the
 // same idea; both still parse and both read "Not set".
 export const reminderLabels = {
@@ -21,6 +27,16 @@ export const reminderLabels = {
 	upcoming: 'Upcoming',
 	range: 'Date range'
 };
+
+/** Reminder choices for Network, in display order, using the shared labels. */
+export const networkReminderOptions = ['all', 'overdue', 'today', 'upcoming', 'not_scheduled'].map(
+	(value) => ({ value, label: reminderLabels[value] })
+);
+
+/** Jobs-style `any` and `unset` still work in Network URLs and canonicalize to `all` / `not_scheduled`. */
+export function normalizeNetworkReminder(value) {
+	return { any: 'all', unset: 'not_scheduled' }[value] ?? value;
+}
 
 export function reminderLabel(value) {
 	return reminderLabels[value] ?? String(value);

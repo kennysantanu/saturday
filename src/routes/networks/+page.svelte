@@ -21,7 +21,12 @@
 	import { page } from '$app/state';
 	import { networkDetailUrl } from '$lib/network-navigation.js';
 	import { buildChips, tagChips } from '$lib/filter-chips.js';
-	import { reminderLabel, resultCount } from '$lib/filter-labels.js';
+	import {
+		reminderLabel,
+		networkReminderOptions,
+		resultCount,
+		noMatchHint
+	} from '$lib/filter-labels.js';
 	let { data } = $props();
 
 	let selectedTags = $state(untrack(() => validTagSelection(data.filters.tag_ids ?? [])));
@@ -90,11 +95,9 @@
 							value={data.filters.follow_up ?? 'all'}
 							data-instant
 						>
-							<option value="all">{reminderLabel('all')}</option>
-							<option value="overdue">{reminderLabel('overdue')}</option>
-							<option value="today">{reminderLabel('today')}</option>
-							<option value="upcoming">{reminderLabel('upcoming')}</option>
-							<option value="not_scheduled">{reminderLabel('not_scheduled')}</option>
+							{#each networkReminderOptions as option (option.value)}<option value={option.value}
+									>{option.label}</option
+								>{/each}
 						</NativeSelect>{/snippet}
 				</Field>
 			</div>
@@ -175,9 +178,7 @@
 		{:else}
 			<EmptyState
 				title={data.filtered ? 'No matching people' : 'No people yet'}
-				description={data.filtered
-					? 'Try changing or clearing the filters.'
-					: 'Add someone you know to get started.'}
+				description={data.filtered ? noMatchHint.filters : 'Add someone you know to get started.'}
 			>
 				{#snippet icon()}<Users class="size-5" />{/snippet}
 				{#snippet actions()}

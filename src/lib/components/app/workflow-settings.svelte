@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { stageJobsUrl } from '$lib/job-search.js';
 	import { enhance } from '$app/forms';
 	import SectionCard from './section-card.svelte';
 	import Field from './field.svelte';
@@ -113,10 +114,7 @@
 									: ''}{stage.is_archived ? ' · Archived' : ''}</span
 							>
 						</p>
-						<a
-							href={'/jobs?view=all&current_stage=' + stage.id}
-							class="link text-sm"
-							hidden={stage.is_archived}
+						<a href={stageJobsUrl(stage.id)} class="link text-sm" hidden={stage.is_archived}
 							>{stage.job_count} current {stage.job_count === 1 ? 'job' : 'jobs'}</a
 						>
 					</div>

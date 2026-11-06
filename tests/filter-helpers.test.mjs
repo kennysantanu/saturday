@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reminderLabel, resultCount, readableKey, filterLabels } from '../src/lib/filter-labels.js';
+import {
+	networkReminderOptions,
+	normalizeNetworkReminder,
+	noMatchHint,
+	reminderLabel,
+	resultCount,
+	readableKey,
+	filterLabels
+} from '../src/lib/filter-labels.js';
 import { buildChips, hrefWithout, hrefWithoutValue, tagChips } from '../src/lib/filter-chips.js';
 
 test('reminder labels treat legacy unset and not_scheduled as the same "Not set"', () => {
@@ -82,4 +90,19 @@ test('tagChips link to the list without just that tag and keep its color', () =>
 	assert.equal(chips[0].href, '/networks?tag_ids=2');
 	assert.equal(chips[1].href, '/networks?tag_ids=1');
 	assert.equal(chips[0].color, '#112233');
+});
+
+test('Network reminder options use the shared labels and accept Jobs-style values', () => {
+	assert.deepEqual(
+		networkReminderOptions.map((option) => option.label),
+		['Any', 'Overdue', 'Today', 'Upcoming', 'Not set']
+	);
+	assert.equal(normalizeNetworkReminder('any'), 'all');
+	assert.equal(normalizeNetworkReminder('unset'), 'not_scheduled');
+	assert.equal(normalizeNetworkReminder('overdue'), 'overdue');
+});
+
+test('one hint for each kind of empty result', () => {
+	assert.equal(noMatchHint.filters, 'Try fewer filters or clear them.');
+	assert.equal(noMatchHint.search, 'Try a different search or clear it.');
 });

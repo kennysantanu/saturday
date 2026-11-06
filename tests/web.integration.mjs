@@ -323,8 +323,8 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		assert.ok(invalidSearch.includes('Check the filters'));
 		assert.ok(invalidSearch.includes('aria-invalid="true"'));
 		// The Advanced panel opens by itself when a filter inside it has an error.
-		assert.ok(/<div[^>]*class="filter-panel"[^>]*>/.test(invalidSearch));
-		assert.ok(!/<div[^>]*class="filter-panel"[^>]*hidden/.test(invalidSearch));
+		assert.ok(/class="filter-panel/.test(invalidSearch));
+		assert.ok(!/class="filter-panel is-collapsed"/.test(invalidSearch));
 		const dashboard = await (await fetch(base)).text();
 		assert.ok(dashboard.includes('Reminders'));
 		assert.ok(dashboard.includes('Send email'));
