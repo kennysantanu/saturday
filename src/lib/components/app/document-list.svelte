@@ -14,7 +14,10 @@
 	import SearchField from './search-field.svelte';
 	import SearchEmpty from './search-empty.svelte';
 	import { filterLabels, resultCount, noMatchHint } from '$lib/filter-labels.js';
+	import { buildChips } from '$lib/filter-chips.js';
+	import { page } from '$app/state';
 	import Field from './field.svelte';
+	import NativeSelect from './native-select.svelte';
 	import Pagination from './pagination.svelte';
 	import RadioOption from './radio-option.svelte';
 	import RowActions from './row-actions.svelte';
@@ -41,7 +44,7 @@
 	import FileArchive from '@lucide/svelte/icons/file-archive';
 	import FileSpreadsheet from '@lucide/svelte/icons/file-spreadsheet';
 	import FileIcon from '@lucide/svelte/icons/file';
-	import { fileType, documentDesignations } from '$lib/file-types';
+	import { fileType, documentDesignations, documentKinds, documentSorts } from '$lib/file-types';
 	import { formatBytes, formatDateTime } from '$lib/format';
 	import { toast } from '$lib/toast.svelte';
 	let { data, form } = $props();
@@ -78,11 +81,22 @@
 		presentation: FileChartColumn
 	};
 	const iconFor = (name: string) => icons[fileType(name).icon] ?? FileIcon;
-	const chips = $derived(
-		data.query ? [{ key: 'query', label: `Filename contains: ${data.query}`, href: data.base }] : []
-	);
-	const pageHref = (page: number) =>
-		`?${new URLSearchParams({ ...(data.query ? { query: data.query } : {}), page: String(page) })}`;
+	const chips = $derived([
+		...buildChips(data.base, page.url.searchParams, data, [
+			['query', 'Filename contains'],
+			['type', 'Type', { format: (value: string) => kindLabel(value) }]
+		])
+	]);
+	const kindLabel = (value: string) =>
+		documentKinds.find((kind) => kind.value === value)?.label ?? value;
+	const filtered = $derived(Boolean(data.query || data.type));
+	const pageHref = (target: number) =>
+		`?${new URLSearchParams({
+			...(data.query ? { query: data.query } : {}),
+			...(data.type ? { type: data.type } : {}),
+			...(data.sort !== 'name' ? { sort: data.sort } : {}),
+			page: String(target)
+		})}`;
 	function finishDialog() {
 		return async ({ result, update }: any) => {
 			await update();
@@ -259,15 +273,49 @@
 	{/if}
 
 	<FilterBar
-		label="Search documents"
+		label="Filter documents"
 		action={data.base}
 		clearHref={data.base}
 		applyLabel={filterLabels.search}
-		clearLabel={filterLabels.clearSearch}
-		showClear={Boolean(data.query)}
+		clearLabel={filterLabels.clear}
+		showClear={filtered || data.sort !== 'name'}
+		instant
 		{chips}
 	>
-		<SearchField id="query" label="Search filenames" value={data.query} />
+		<div class="filter-row filter-row-no-toggle">
+			<div class="filter-row-search">
+				<SearchField id="query" label="Search filenames" value={data.query} />
+			</div>
+			<div class="filter-row-one">
+				<Field id="type" label="Type">
+					{#snippet control(attrs)}<NativeSelect
+							{...attrs}
+							name="type"
+							value={data.type}
+							data-instant
+						>
+							<option value="">{filterLabels.any}</option>
+							{#each documentKinds as kind (kind.value)}<option value={kind.value}
+									>{kind.label}</option
+								>{/each}
+						</NativeSelect>{/snippet}
+				</Field>
+			</div>
+			<div class="filter-row-two">
+				<Field id="sort" label="Sort by">
+					{#snippet control(attrs)}<NativeSelect
+							{...attrs}
+							name="sort"
+							value={data.sort}
+							data-instant
+						>
+							{#each documentSorts as option (option.value)}<option value={option.value}
+									>{option.label}</option
+								>{/each}
+						</NativeSelect>{/snippet}
+				</Field>
+			</div>
+		</div>
 	</FilterBar>
 
 	<div class="space-y-4">
@@ -275,21 +323,21 @@
 			{resultCount(data.total, {
 				one: 'document',
 				many: 'documents',
-				filtered: Boolean(data.query),
-				qualifier: 'matching search'
+				filtered,
+				qualifier: 'matching filters'
 			})}
 		</p>
 		{#if !data.documents.length}
 			<EmptyState
-				title={data.query ? 'No matching documents' : 'No documents yet'}
-				description={data.query
-					? noMatchHint.search
+				title={filtered ? 'No matching documents' : 'No documents yet'}
+				description={filtered
+					? noMatchHint.filters
 					: 'Upload a file or create a Markdown document.'}
 			>
 				{#snippet icon()}<FileText class="size-5" />{/snippet}
 				{#snippet actions()}
-					{#if data.query}
-						<Button href={data.base} variant="outline" size="lg">Clear search</Button>
+					{#if filtered}
+						<Button href={data.base} variant="outline" size="lg">Clear filters</Button>
 					{:else}
 						<Button size="lg" onclick={() => uploadInput.click()} disabled={uploading}
 							><Upload data-icon="inline-start" />Upload</Button

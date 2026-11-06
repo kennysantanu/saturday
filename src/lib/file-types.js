@@ -33,6 +33,26 @@ export function fileType(filename) {
 		preview: type !== 'other'
 	};
 }
+/** Document list filter: `value` matches `fileType(name).icon`; `other` covers everything else. */
+export const documentKinds = Object.freeze([
+	{ value: 'markdown', label: 'Markdown' },
+	{ value: 'html', label: 'HTML' },
+	{ value: 'text', label: 'Text' },
+	{ value: 'pdf', label: 'PDF' },
+	{ value: 'document', label: 'Word and similar' },
+	{ value: 'presentation', label: 'Presentation' },
+	{ value: 'sheet', label: 'Spreadsheet' },
+	{ value: 'image', label: 'Image' },
+	{ value: 'audio', label: 'Audio' },
+	{ value: 'video', label: 'Video' },
+	{ value: 'archive', label: 'Archive' },
+	{ value: 'other', label: 'Other' }
+]);
+export const documentSorts = Object.freeze([
+	{ value: 'name', label: 'Name' },
+	{ value: 'updated', label: 'Recently updated' },
+	{ value: 'size', label: 'Largest first' }
+]);
 // Be conservative: unsupported constructs stay in source mode, never silently disappear.
 export function visualMarkdownSupported(text) {
 	return !/(<\/?[a-z!]|!\[|\||\[[ x]\]|^\s*\[.*\]:|\$\$|^\s*:::|~~|^\s*[^\n]+\n\s*[-=]{2,}\s*$)/im.test(

@@ -1145,6 +1145,19 @@ details[open] > summary > .collapse-label {
 .filter-row-toggle {
 	grid-area: toggle;
 }
+/* A row without the Advanced toggle (Documents): Search first, then the two selects. */
+@media (width >= 40rem) {
+	.filter-row.filter-row-no-toggle {
+		grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+		grid-template-areas: 'search search' 'one two';
+	}
+}
+@media (width >= 64rem) {
+	.filter-row.filter-row-no-toggle {
+		grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+		grid-template-areas: 'search one two';
+	}
+}
 @media (width >= 64rem) {
 	.filter-row {
 		grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) auto;
@@ -1238,6 +1251,11 @@ details[open] > summary > .collapse-label {
 	padding: 16px 24px 0;
 	border-top: 1px solid var(--border);
 	background: var(--card);
+}
+/* Without a footer (forms with no advanced panel) the chips end the card. */
+.filter-chips-row:last-child {
+	padding-bottom: 16px;
+	border-radius: 0 0 var(--r-card) var(--r-card);
 }
 .filter-footer {
 	display: flex;

@@ -3,7 +3,7 @@ import { basename } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createWriteStream } from 'node:fs';
 import { Transform } from 'node:stream';
-import { fileType, documentDesignations } from '../../file-types.js';
+import { fileType, documentDesignations, documentKinds, documentSorts } from '../../file-types.js';
 import { databaseIdentity } from '../database.js';
 import {
 	withFileLock,
@@ -92,6 +92,8 @@ function textBytes(name, content) {
 export async function listDocuments({
 	scope = 'documents',
 	query = '',
+	type = '',
+	sort = 'name',
 	page = 1,
 	limit = 50,
 	catalog_token,
@@ -104,17 +106,28 @@ export async function listDocuments({
 			reject('VALIDATION', 'Invalid document format.');
 		if (!Number.isInteger(page) || page < 1 || !Number.isInteger(limit) || limit < 1 || limit > 100)
 			reject('VALIDATION', 'Invalid document pagination.');
+		if (type && !documentKinds.some((kind) => kind.value === type))
+			reject('VALIDATION', 'Invalid document type.');
+		if (!documentSorts.some((option) => option.value === sort))
+			reject('VALIDATION', 'Invalid document sort.');
 		if (catalog_token) checkToken(m.token, catalog_token);
+		const byName = (a, b) => a.key.localeCompare(b.key, 'en') || a.id.localeCompare(b.id);
+		const order = {
+			name: byName,
+			updated: (a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at) || byName(a, b),
+			size: (a, b) => b.size - a.size || byName(a, b)
+		}[sort];
 		const docs = m.documents
 			.filter(
 				(d) =>
 					d.key.startsWith(`${prefix}/`) &&
 					basename(d.key).toLowerCase().includes(query.toLowerCase()) &&
+					(!type || fileType(d.key).icon === type) &&
 					(!editable_format ||
 						(fileType(d.key).type === editable_format && d.size <= TEXT_LIMIT)) &&
 					(!editable_markdown || (fileType(d.key).type === 'markdown' && d.size <= TEXT_LIMIT))
 			)
-			.sort((a, b) => a.key.localeCompare(b.key, 'en') || a.id.localeCompare(b.id));
+			.sort(order);
 		return {
 			documents: docs.slice((page - 1) * limit, page * limit).map((d) => info(d, m)),
 			total: docs.length,

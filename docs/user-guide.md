@@ -117,7 +117,7 @@ Successful deletion returns to your originating list or job and shows a confirma
 
 ## Documents and Profile
 
-**Documents** holds reusable files. Choose **Upload** to save a file immediately (up to 25 MiB), or **New document** to create Markdown. Search by filename. Each row offers Edit and a menu with Preview, Download, Rename, Duplicate, and permanent Delete. There is no Trash or automatic version history.
+**Documents** holds reusable files. Choose **Upload** to save a file immediately (up to 25 MiB), or **New document** to create Markdown. Search by filename, narrow by **Type** (Markdown, PDF, Image and so on) and choose **Sort by** Name, Recently updated or Largest first; Type and Sort apply as soon as you change them. Each row offers Edit and a menu with Preview, Download, Rename, Duplicate, and permanent Delete. There is no Trash or automatic version history.
 
 Markdown has a basic visual editor and source mode; unsupported formatting stays in source mode to preserve it. HTML and TXT use source editors. Editing is limited to valid UTF-8 text up to 1 MiB. PDFs support browser preview/download; other binary formats download only. Click **Save** explicitly. If another editor or assistant changes the file, reload and reconcile, or save your draft as a separate copy.
 
