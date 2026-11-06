@@ -11,12 +11,12 @@
 </script>
 
 <div class="list-row" data-static>
-	<div class="row-mark" aria-hidden="true">{@render icon()}</div>
-	<div class="list-row-title min-w-0">
+	<span class="list-row-icon" aria-hidden="true">{@render icon()}</span>
+	<div class="list-row-body">
 		{@render title()}
-		{#if meta}<p class="mt-1 text-sm text-muted-foreground">{@render meta()}</p>{/if}
+		{#if meta}<p class="list-row-meta">{@render meta()}</p>{/if}
 	</div>
 	{#if actions}
-		<div class="list-row-status">{@render actions()}</div>
+		<div class="list-row-actions">{@render actions()}</div>
 	{/if}
 </div>
