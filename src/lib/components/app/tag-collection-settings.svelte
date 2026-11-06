@@ -5,11 +5,10 @@
 	import { tagRequest } from '$lib/tag-client';
 	import TagEditorDialog from './tag-editor-dialog.svelte';
 	import TagChip from './tag-chip.svelte';
-	import Field from './field.svelte';
+	import TagSearch from './tag-search.svelte';
 	import Notice from './notice.svelte';
 	import RowActions from './row-actions.svelte';
 	import Pagination from './pagination.svelte';
-	import { Input } from '$lib/components/ui/input/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	let { collection, initial }: { collection: TagCollection; initial: TagPage } = $props();
 	let listing = $state(untrack(() => initial)),
@@ -59,33 +58,15 @@
 			>
 		</div>
 	</div>
-	<div class="flex items-end gap-2">
-		<div class="min-w-0 flex-1">
-			<Field
-				id={`settings-${collection}-search`}
-				label={`Search ${collection === 'job' ? 'job' : 'people'} tags`}
-				>{#snippet control(attrs)}<Input
-						{...attrs}
-						type="search"
-						bind:value={query}
-						maxlength={200}
-						onkeydown={(event) => {
-							if (event.key === 'Enter') {
-								event.preventDefault();
-								void search();
-							}
-						}}
-					/>{/snippet}</Field
-			>
-		</div>
-		<Button variant="outline" disabled={loading} onclick={() => search()}
-			>{loading ? 'Searching…' : 'Search tags'}</Button
-		>
-	</div>
+	<TagSearch
+		id={`settings-${collection}-search`}
+		label={`Search ${collection === 'job' ? 'job' : 'people'} tags`}
+		bind:query
+		{loading}
+		invalid={listing.invalid_query}
+		onsearch={() => search()}
+	/>
 	{#if message}<Notice tone="error" title="Tags unavailable">{message}</Notice>{/if}
-	{#if listing.invalid_query}<p class="text-sm text-muted-foreground">
-			Search using letters, numbers, spaces or underscores.
-		</p>{/if}
 	<ul class="divide-y">
 		{#each listing.tags as tag (tag.id)}<li
 				class="flex min-w-0 flex-wrap items-center justify-between gap-3 py-3"

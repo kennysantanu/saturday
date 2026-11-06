@@ -322,7 +322,9 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		const invalidSearch = await (await fetch(`${base}/jobs?created_from=2026-02-30`)).text();
 		assert.ok(invalidSearch.includes('Check the filters'));
 		assert.ok(invalidSearch.includes('aria-invalid="true"'));
-		assert.ok(invalidSearch.includes('open'));
+		// The Advanced panel opens by itself when a filter inside it has an error.
+		assert.ok(/<div[^>]*class="filter-panel"[^>]*>/.test(invalidSearch));
+		assert.ok(!/<div[^>]*class="filter-panel"[^>]*hidden/.test(invalidSearch));
 		const dashboard = await (await fetch(base)).text();
 		assert.ok(dashboard.includes('Reminders'));
 		assert.ok(dashboard.includes('Send email'));

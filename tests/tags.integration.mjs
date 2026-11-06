@@ -221,6 +221,7 @@ test('colored job and people tags support creation, assignment, filters, Setting
 		);
 		step = 'selection paging and filtering preserve context';
 		await go('/jobs?view=all');
+		await page.evaluate(() => document.querySelector('button.filter-toggle').click());
 		await fill('Search tags', 'referral', '');
 		await button('Search tags');
 		await page.click(`[data-choice="${second.id}"] input`);

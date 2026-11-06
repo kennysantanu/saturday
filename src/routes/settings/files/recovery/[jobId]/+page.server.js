@@ -5,6 +5,7 @@ export async function load({ params, url }) {
 	return {
 		documents: await recoveryDocuments(params.jobId),
 		jobId: params.jobId,
+		query: url.searchParams.get('query') ?? '',
 		jobs: (
 			await searchJobs({ view: 'all', query: url.searchParams.get('query') ?? '', limit: 100 })
 		).jobs

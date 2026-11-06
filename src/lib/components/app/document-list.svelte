@@ -11,7 +11,9 @@
 	import ConfirmDialog from './confirm-dialog.svelte';
 	import DocumentRow from './document-row.svelte';
 	import FilterBar from './filter-bar.svelte';
-	import FilterChips from './filter-chips.svelte';
+	import SearchField from './search-field.svelte';
+	import SearchEmpty from './search-empty.svelte';
+	import { filterLabels, resultCount } from '$lib/filter-labels.js';
 	import Field from './field.svelte';
 	import Pagination from './pagination.svelte';
 	import RadioOption from './radio-option.svelte';
@@ -80,7 +82,7 @@
 		data.query ? [{ key: 'query', label: `Filename contains: ${data.query}`, href: data.base }] : []
 	);
 	const pageHref = (page: number) =>
-		`?${new URLSearchParams({ query: data.query, page: String(page) })}`;
+		`?${new URLSearchParams({ ...(data.query ? { query: data.query } : {}), page: String(page) })}`;
 	function finishDialog() {
 		return async ({ result, update }: any) => {
 			await update();
@@ -260,20 +262,22 @@
 		label="Search documents"
 		action={data.base}
 		clearHref={data.base}
-		applyLabel="Search"
-		clearLabel="Clear search"
+		applyLabel={filterLabels.search}
+		clearLabel={filterLabels.clearSearch}
 		showClear={Boolean(data.query)}
+		{chips}
 	>
-		<Field id="query" label="Search filenames">
-			{#snippet control(attrs)}<Input {...attrs} name="query" value={data.query} />{/snippet}
-		</Field>
+		<SearchField id="query" label="Search filenames" value={data.query} />
 	</FilterBar>
-	<FilterChips {chips} />
 
 	<div class="space-y-4">
 		<p class="text-sm text-muted-foreground" aria-live="polite">
-			{data.total}
-			{data.total === 1 ? 'document' : 'documents'}{data.query ? ' matching search' : ''}
+			{resultCount(data.total, {
+				one: 'document',
+				many: 'documents',
+				filtered: Boolean(data.query),
+				qualifier: 'matching search'
+			})}
 		</p>
 		{#if !data.documents.length}
 			<EmptyState
@@ -356,9 +360,12 @@
 			class="flex flex-wrap items-end gap-2"
 		>
 			<div class="min-w-48 flex-1">
-				<Field id="picker_query" label="Search documents">
-					{#snippet control(attrs)}<Input {...attrs} bind:value={pickerQuery} />{/snippet}
-				</Field>
+				<SearchField
+					id="picker_query"
+					label="Search documents"
+					name="picker_query"
+					bind:value={pickerQuery}
+				/>
 			</div>
 			<Button variant="outline" type="submit">Search</Button>
 		</form>
@@ -388,9 +395,7 @@
 							}}
 						/>
 					{/each}
-					{#if !candidates.length}<p class="text-sm text-muted-foreground">
-							No matching documents.
-						</p>{/if}
+					{#if !candidates.length}<SearchEmpty noun="documents" />{/if}
 				{/if}
 			</fieldset>
 			<Field id="copy_filename" label="Destination filename" required>

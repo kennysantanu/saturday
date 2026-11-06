@@ -9,7 +9,7 @@
 	import RecentMenu from '$lib/components/app/recent-menu.svelte';
 	import PageShell from '$lib/components/app/page-shell.svelte';
 	import FilterBar from '$lib/components/app/filter-bar.svelte';
-	import FilterChips from '$lib/components/app/filter-chips.svelte';
+	import FilterToggle from '$lib/components/app/filter-toggle.svelte';
 	import Checkbox from '$lib/components/app/checkbox.svelte';
 	import Pagination from '$lib/components/app/pagination.svelte';
 	import EmptyState from '$lib/components/app/empty-state.svelte';
@@ -20,44 +20,65 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import * as Card from '$lib/components/ui/card/index.js';
-	import { workOptions, employmentOptions, sortOptions } from '$lib/job-search.js';
+	import {
+		workOptions,
+		employmentOptions,
+		sortOptions,
+		statusValue,
+		applyStatus,
+		searchUrl
+	} from '$lib/job-search.js';
 	import { jobDetailUrl } from '$lib/job-navigation.js';
+	import { readableKey, resultCount, reminderLabel } from '$lib/filter-labels.js';
+	import SearchField from '$lib/components/app/search-field.svelte';
 	import { page } from '$app/state';
 	import { focusFirstError } from '$lib/forms';
 
 	let { data } = $props();
-	// Draft controls change only on Apply; URL-backed data remains the applied result.
-	let values = $state(
-		untrack(() => ({ ...data.filters, tag_ids: validTagSelection(data.filters.tag_ids) }))
-	);
+	// Draft controls change only on Apply, except the quick controls (Status, Starred, Sort),
+	// which apply on change. URL-backed data remains the applied result.
+	const draftFrom = (filters: typeof data.filters) => ({
+		...filters,
+		tag_ids: validTagSelection(filters.tag_ids),
+		current_stage: filters.current_stage.map(String),
+		milestone_stage: filters.milestone_stage.map(String),
+		status: statusValue({ ...filters, current_stage: filters.current_stage.map(String) })
+	});
+	let values = $state(untrack(() => draftFrom(data.filters)));
 	let hydrated = $state(false);
-	let hadHistorical = untrack(
-		() => data.filters.current_stage.length + data.filters.milestone_stage.length > 0
-	);
+	let hadMilestone = untrack(() => data.filters.milestone_stage.length > 0);
+	// Milestone history includes active and closed jobs, so Status reads All while it is selected
+	// (unless a specific stage is chosen).
+	const stageSelected = $derived(values.status.startsWith('stage-') || values.status === 'custom');
 	$effect(() => {
-		const hasHistorical = values.current_stage.length + values.milestone_stage.length > 0;
-		if (hasHistorical !== hadHistorical) {
-			values.view = hasHistorical ? 'all' : 'active';
-			hadHistorical = hasHistorical;
+		const hasMilestone = values.milestone_stage.length > 0;
+		if (hasMilestone !== hadMilestone) {
+			if (!stageSelected) values.status = hasMilestone ? 'all' : 'active';
+			hadMilestone = hasMilestone;
 		}
 	});
 	onMount(() => {
 		hydrated = true;
 	});
 	$effect(() => {
-		values = {
-			...data.filters,
-			tag_ids: validTagSelection(data.filters.tag_ids),
-			current_stage: data.filters.current_stage.map(String),
-			milestone_stage: data.filters.milestone_stage.map(String)
-		};
-		hadHistorical = data.filters.current_stage.length + data.filters.milestone_stage.length > 0;
+		values = draftFrom(data.filters);
+		hadMilestone = data.filters.milestone_stage.length > 0;
 		if (Object.keys(data.errors).length) void tick().then(focusFirstError);
 	});
+	const statusLocked = $derived(values.milestone_stage.length > 0 && !stageSelected);
+	const unapplied = $derived(
+		hydrated &&
+			!Object.keys(data.errors).length &&
+			searchUrl(applyStatus(values)) !== searchUrl(data.filters)
+	);
 	const errors = $derived(data.errors as Record<string, string>);
 	const invalid = $derived(Object.keys(errors).length > 0);
-	const historical = $derived(values.current_stage.length + values.milestone_stage.length > 0);
 	const advancedKeys = [
+		'tag_ids',
+		'starred',
+		'title',
+		'company',
+		'location',
 		'milestone_stage',
 		'work_arrangement',
 		'employment_type',
@@ -77,6 +98,28 @@
 		'updated_from',
 		'updated_to'
 	];
+	// Once scripts run, From/Through show only for Date range and Min/Max only for Scored (or a
+	// bound already in the URL); without scripts every field stays visible.
+	const showRange = (key: 'follow_up' | 'deadline') =>
+		!hydrated || values[key] === 'range' || Boolean(errors[`${key}_from`] || errors[`${key}_to`]);
+	const hasBound = (value: unknown) => value !== undefined && value !== null && value !== '';
+	const showBounds = $derived(
+		!hydrated ||
+			values.score === 'scored' ||
+			(values.score === 'any' && (hasBound(values.score_min) || hasBound(values.score_max))) ||
+			Boolean(errors.score_min || errors.score_max)
+	);
+	const advancedCount = $derived(
+		data.chips.filter((chip: { key: string }) => advancedKeys.includes(chip.key.split(':')[0]))
+			.length
+	);
+	const countText = $derived(
+		resultCount(data.total, {
+			one: data.chips.length ? 'job' : 'active job',
+			many: data.chips.length ? 'jobs' : 'active jobs',
+			filtered: data.chips.length > 0
+		}) + (data.totalPages > 1 ? ` · Page ${data.page} of ${data.totalPages}` : '')
+	);
 	const advancedOpen = $derived(
 		data.chips.some((chip: { key: string }) => advancedKeys.includes(chip.key.split(':')[0])) ||
 			Object.keys(errors).some((key) => advancedKeys.includes(key))
@@ -132,128 +175,121 @@
 		{/snippet}
 	</PageHeader>
 
-	<FilterBar label="Filter jobs" action="/jobs" clearHref="/jobs">
+	<FilterBar
+		label="Filter jobs"
+		action="/jobs"
+		clearHref="/jobs"
+		showClear={data.chips.length > 0 || invalid}
+		instant
+		{unapplied}
+		chips={data.chips}
+		advancedLabel="Advanced filters"
+		{advancedCount}
+		{advancedOpen}
+	>
 		{#snippet before()}
 			{#if invalid}
 				<Notice tone="error" title="Check the filters">
 					{#each Object.entries(errors) as [key, message]}<p>
-							{key.replaceAll('_', ' ')}: {message}
+							{readableKey(key)}: {message}
 						</p>{/each}
 				</Notice>
 			{/if}
 		{/snippet}
-		<p class="text-sm text-muted-foreground">
-			All filters must match. Multiple choices within a category match any selected choice.
-		</p>
-
-		<Field id="query" label="Search jobs" error={errors.query}>
-			{#snippet control(attrs)}<Input
-					{...attrs}
-					name="query"
+		<div class="filter-row">
+			<div class="filter-row-search">
+				<SearchField
+					id="query"
+					label="Search jobs"
 					bind:value={values.query}
 					placeholder="Title, company or location"
-				/>{/snippet}
-		</Field>
-		<div class="grid gap-4 sm:grid-cols-3">
-			<Field
-				id="view"
-				label="Activity"
-				error={errors.view}
-				hint={historical ? 'Stage filters include active and closed jobs.' : undefined}
-			>
-				{#snippet control(attrs)}
-					<NativeSelect
-						{...attrs}
-						name="view"
-						value={historical ? 'all' : values.view}
-						onchange={(event) => (values.view = event.currentTarget.value)}
-						disabled={historical}
-					>
-						<option value="active">Active</option><option value="closed">Closed</option><option
-							value="all">All</option
+					error={errors.query}
+				/>
+			</div>
+			<div class="filter-row-one">
+				<Field
+					id="status"
+					label="Status"
+					error={errors.view ?? errors.current_stage}
+					hint={statusLocked ? 'Milestone history includes active and closed jobs.' : undefined}
+				>
+					{#snippet control(attrs)}
+						<NativeSelect
+							{...attrs}
+							name="status"
+							bind:value={values.status}
+							disabled={statusLocked}
+							data-instant
 						>
-					</NativeSelect>
-				{/snippet}
-			</Field>
-			<Field id="starred" label="Starred" error={errors.starred}>
-				{#snippet control(attrs)}<NativeSelect {...attrs} name="starred" bind:value={values.starred}
-						><option value="all">All</option><option value="starred">Starred</option><option
-							value="not_starred">Not starred</option
-						></NativeSelect
-					>{/snippet}
-			</Field>
-			<Field id="sort" label="Sort by" error={errors.sort}>
-				{#snippet control(attrs)}<NativeSelect {...attrs} name="sort" bind:value={values.sort}
-						>{#each sortOptions as option}<option value={option.value}>{option.label}</option
-							>{/each}</NativeSelect
-					>{/snippet}
-			</Field>
+							<option value="active">Active</option>
+							<option value="closed">Closed</option>
+							<option value="all">All</option>
+							{#if values.status === 'custom'}<option value="custom">Several stages</option>{/if}
+							<optgroup label="Current stage">
+								{#each data.stages.filter((stage: { is_archived: boolean }) => !stage.is_archived) as stage (stage.id)}
+									<option value={`stage-${stage.id}`}>{stage.name}</option>
+								{/each}
+							</optgroup>
+						</NativeSelect>
+						{#if values.status === 'custom'}{#each values.current_stage as id}<input
+									type="hidden"
+									name="current_stage"
+									value={id}
+								/>{/each}{/if}
+					{/snippet}
+				</Field>
+			</div>
+			<div class="filter-row-two">
+				<Field id="sort" label="Sort by" error={errors.sort}>
+					{#snippet control(attrs)}<NativeSelect
+							{...attrs}
+							name="sort"
+							bind:value={values.sort}
+							data-instant
+							>{#each sortOptions as option}<option value={option.value}>{option.label}</option
+								>{/each}</NativeSelect
+						>{/snippet}
+				</Field>
+			</div>
+			<div class="filter-row-toggle"><FilterToggle /></div>
 		</div>
 
-		{#snippet more()}
-			<details class="disclosure" open={advancedOpen}>
-				<summary
-					><span>Advanced filters</span><ChevronDown class="disclosure-chevron size-4" /></summary
-				>
-				<div class="disclosure-body space-y-6">
-					<div class="grid gap-4 sm:grid-cols-3">
-						<Field id="title" label="Title contains" error={errors.title}>
-							{#snippet control(attrs)}<Input
-									{...attrs}
-									name="title"
-									bind:value={values.title}
-									maxlength={200}
-									placeholder="Engineer"
-								/>{/snippet}
-						</Field>
-						<Field id="company" label="Company contains" error={errors.company}>
-							{#snippet control(attrs)}<Input
-									{...attrs}
-									name="company"
-									bind:value={values.company}
-									maxlength={200}
-									placeholder="Company name"
-								/>{/snippet}
-						</Field>
-						<Field id="location" label="Location contains" error={errors.location}>
-							{#snippet control(attrs)}<Input
-									{...attrs}
-									name="location"
-									bind:value={values.location}
-									maxlength={200}
-									placeholder="City or region"
-								/>{/snippet}
-						</Field>
-					</div>
-					<div class="grid gap-6 sm:grid-cols-2">
-						{#each categoryGroups as group}
-							<fieldset
-								class="space-y-3"
-								aria-describedby={errors[group.key] ? `${group.key}-error` : undefined}
-							>
-								<legend class="text-sm font-medium">{group.label}</legend>
-								<div class="flex flex-wrap gap-x-5 gap-y-3">
-									{#each group.options as option}<Checkbox
-											name={group.key}
-											value={option.value}
-											label={option.label}
-											bind:group={values[group.key]}
-											aria-invalid={Boolean(errors[group.key])}
-										/>{/each}
-								</div>
-								{#if group.key === 'milestone_stage'}<p class="text-sm text-muted-foreground">
-										Includes active and closed jobs with any selected milestone, including scheduled
-										milestones.
-									</p>{/if}
-								{#if errors[group.key]}<p
-										id={`${group.key}-error`}
-										class="text-sm text-destructive"
-									>
-										{errors[group.key]}
-									</p>{/if}
-							</fieldset>
-						{/each}
-					</div>
+		{#snippet advanced()}
+			<p class="text-sm text-muted-foreground">
+				All filters must match. Multiple choices within a category match any selected choice.
+			</p>
+			<section class="space-y-4" aria-labelledby="adv-details">
+				<h3 id="adv-details" class="text-base font-semibold">Details</h3>
+				<div class="grid gap-4 sm:grid-cols-3">
+					<Field id="title" label="Title contains" error={errors.title}>
+						{#snippet control(attrs)}<Input
+								{...attrs}
+								name="title"
+								bind:value={values.title}
+								maxlength={200}
+								placeholder="Engineer"
+							/>{/snippet}
+					</Field>
+					<Field id="company" label="Company contains" error={errors.company}>
+						{#snippet control(attrs)}<Input
+								{...attrs}
+								name="company"
+								bind:value={values.company}
+								maxlength={200}
+								placeholder="Company name"
+							/>{/snippet}
+					</Field>
+					<Field id="location" label="Location contains" error={errors.location}>
+						{#snippet control(attrs)}<Input
+								{...attrs}
+								name="location"
+								bind:value={values.location}
+								maxlength={200}
+								placeholder="City or region"
+							/>{/snippet}
+					</Field>
+				</div>
+				<div class="grid gap-4 sm:grid-cols-2">
 					<Field id="source" label="Source contains" error={errors.source}>
 						{#snippet control(attrs)}<Input
 								{...attrs}
@@ -263,25 +299,81 @@
 								placeholder="Referral or job board"
 							/>{/snippet}
 					</Field>
-					<div class="grid gap-6 lg:grid-cols-2">
-						{#each dateGroups as group}
-							<fieldset class="space-y-4">
-								<legend class="mb-3 text-sm font-medium">{group.label}</legend>
-								<Field id={group.key} label="Dates" error={errors[group.key]}>
-									{#snippet control(attrs)}
-										<NativeSelect {...attrs} name={group.key} bind:value={values[group.key]}>
-											<option value="any">Any</option><option value="unset"
-												>{group.key === 'follow_up' ? 'Not scheduled' : 'Not specified'}</option
-											><option value="set"
-												>{group.key === 'follow_up' ? 'Scheduled' : 'Specified'}</option
-											><option value="overdue">Overdue</option><option value="today">Today</option
-											><option value="upcoming">Upcoming</option><option value="range"
-												>Date range</option
-											>
-										</NativeSelect>
-									{/snippet}
-								</Field>
-								<div class="grid grid-cols-2 gap-4">
+					<Field id="starred" label="Starred" error={errors.starred}>
+						{#snippet control(attrs)}<NativeSelect
+								{...attrs}
+								name="starred"
+								bind:value={values.starred}
+								data-instant
+								><option value="all">All</option><option value="starred">Starred</option><option
+									value="not_starred">Not starred</option
+								></NativeSelect
+							>{/snippet}
+					</Field>
+				</div>
+			</section>
+			<section class="space-y-4" aria-labelledby="adv-type">
+				<h3 id="adv-type" class="text-base font-semibold">Job type and history</h3>
+				<div class="grid gap-6 sm:grid-cols-2">
+					{#each categoryGroups as group}
+						<fieldset
+							class="space-y-3"
+							aria-describedby={errors[group.key] ? `${group.key}-error` : undefined}
+						>
+							<legend class="text-sm font-medium">{group.label}</legend>
+							<div class="choice-pills flex flex-wrap gap-2">
+								{#each group.options as option}<Checkbox
+										name={group.key}
+										value={option.value}
+										label={option.label}
+										bind:group={values[group.key]}
+										aria-invalid={Boolean(errors[group.key])}
+									/>{/each}
+							</div>
+							{#if group.key === 'milestone_stage'}<p class="text-sm text-muted-foreground">
+									Includes active and closed jobs with any selected milestone, including scheduled
+									milestones.
+								</p>{/if}
+							{#if errors[group.key]}<p id={`${group.key}-error`} class="text-sm text-destructive">
+									{errors[group.key]}
+								</p>{/if}
+						</fieldset>
+					{/each}
+				</div>
+			</section>
+			<section class="space-y-4" aria-label="Job tags">
+				<TagPicker
+					collection="job"
+					initial={data.tagOptions}
+					bind:selected={values.tag_ids}
+					allowCreate={false}
+					marker={false}
+					error={errors.tag_ids}
+				/>
+			</section>
+			<section class="space-y-4" aria-labelledby="adv-dates">
+				<h3 id="adv-dates" class="text-base font-semibold">Dates</h3>
+				<div class="grid gap-6 lg:grid-cols-2">
+					{#each dateGroups as group}
+						<fieldset class="space-y-4">
+							<legend class="sr-only">{group.label}</legend>
+							<Field id={group.key} label={group.label} error={errors[group.key]}>
+								{#snippet control(attrs)}
+									<NativeSelect {...attrs} name={group.key} bind:value={values[group.key]}>
+										<option value="any">Any</option><option value="unset"
+											>{group.key === 'follow_up'
+												? reminderLabel('unset')
+												: 'Not specified'}</option
+										><option value="set"
+											>{group.key === 'follow_up' ? 'Scheduled' : 'Specified'}</option
+										><option value="overdue">Overdue</option><option value="today">Today</option
+										><option value="upcoming">Upcoming</option><option value="range"
+											>Date range</option
+										>
+									</NativeSelect>
+								{/snippet}
+							</Field>
+							{#if showRange(group.key)}<div class="grid grid-cols-2 gap-4">
 									{#each ['from', 'to'] as bound}
 										{@const key = `${group.key}_${bound}` as
 											'follow_up_from' | 'follow_up_to' | 'deadline_from' | 'deadline_to'}
@@ -298,40 +390,67 @@
 												/>{/snippet}
 										</Field>
 									{/each}
-								</div>
-								<p class="text-sm text-muted-foreground">
-									From and Through apply when Date range is selected. Today uses the local calendar.
-								</p>
-							</fieldset>
-						{/each}
-					</div>
-					<fieldset class="space-y-4">
-						<legend class="mb-3 text-sm font-medium">Assistant score</legend>
-						<div class="grid gap-4 sm:grid-cols-3">
-							<Field id="score" label="Assessment" error={errors.score}>
-								{#snippet control(attrs)}<NativeSelect
-										{...attrs}
-										name="score"
-										bind:value={values.score}
-										onchange={(event) => {
-											if (event.currentTarget.value === 'unscored') {
-												values.score_min = undefined;
-												values.score_max = undefined;
-											}
-										}}
-										><option value="any">Any</option><option value="scored">Scored</option><option
-											value="unscored">Unscored</option
-										></NativeSelect
-									>{/snippet}
-							</Field>
-							<Field id="score_min" label="Minimum" error={errors.score_min}>
+								</div>{/if}
+							<p class="text-sm text-muted-foreground">
+								{showRange(group.key)
+									? 'From and Through apply when Date range is selected. Today uses the local calendar.'
+									: 'Choose Date range to set From and Through. Today uses the local calendar.'}
+							</p>
+						</fieldset>
+					{/each}
+				</div>
+				<div class="grid gap-6 lg:grid-cols-2">
+					{#each ['created', 'updated'] as kind}
+						<fieldset>
+							<legend class="mb-3 text-sm font-medium"
+								>{kind === 'created' ? 'Created date' : 'Updated date'}</legend
+							>
+							<div class="grid grid-cols-2 gap-4">
+								{#each ['from', 'to'] as bound}
+									{@const key = `${kind}_${bound}` as
+										'created_from' | 'created_to' | 'updated_from' | 'updated_to'}
+									<Field id={key} label={bound === 'from' ? 'From' : 'Through'} error={errors[key]}
+										>{#snippet control(attrs)}<Input
+												{...attrs}
+												name={key}
+												type="date"
+												bind:value={values[key]}
+											/>{/snippet}</Field
+									>
+								{/each}
+							</div>
+						</fieldset>
+					{/each}
+				</div>
+			</section>
+			<section class="space-y-4" aria-labelledby="adv-score">
+				<h3 id="adv-score" class="text-base font-semibold">Assistant score</h3>
+				<fieldset class="space-y-4">
+					<legend class="sr-only">Assistant score</legend>
+					<div class="grid gap-4 sm:grid-cols-3">
+						<Field id="score" label="Assessment" error={errors.score}>
+							{#snippet control(attrs)}<NativeSelect
+									{...attrs}
+									name="score"
+									bind:value={values.score}
+									onchange={(event) => {
+										if (event.currentTarget.value === 'unscored') {
+											values.score_min = undefined;
+											values.score_max = undefined;
+										}
+									}}
+									><option value="any">Any</option><option value="scored">Scored</option><option
+										value="unscored">Unscored</option
+									></NativeSelect
+								>{/snippet}
+						</Field>
+						{#if showBounds}<Field id="score_min" label="Minimum" error={errors.score_min}>
 								{#snippet control(attrs)}<Input
 										{...attrs}
 										name="score_min"
 										type="number"
 										step="any"
 										bind:value={values.score_min}
-										disabled={hydrated && values.score === 'unscored'}
 									/>{/snippet}
 							</Field>
 							<Field id="score_max" label="Maximum" error={errors.score_max}>
@@ -341,62 +460,22 @@
 										type="number"
 										step="any"
 										bind:value={values.score_max}
-										disabled={hydrated && values.score === 'unscored'}
 									/>{/snippet}
-							</Field>
-						</div>
-						<p class="text-sm text-muted-foreground">
-							Scores have no fixed scale. Bounds match scored jobs only.
-						</p>
-					</fieldset>
-					<div class="grid gap-6 lg:grid-cols-2">
-						{#each ['created', 'updated'] as kind}
-							<fieldset>
-								<legend class="mb-3 text-sm font-medium"
-									>{kind === 'created' ? 'Created date' : 'Updated date'}</legend
-								>
-								<div class="grid grid-cols-2 gap-4">
-									{#each ['from', 'to'] as bound}
-										{@const key = `${kind}_${bound}` as
-											'created_from' | 'created_to' | 'updated_from' | 'updated_to'}
-										<Field
-											id={key}
-											label={bound === 'from' ? 'From' : 'Through'}
-											error={errors[key]}
-											>{#snippet control(attrs)}<Input
-													{...attrs}
-													name={key}
-													type="date"
-													bind:value={values[key]}
-												/>{/snippet}</Field
-										>
-									{/each}
-								</div>
-							</fieldset>
-						{/each}
+							</Field>{/if}
 					</div>
-				</div>
-			</details>
+					<p class="text-sm text-muted-foreground">
+						Scores have no fixed scale.{showBounds
+							? ' Bounds match scored jobs only.'
+							: ' Choose Scored to set a minimum or maximum.'}
+					</p>
+				</fieldset>
+			</section>
 		{/snippet}
-		<TagPicker
-			collection="job"
-			initial={data.tagOptions}
-			bind:selected={values.tag_ids}
-			allowCreate={false}
-			marker={false}
-			error={errors.tag_ids}
-		/>
 	</FilterBar>
 
-	<FilterChips chips={data.chips} />
 	{#if !invalid}
 		<div class="space-y-4">
-			<p class="text-sm text-muted-foreground" aria-live="polite">
-				{data.total}{data.chips.length ? '' : ' active'}
-				{data.total === 1 ? 'job' : 'jobs'}{data.chips.length
-					? ' matching filters'
-					: ''}{data.total > 50 ? ` · Page ${data.page} of ${data.totalPages}` : ''}
-			</p>
+			<p class="text-sm text-muted-foreground" aria-live="polite">{countText}</p>
 			{#if data.jobs.length === 0}
 				<EmptyState
 					title={data.totalJobs === 0
