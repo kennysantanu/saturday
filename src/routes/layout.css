@@ -1039,6 +1039,34 @@ details[open] > summary > .collapse-label {
 	border-radius: 50%;
 }
 
+/* Tag color: a soft tint of the tag's color over the surface, a matching border and a solid dot.
+   The label keeps the normal foreground color, so contrast never depends on the chosen color.
+   Set --tag on the element; place after .filter-chip so it wins on equal specificity. */
+.tag-tint {
+	background: color-mix(in srgb, var(--tag, #64748b) 14%, var(--card));
+	border: 1px solid color-mix(in srgb, var(--tag, #64748b) 40%, var(--border));
+	color: var(--foreground);
+}
+.tag-dot {
+	flex-shrink: 0;
+	width: 0.5rem;
+	height: 0.5rem;
+	border-radius: 999px;
+	background: var(--tag, #64748b);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 22%, transparent);
+}
+@media (forced-colors: active) {
+	.tag-tint {
+		background: Canvas;
+		color: CanvasText;
+		border-color: CanvasText;
+	}
+	.tag-dot {
+		background: CanvasText;
+		box-shadow: none;
+	}
+}
+
 /* Multi-select filter choices as pill toggles. Without CSS they stay plain checkboxes. */
 .choice-pills .check-field {
 	position: relative;

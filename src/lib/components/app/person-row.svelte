@@ -45,7 +45,7 @@
 				{[role, organization].filter(Boolean).join(' · ')}
 			</p>
 		{/if}
-		<TagList {tags} />
+		<TagList {tags} wideLimit={3} />
 	</div>
 	<div class="list-row-status">
 		{#if nextReminder}

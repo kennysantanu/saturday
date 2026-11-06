@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Field from './field.svelte';
 	import { Input } from '$lib/components/ui/input/index.js';
-	import { normalizeTagName, displayTagName, tagColorPattern } from '$lib/tags.js';
+	import { normalizeTagName, displayTagName, tagColorPattern, tagPalette } from '$lib/tags.js';
 	import TagChip from './tag-chip.svelte';
 	let {
 		name = $bindable(''),
@@ -27,7 +27,7 @@
 	id={`${prefix}-name`}
 	label="Tag name"
 	required
-	hint="Letters and numbers only; spaces separate words. Names are saved in lowercase."
+	hint="Letters and numbers only. Spaces separate words. Names are saved in lowercase."
 	error={errors.name}
 >
 	{#snippet control(attrs)}<Input
@@ -43,8 +43,24 @@
 			}}
 		/>{/snippet}
 </Field>
-<div class="grid grid-cols-[4.5rem_1fr] gap-4">
-	<Field id={`${prefix}-color`} label="Color">
+<div role="group" aria-label="Color choices" class="space-y-1">
+	<p class="text-sm font-medium">Color</p>
+	<div class="flex flex-wrap gap-1">
+		{#each tagPalette as swatch (swatch.color)}
+			<button
+				type="button"
+				class="swatch"
+				style:--swatch={swatch.color}
+				aria-label={swatch.name}
+				aria-pressed={hex === swatch.color}
+				title={swatch.name}
+				onclick={() => (color = swatch.color)}
+			></button>
+		{/each}
+	</div>
+</div>
+<div class="grid grid-cols-[7rem_1fr] gap-4">
+	<Field id={`${prefix}-color`} label="Custom color">
 		{#snippet control(attrs)}<Input
 				{...attrs}
 				type="color"
@@ -78,3 +94,42 @@
 			}}
 		/>
 	</div>{/if}
+
+<style>
+	/* 44px target around a 28px swatch; the ring shows the current color. */
+	.swatch {
+		display: grid;
+		place-items: center;
+		width: 44px;
+		height: 44px;
+		border-radius: 999px;
+		cursor: pointer;
+	}
+	.swatch::before {
+		content: '';
+		width: 28px;
+		height: 28px;
+		border-radius: 999px;
+		background: var(--swatch);
+		box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 22%, transparent);
+	}
+	.swatch[aria-pressed='true']::before {
+		box-shadow:
+			0 0 0 2px var(--card),
+			0 0 0 4px var(--foreground);
+	}
+	.swatch:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 0;
+	}
+	@media (forced-colors: active) {
+		.swatch::before {
+			forced-color-adjust: none;
+		}
+		.swatch[aria-pressed='true']::before {
+			box-shadow:
+				0 0 0 2px Canvas,
+				0 0 0 4px Highlight;
+		}
+	}
+</style>

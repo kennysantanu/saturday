@@ -3,10 +3,9 @@
 	import { tick, untrack, onMount } from 'svelte';
 	import type { Tag, TagPickerData, TagCollection } from '$lib/tag-types';
 	import { tagRequest, TagRequestError } from '$lib/tag-client';
-	import { tagTextColor, validTagSelection } from '$lib/tags.js';
+	import { normalizeTagName, validTagSelection } from '$lib/tags.js';
 	import TagSearch from './tag-search.svelte';
 	import Checkbox from './checkbox.svelte';
-	import TagChip from './tag-chip.svelte';
 	import TagDefinitionFields from './tag-definition-fields.svelte';
 	import Pagination from './pagination.svelte';
 	import Notice from './notice.svelte';
@@ -39,6 +38,7 @@
 		onselection?: (tags: Tag[]) => void;
 		refreshToken?: number;
 	} = $props();
+	const searchThreshold = 12;
 	const uid = $props.id();
 	let root: HTMLDivElement;
 	let query = $state(''),
@@ -69,6 +69,17 @@
 					}
 			)
 			.sort((a, b) => a.display_name.localeCompare(b.display_name) || a.id - b.id)
+	);
+	// A short list needs no search box; a long list, a single-choice picker or a past search does.
+	const showSearch = $derived(single || searched || initial.total > searchThreshold);
+	const offered = $derived(normalizeTagName(query.trim()));
+	const canOffer = $derived(
+		allowCreate &&
+			!loading &&
+			!!offered &&
+			offered.length <= 50 &&
+			!listing.tags.some((tag) => tag.name === offered) &&
+			!chosen.some((tag) => tag.name === offered)
 	);
 	const options = $derived(
 		[
@@ -125,18 +136,6 @@
 			if (sequence === requestSequence) loading = false;
 		}
 	}
-	async function remove(id: string) {
-		const at = chosen.findIndex((tag) => String(tag.id) === id);
-		selected = selected.filter((value) => value !== id);
-		announcement = 'Tag removed from selection.';
-		dirty();
-		await tick();
-		const targets = root.querySelectorAll<HTMLButtonElement>('[data-tag-remove] button');
-		(
-			targets[Math.min(at, targets.length - 1)] ??
-			root.querySelector<HTMLInputElement>('input[type="search"]')
-		)?.focus();
-	}
 	async function choose(id: string, checked: boolean) {
 		selected = single
 			? checked
@@ -145,6 +144,7 @@
 			: checked
 				? [...new Set([...selected, id])]
 				: selected.filter((value) => value !== id);
+		announcement = checked ? 'Tag selected.' : 'Tag removed from selection.';
 		dirty();
 		await tick();
 		root.querySelector<HTMLInputElement>(`[data-choice="${id}"] input`)?.focus();
@@ -211,42 +211,44 @@
 				value={tag.id}
 			/>{/each}{/if}
 	{#if error}<p class="text-sm text-destructive" role="alert" tabindex="-1">{error}</p>{/if}
-	{#if chosen.length}<div class="flex flex-wrap gap-2" aria-label="Selected tags">
-			{#each chosen as tag (tag.id)}<span data-tag-remove
-					><TagChip {tag} onremove={() => remove(String(tag.id))} /></span
-				>{/each}
-		</div>{/if}
-	<TagSearch
-		id={`${uid}-search`}
-		label={`Search ${label.toLowerCase()}`}
-		bind:query
-		{loading}
-		disabled={creating}
-		invalid={listing.invalid_query}
-		onsearch={() => search()}
-	/>
+	{#if showSearch}<TagSearch
+			id={`${uid}-search`}
+			label={`Search ${label.toLowerCase()}`}
+			bind:query
+			{loading}
+			disabled={creating}
+			invalid={listing.invalid_query}
+			onsearch={() => search()}
+		/>{/if}
 	{#if message}<Notice tone="error" title="Tags need attention">{message}</Notice>{/if}
 	<div class="flex flex-wrap gap-2" aria-busy={loading}>
 		{#each options as tag (tag.id)}
-			<div
-				data-choice={tag.id}
-				class="tag-choice"
-				style:background-color={tag.color}
-				style:color={tagTextColor(tag.color)}
-			>
+			<div data-choice={tag.id} class="tag-choice" style:--tag={tag.color}>
 				<Checkbox
 					name={hydrated ? undefined : fieldName}
 					value={String(tag.id)}
 					class="min-h-11 min-w-11 px-3 py-2"
 					label={tag.display_name + (tag.unavailable ? ' · Unavailable' : '')}
 					checked={selected.includes(String(tag.id))}
-					disabled={tag.unavailable || creating}
+					disabled={creating}
 					onchange={(event) => choose(String(tag.id), event.currentTarget.checked)}
 				/>
 			</div>
-		{:else}<p class="text-sm text-muted-foreground">
-				{single && !searched ? 'Search to choose a tag.' : 'No tags found.'}
-			</p>{/each}
+		{:else}{#if !canOffer}<p class="text-sm text-muted-foreground">
+					{single && !searched ? 'Search to choose a tag.' : 'No tags found.'}
+				</p>{/if}{/each}
+		{#if canOffer}<button
+				type="button"
+				class="tag-offer"
+				disabled={creating}
+				onclick={() => {
+					createOpen = true;
+					name = query.trim();
+					errors = {};
+					existing = null;
+				}}
+				><Plus class="size-4" aria-hidden="true" />Create “{offered!.replaceAll('_', ' ')}”</button
+			>{/if}
 	</div>
 	{#if !single || searched}<Pagination
 			page={listing.page}
@@ -322,27 +324,105 @@
 </div>
 
 <style>
+	/* One toggle chip per tag: neutral with a color dot, tinted with a check when selected. */
 	.tag-choice {
+		position: relative;
 		border: 1px solid var(--border);
 		border-radius: var(--r-control);
+		background: var(--card);
+		color: var(--foreground);
 		max-width: 100%;
 		min-width: 0;
 	}
 	.tag-choice :global(.check-field) {
+		position: relative;
 		min-height: 44px;
 		min-width: 44px;
 		margin: 0;
+		gap: 0;
 		cursor: pointer;
 		align-items: center;
+	}
+	.tag-choice :global(.check-field input) {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		margin: 0;
+		appearance: none;
+		-webkit-appearance: none;
+		opacity: 0;
+		cursor: pointer;
 	}
 	.tag-choice :global(.check-field span) {
 		overflow-wrap: anywhere;
 	}
+	.tag-choice :global(.check-field span)::before {
+		content: '';
+		display: inline-block;
+		width: 0.5rem;
+		height: 0.5rem;
+		margin-inline-end: 0.5rem;
+		border-radius: 999px;
+		background: var(--tag, #64748b);
+		box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 22%, transparent);
+	}
+	.tag-choice:has(:global(input:checked)) {
+		background: color-mix(in srgb, var(--tag, #64748b) 14%, var(--card));
+		border-color: color-mix(in srgb, var(--tag, #64748b) 40%, var(--border));
+		font-weight: 600;
+	}
+	.tag-choice:has(:global(input:checked)) :global(.check-field span)::after {
+		content: '\2713';
+		margin-inline-start: 0.5rem;
+		font-weight: 700;
+	}
+	.tag-choice:has(:global(input:focus-visible)) {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+	}
+	.tag-choice:has(:global(input:disabled)) {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	@media (hover: hover) {
+		.tag-choice:not(:has(:global(input:checked))):hover {
+			background: var(--muted);
+		}
+	}
+	.tag-offer {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		min-height: 44px;
+		padding: 0 0.875rem;
+		border: 1px dashed var(--input);
+		border-radius: var(--r-control);
+		color: var(--foreground);
+		font-size: 0.875rem;
+		cursor: pointer;
+	}
+	.tag-offer:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+	}
+	@media (hover: hover) {
+		.tag-offer:hover {
+			background: var(--muted);
+		}
+	}
 	@media (forced-colors: active) {
 		.tag-choice {
-			background: Canvas !important;
-			color: CanvasText !important;
+			background: Canvas;
+			color: CanvasText;
 			border-color: CanvasText;
+		}
+		.tag-choice:has(:global(input:checked)) {
+			border: 2px solid Highlight;
+		}
+		.tag-choice :global(.check-field span)::before {
+			background: CanvasText;
+			box-shadow: none;
 		}
 	}
 </style>

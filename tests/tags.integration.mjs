@@ -148,6 +148,11 @@ test('colored job and people tags support creation, assignment, filters, Setting
 			);
 			await page.locator(`[id="${id}"]`).fill(value);
 		};
+		// Tag search runs after a short pause in typing.
+		const searched = async () => {
+			await new Promise((r) => setTimeout(r, 500));
+			await settle();
+		};
 		const dialog = () => page.waitForSelector('[role="dialog"]');
 		const closed = () => page.waitForSelector('[role="dialog"]', { hidden: true });
 		step = 'responsive chips and dialogs';
@@ -223,7 +228,7 @@ test('colored job and people tags support creation, assignment, filters, Setting
 		await go('/jobs?view=all');
 		await page.evaluate(() => document.querySelector('button.filter-toggle').click());
 		await fill('Search tags', 'referral', '');
-		await button('Search tags');
+		await searched();
 		await page.click(`[data-choice="${second.id}"] input`);
 		await page.waitForFunction(
 			(id) =>
@@ -278,14 +283,14 @@ test('colored job and people tags support creation, assignment, filters, Setting
 		const fg = '[role="dialog"] [role="group"][aria-label="First tag"]',
 			sg = '[role="dialog"] [role="group"][aria-label="Second tag"]';
 		await fill('Search first tag', 'career fair', fg);
-		await button('Search tags', fg);
+		await searched();
 		await page.click(`${fg} [data-choice="${first.id}"] input`);
 		assert.equal(
 			await page.$eval('[role="dialog"] input[autocomplete="off"]', (e) => e.value),
 			'career fair'
 		);
 		await fill('Search second tag', 'referral', sg);
-		await button('Search tags', sg);
+		await searched();
 		await page.click(`${sg} [data-choice="${second.id}"] input`);
 		await fill('Tag name', 'Event leads');
 		await fill('Hex color', '#11cc55');
@@ -303,14 +308,14 @@ test('colored job and people tags support creation, assignment, filters, Setting
 		await page.waitForFunction(() =>
 			document.querySelector('[role="dialog"]')?.textContent.includes('Unavailable')
 		);
-		await page.click(`[aria-label="Remove Unavailable tag #${networkTag.id}"]`);
+		await page.click(`[data-choice="${networkTag.id}"] input`);
 		await button('Save tags');
 		await closed();
 		assert.equal(getNetwork(p.id).tags.length, 0);
 		step = 'delete inside edit and cancellation preserves color draft';
 		await go('/settings#tags');
 		await fill('Search job tags', 'event leads', group);
-		await button('Search tags', group);
+		await searched();
 		await page.click(`${group} button[aria-label="Edit event leads"]`);
 		await fill('Hex color', '#123456');
 		await button('Delete tag');
@@ -330,7 +335,7 @@ test('colored job and people tags support creation, assignment, filters, Setting
 		step = 'confirmed tag deletion preserves people';
 		const pg = '[role="group"][aria-label="People tags"]';
 		await fill('Search people tags', 'campus fair', pg);
-		await button('Search tags', pg);
+		await searched();
 		await page.click(`${pg} button[aria-label="Edit campus fair"]`);
 		await button('Delete tag');
 		await page.evaluate(() => {
@@ -369,10 +374,10 @@ test('colored job and people tags support creation, assignment, filters, Setting
 		assert.equal(await page.$$eval('a.list-row', (els) => els.length), 0);
 		await go('/settings#tags');
 		await fill('Search job tags', 'event leads', group);
-		await button('Search tags', group);
+		await searched();
 		step = 'expired sign-in retains edit draft and supports manual retry';
 		await fill('Search job tags', 'event leads', group);
-		await button('Search tags', group);
+		await searched();
 		await page.click(`${group} button[aria-label="Edit event leads"]`);
 		await fill('Tag name', 'Retained after login');
 		const protectedSettings = {

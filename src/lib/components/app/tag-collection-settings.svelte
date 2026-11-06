@@ -75,7 +75,13 @@
 					<TagChip {tag} />
 					<p class="text-sm text-muted-foreground">
 						{tag.usage_count ?? 0}
-						{collection === 'job' ? 'jobs' : 'people'}
+						{(tag.usage_count ?? 0) === 1
+							? collection === 'job'
+								? 'job'
+								: 'person'
+							: collection === 'job'
+								? 'jobs'
+								: 'people'}
 					</p>
 				</div>
 				<RowActions

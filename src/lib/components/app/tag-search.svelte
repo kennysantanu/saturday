@@ -1,10 +1,11 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import SearchField from './search-field.svelte';
-	import { Button } from '$lib/components/ui/button/index.js';
 
 	/**
-	 * Tag search used by the tag picker and Settings tag lists: a labelled search field, Search tags
-	 * button and invalid-query hint. Enter searches without submitting any surrounding form.
+	 * Tag search used by the tag picker and Settings tag lists: a labelled search field and an
+	 * invalid-query hint. Results load as you type (after a short pause) or on Enter, which never
+	 * submits a surrounding form.
 	 */
 	let {
 		id,
@@ -23,16 +24,25 @@
 		invalid?: boolean;
 		onsearch: () => void;
 	} = $props();
+
+	let searched = untrack(() => query);
+	$effect(() => {
+		const value = query;
+		if (value === searched) return;
+		const timer = setTimeout(() => {
+			searched = value;
+			onsearch();
+		}, 300);
+		return () => clearTimeout(timer);
+	});
+	function now() {
+		searched = query;
+		onsearch();
+	}
 </script>
 
-<div class="flex items-end gap-2">
-	<div class="min-w-0 flex-1">
-		<SearchField {id} {label} bind:value={query} maxlength={200} onenter={onsearch} />
-	</div>
-	<Button type="button" variant="outline" disabled={loading || disabled} onclick={onsearch}
-		>{loading ? 'Searching…' : 'Search tags'}</Button
-	>
-</div>
+<SearchField {id} {label} bind:value={query} maxlength={200} {disabled} onenter={now} />
+<p class="sr-only" role="status">{loading ? 'Searching tags' : ''}</p>
 {#if invalid}<p class="text-sm text-muted-foreground">
 		Search using letters, numbers, spaces or underscores.
 	</p>{/if}
