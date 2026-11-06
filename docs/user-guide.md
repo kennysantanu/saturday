@@ -6,7 +6,7 @@ Saturday keeps your job records and documents on your computer. Use the web app 
 
 ## Add and find jobs
 
-1. Open **Dashboard** or **Jobs** and choose **Add job**.
+1. Open **Jobs** and choose **Add job**.
 2. Enter a **Job title** and **Company**. The main form also has an optional posting link, description, notes, and a star checkbox. Under **More details**, you can add employment type, work arrangement, location, compensation, source, an application deadline. Add reminders from job detail after saving.
 3. Save the job to open its detail page. Use **Edit** there to correct its information later.
 
@@ -46,11 +46,11 @@ Configuration takes effect immediately without restarting. Other open browsers o
 
 Open a card to view details and use **Change stage** there. The Dashboard return link preserves job pages, but may reset the visible stage window; pages adjust if jobs have moved away. The board has no dragging or inline stage controls.
 
-Below the board, **Notifications** appears on the left and **Milestone history** on the right; they stack in that order on smaller screens. **View all jobs** beside the board heading opens the full Jobs list.
+Below the board, **Needs attention** and **Coming up** appear on the left and **Milestone history** on the right; they stack in that order on smaller screens. **View all jobs** beside the board heading opens the full Jobs list.
 
-**Milestone history** counts distinct jobs with each milestone across active and closed jobs, including scheduled milestones. Counts overlap; repeat milestones count a job once. Count links open the matching Jobs history filter, separately from current-stage filters.
+**Milestone history** counts distinct jobs with each milestone across active and closed jobs, including scheduled milestones. Counts overlap; repeat milestones count a job once. Each row has a bar showing that stage's share of all jobs, and the count links open the matching Jobs history filter, separately from current-stage filters.
 
-Under **Notifications**, **Needs attention** lists active reminders for jobs and people, including closed jobs, alongside open-job application deadlines. **Coming up** shows future history on open jobs. Dashboard uses saved stage names and ordering. Archived milestone counts remain available under **Archived milestones**; archived stages have no board columns.
+**Needs attention** lists active reminders for jobs and people, including closed jobs, alongside open-job application deadlines, grouped by urgency (Overdue, Today, Upcoming) and ordered by time. Each row shows how late or soon it is ("3 days overdue", "Tomorrow · 09:00", "Due in 2 days"); hover the date for the full date. Five rows show, always including at least one from each group, with **Show N more** for the rest. Long notes show two lines; hover for the whole note. Choose the check mark on a reminder to **dismiss** it; the message offers **Undo**, and dismissed reminders are also under Past reminders on the job or person. When something is overdue or due today, small links under the header ("3 overdue", "1 due today") jump to the list. Cards on the board show a star for starred jobs, a red dot when a reminder is overdue, and how many days the job has been in its stage (for example 5d; closed stages omit it). **Coming up** shows future history on open jobs. Dashboard uses saved stage names and ordering. Archived milestone counts remain available under **Archived milestones**; archived stages have no board columns.
 
 Job detail puts compact Reminders and Job details on the left at desktop widths, followed in reading order by History, Documents, Network and Job description on the right. On phones they stack in that order, with Job details initially collapsed. History initially shows five recent and three upcoming entries; Show more reveals the rest. Documents initially shows three files, with Show more for the loaded preview and Manage documents for the complete list. Long notes/descriptions have Show more/Show less disclosures; these preserve the full content and work without JavaScript.
 

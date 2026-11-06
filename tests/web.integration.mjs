@@ -326,7 +326,7 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		assert.ok(/class="filter-panel/.test(invalidSearch));
 		assert.ok(!/class="filter-panel is-collapsed"/.test(invalidSearch));
 		const dashboard = await (await fetch(base)).text();
-		assert.ok(dashboard.includes('Reminders'));
+		assert.ok(dashboard.includes('Needs attention'));
 		assert.ok(dashboard.includes('Send email'));
 		assert.ok(dashboard.includes('Overdue'));
 		const edited = await postJob(`/jobs/${newId}/edit`, {

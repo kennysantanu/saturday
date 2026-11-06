@@ -10,6 +10,7 @@ import {
 } from '../../job-fields.js';
 import { startingStage, stageById, readWorkflow } from './workflow.js';
 import { PIPELINE_PAGE_SIZE, pipelinePage } from '../../job-pipeline.js';
+import { daysBetween } from '../../dates.js';
 import { inTransaction, withDatabase, reserveJobFileIds } from '../database.js';
 export { deleteJob } from '../job-deletion.js';
 import {
@@ -509,6 +510,13 @@ export function getDashboardStats({ today = localCalendarDate(), pipelinePages =
 							.all(stage.id, PIPELINE_PAGE_SIZE, (page - 1) * PIPELINE_PAGE_SIZE)
 							.map((row) => {
 								const job = jobFromRow(row);
+								// When the job reached this stage: its latest milestone for the stage.
+								const since =
+									db
+										.prepare(
+											'SELECT MAX(event_date) AS d FROM job_updates WHERE job_id=? AND stage_id=?'
+										)
+										.get(job.id, stage.id)?.d ?? null;
 								return {
 									id: job.id,
 									title: job.title,
@@ -516,7 +524,8 @@ export function getDashboardStats({ today = localCalendarDate(), pipelinePages =
 									currentStage: job.currentStage,
 									isStarred: job.isStarred,
 									nextReminder: job.nextReminder,
-									applicationDeadline: job.applicationDeadline
+									applicationDeadline: job.applicationDeadline,
+									daysInStage: since ? Math.max(0, daysBetween(since, today)) : null
 								};
 							});
 						return {

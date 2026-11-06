@@ -82,8 +82,8 @@ test('Dashboard pipeline HTTP and browser paging, detail returns, closed jobs an
 		assert(html.includes('Job pipeline'));
 		assert(!html.includes('Recently updated'));
 		assert(!html.includes('Jobs you’re still pursuing'));
-		assert(html.indexOf('id="job-pipeline"') < html.indexOf('id="notifications-heading"'));
-		assert(html.indexOf('id="notifications-heading"') < html.indexOf('id="history-heading"'));
+		assert(html.indexOf('id="job-pipeline"') < html.indexOf('id="notifications"'));
+		assert(html.indexOf('id="notifications"') < html.indexOf('id="history-heading"'));
 		assert(html.includes('Archived milestones'));
 		assert(!html.includes(`id="pipeline-stage-${id('Interview')}"`));
 		assert(html.includes(`/jobs?view=all&amp;current_stage=${newId}`));
@@ -433,9 +433,7 @@ test('Dashboard pipeline HTTP and browser paging, detail returns, closed jobs an
 		);
 		assert(
 			await page.evaluate(() => {
-				const left = document
-					.querySelector('[aria-labelledby="notifications-heading"]')
-					.getBoundingClientRect();
+				const left = document.querySelector('#notifications').getBoundingClientRect();
 				const right = document
 					.querySelector('[aria-labelledby="history-heading"]')
 					.getBoundingClientRect();
@@ -496,9 +494,7 @@ test('Dashboard pipeline HTTP and browser paging, detail returns, closed jobs an
 		await page.$eval('.dashboard-overview', (el) => el.scrollIntoView({ block: 'start' }));
 		assert(
 			await page.evaluate(() => {
-				const left = document
-					.querySelector('[aria-labelledby="notifications-heading"]')
-					.getBoundingClientRect();
+				const left = document.querySelector('#notifications').getBoundingClientRect();
 				const right = document
 					.querySelector('[aria-labelledby="history-heading"]')
 					.getBoundingClientRect();

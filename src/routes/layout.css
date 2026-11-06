@@ -853,6 +853,101 @@ details[open] > summary > .collapse-label {
 	gap: 32px;
 	align-items: start;
 }
+.attention-row {
+	display: flex;
+	align-items: stretch;
+}
+.attention-link {
+	display: grid;
+	flex: 1;
+	min-width: 0;
+	grid-template-columns: 36px minmax(0, 1fr);
+	grid-template-areas: 'mark text' '. when';
+	align-items: center;
+	gap: 8px 12px;
+	padding: 14px 16px;
+	transition: background-color 160ms;
+}
+.attention-mark {
+	grid-area: mark;
+	width: 36px;
+	height: 36px;
+	border-radius: 11px;
+}
+.attention-text {
+	grid-area: text;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.attention-when {
+	grid-area: when;
+}
+.attention-when [data-slot='badge'] {
+	max-width: 100%;
+	height: auto;
+	min-height: 26px;
+	white-space: normal;
+}
+.attention-chevron {
+	display: none;
+}
+.attention-action {
+	display: grid;
+	place-items: center;
+	padding-inline: 4px 12px;
+}
+@media (width >= 40rem) {
+	.attention-link {
+		grid-template-columns: 36px minmax(0, 1fr) auto;
+		grid-template-areas: 'mark text when';
+		gap: 12px;
+		padding-inline: 20px;
+	}
+	.attention-when {
+		justify-self: end;
+		text-align: right;
+	}
+	.attention-link:not(:has(+ .attention-action)) {
+		grid-template-columns: 36px minmax(0, 1fr) auto 16px;
+	}
+	.attention-link:not(:has(+ .attention-action)) .attention-chevron {
+		display: block;
+	}
+}
+@media (hover: hover) {
+	.attention-link:hover {
+		background: var(--muted);
+	}
+}
+.attention-link:focus-visible {
+	outline-offset: -4px;
+	border-radius: var(--r-group);
+}
+.attention-summary {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+.attention-summary a {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 44px;
+	padding: 0 16px;
+	border: 1px solid var(--border);
+	border-radius: var(--r-control);
+	background: var(--card);
+	font-size: 0.875rem;
+}
+.attention-summary a[data-tone='overdue'] {
+	border-color: color-mix(in srgb, var(--destructive) 40%, var(--border));
+	background: color-mix(in srgb, var(--destructive) 10%, var(--card));
+}
+@media (hover: hover) {
+	.attention-summary a:hover {
+		background: var(--muted);
+	}
+}
 .group-title {
 	padding: 12px 24px;
 	font-size: 0.875rem;
@@ -862,17 +957,6 @@ details[open] > summary > .collapse-label {
 @media (width >= 64rem) {
 	.dashboard-overview {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-	}
-	.dashboard-overview .list-row {
-		grid-template-columns: 36px minmax(0, 1fr) 16px;
-	}
-	.dashboard-overview .list-row-status {
-		grid-column: 2;
-		align-items: flex-start;
-	}
-	.dashboard-overview .list-row > svg {
-		grid-column: 3;
-		grid-row: 1;
 	}
 }
 .pipeline-browser {
@@ -916,13 +1000,15 @@ details[open] > summary > .collapse-label {
 			var(--pipeline-columns)
 	);
 	min-width: 0;
+	/* The track fills the board, so every column background matches the tallest column. */
+	display: grid;
 }
 .pipeline-track {
 	display: grid;
 	grid-auto-flow: column;
 	grid-auto-columns: var(--pipeline-column-width);
 	gap: 12px;
-	align-items: start;
+	align-items: stretch;
 	transform: translateX(
 		calc(var(--pipeline-offset) - var(--pipeline-hidden) * (var(--pipeline-column-width) + 12px))
 	);
@@ -980,6 +1066,42 @@ details[open] > summary > .collapse-label {
 	overflow-y: auto;
 	margin: -4px;
 	padding: 4px;
+	/* Fade the edge that has more cards; nothing fades when the list fits (no scroll timeline). */
+	mask-image: linear-gradient(
+		to bottom,
+		transparent,
+		#000 var(--fade-top),
+		#000 calc(100% - var(--fade-bottom)),
+		transparent
+	);
+	animation: pipeline-fade linear both;
+	animation-timeline: scroll(self);
+}
+@property --fade-top {
+	syntax: '<length>';
+	inherits: false;
+	initial-value: 0px;
+}
+@property --fade-bottom {
+	syntax: '<length>';
+	inherits: false;
+	initial-value: 0px;
+}
+@keyframes pipeline-fade {
+	0% {
+		--fade-top: 0px;
+	}
+	8%,
+	100% {
+		--fade-top: 28px;
+	}
+	0%,
+	92% {
+		--fade-bottom: 28px;
+	}
+	100% {
+		--fade-bottom: 0px;
+	}
 }
 .pipeline-card,
 .pipeline-preview-card {
@@ -1001,21 +1123,63 @@ details[open] > summary > .collapse-label {
 	white-space: nowrap;
 	text-overflow: ellipsis;
 }
+/* Second line: company (ellipsized) with an overdue dot and "5d in stage" at the end. */
+.pipeline-card > .pipeline-meta {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.pipeline-meta > .truncate {
+	flex: 1;
+	min-width: 0;
+}
+.pipeline-flag {
+	flex-shrink: 0;
+	width: 0.5rem;
+	height: 0.5rem;
+	border-radius: 999px;
+	background: var(--destructive);
+}
 
 .milestone-counts {
 	display: grid;
 	gap: 8px;
 }
+/* Name and count on one line, a proportional bar (share of all jobs) beneath. */
 .milestone-count {
-	display: flex;
-	justify-content: space-between;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
 	align-items: baseline;
-	gap: 16px;
-	padding: 12px 16px;
+	gap: 6px 16px;
+	padding: 10px 16px 12px;
 	background: var(--card);
 	border-radius: var(--r-group);
 	overflow-wrap: anywhere;
 	font-size: 0.875rem;
+}
+.milestone-bar {
+	grid-column: 1 / -1;
+	height: 6px;
+	border-radius: 999px;
+	background: var(--muted);
+	overflow: hidden;
+}
+.milestone-bar > span {
+	display: block;
+	height: 100%;
+	border-radius: 999px;
+	background: var(--primary);
+}
+.milestone-count[data-closed] .milestone-bar > span {
+	background: var(--muted-foreground);
+}
+@media (forced-colors: active) {
+	.milestone-bar {
+		border: 1px solid CanvasText;
+	}
+	.milestone-bar > span {
+		background: Highlight;
+	}
 }
 .milestone-count > strong {
 	flex-shrink: 0;
