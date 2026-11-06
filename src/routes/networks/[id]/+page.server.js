@@ -43,14 +43,24 @@ export async function load({ params, url }) {
 			picker = await searchJobs({
 				view: 'all',
 				query: query.job_query ?? '',
-				page: query.picker_page
+				page: query.picker_page,
+				limit: 5
 			});
 	} catch (e) {
 		if (!(e instanceof ValidationError)) throw e;
 		errors = e.fieldErrors;
 		linkedJobs ??= await networks.listNetworkJobs({ network_id: params.id });
 		history ??= await networks.listNetworkUpdates({ network_id: params.id });
-		if (query.link_job === '1') picker = await searchJobs({ view: 'all' });
+		if (query.link_job === '1') picker = await searchJobs({ view: 'all', limit: 5 });
+	}
+	let selectedJob = null;
+	if (picker && query.job) {
+		try {
+			selectedJob = await getJob(query.job);
+		} catch (e) {
+			if (!(e instanceof ServiceError || e instanceof ValidationError)) throw e;
+			errors = { ...errors, job: 'The selected job was not found.' };
+		}
 	}
 	return {
 		tagOptions: await tagPickerData(
@@ -63,6 +73,7 @@ export async function load({ params, url }) {
 		linkedJobs,
 		history,
 		picker,
+		selectedJob,
 		linkedIds: picker ? await networks.networkLinkIds({ network_id: params.id }) : [],
 		query,
 		errors,

@@ -17,8 +17,6 @@
 	import PageHeader from '$lib/components/app/page-header.svelte';
 	import PageShell from '$lib/components/app/page-shell.svelte';
 	import Field from '$lib/components/app/field.svelte';
-	import SearchField from '$lib/components/app/search-field.svelte';
-	import SearchEmpty from '$lib/components/app/search-empty.svelte';
 	import Notice from '$lib/components/app/notice.svelte';
 	import ConfirmDialog from '$lib/components/app/confirm-dialog.svelte';
 	import UnsavedDialog from '$lib/components/app/unsaved-dialog.svelte';
@@ -27,7 +25,7 @@
 	import EmptyState from '$lib/components/app/empty-state.svelte';
 	import LinkedItem from '$lib/components/app/linked-item.svelte';
 	import Pagination from '$lib/components/app/pagination.svelte';
-	import RadioOption from '$lib/components/app/radio-option.svelte';
+	import NetworkJobPicker from '$lib/components/app/network-job-picker.svelte';
 	import SectionCard from '$lib/components/app/section-card.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -59,10 +57,6 @@
 	let noteJob = $state('');
 	let noteJobTitle = $state('');
 	let noteText = $state('');
-	let pickerOpen = $state(false);
-	$effect(() => {
-		pickerOpen = !!data.picker;
-	});
 	$effect(() => {
 		if (!form?.errors) return;
 		if (
@@ -87,7 +81,6 @@
 			noteJob = values.job_id ?? '';
 			noteText = values.notes ?? '';
 		}
-		if (form.action === 'network-linked') pickerOpen = true;
 	});
 	function href(changes: Record<string, string | number | null>) {
 		const params = new URLSearchParams(page.url.searchParams);
@@ -162,7 +155,7 @@
 					name={person.name}
 					counts={{ history: data.history.total, relationships: data.linkedJobs.total }}
 					action={formAction('deletePerson')}
-					disabled={interactionOpen || noteOpen || pickerOpen}
+					disabled={interactionOpen || noteOpen || !!data.picker}
 				/>
 			{/key}
 		{/snippet}
@@ -436,96 +429,6 @@
 	{/snippet}
 </UnsavedDialog>
 
-<Dialog.Root bind:open={pickerOpen}>
-	<Dialog.Content class="sm:max-w-2xl">
-		<Dialog.Header>
-			<Dialog.Title>Link to job</Dialog.Title>
-			<Dialog.Description
-				>Select an existing job for {person.name}. Inactive jobs are included.</Dialog.Description
-			>
-		</Dialog.Header>
-		<form method="GET" action={`/networks/${person.id}`} class="space-y-3">
-			<input type="hidden" name="return_to" value={data.returnTo} />
-			{#if Object.keys(data.errors).length}<Notice
-					tone="error"
-					title="Check the search or page values">{Object.values(data.errors).join(' ')}</Notice
-				>{/if}
-			<input type="hidden" name="link_job" value="1" />
-			{#if data.query.jobs_page}<input
-					type="hidden"
-					name="jobs_page"
-					value={data.query.jobs_page}
-				/>{/if}
-			{#if data.query.updates_page}<input
-					type="hidden"
-					name="updates_page"
-					value={data.query.updates_page}
-				/>{/if}
-			<SearchField
-				id="job_query"
-				label="Search jobs"
-				name="job_query"
-				value={data.query.job_query ?? ''}
-				maxlength={200}
-				placeholder="Title or company"
-			/>
-			<Button type="submit" variant="outline">Search jobs</Button>
-		</form>
-		<form method="POST" action={formAction('link')} use:enhance={enhanceNetwork} class="space-y-4">
-			{#if form?.action === 'network-linked' && errors.form}<Notice
-					tone="error"
-					title="Could not link job">{errors.form}</Notice
-				>{/if}
-			<fieldset class="space-y-2">
-				<legend class="mb-2 text-sm font-medium"
-					>Choose a job <span class="text-destructive" aria-hidden="true">*</span></legend
-				>
-				{#each data.picker?.jobs ?? [] as job (job.id)}
-					<RadioOption
-						name="job_id"
-						value={job.id}
-						required
-						disabled={data.linkedIds.includes(job.id)}
-						checked={values.job_id === String(job.id)}
-						label={`${job.title} #${job.id}`}
-						description={`${job.company}${!job.isActive ? ' · Closed' : ''}${data.linkedIds.includes(job.id) ? ' · Already linked' : ''}`}
-					/>
-				{/each}
-				{#if !data.picker?.jobs.length}<SearchEmpty noun="jobs"
-						><a href="/jobs/new" class="link">Add a job</a></SearchEmpty
-					>{/if}
-			</fieldset>
-			{#if errors.job_id}<p class="text-sm text-destructive" role="alert" tabindex="-1">
-					{errors.job_id}
-				</p>{/if}
-			{#if data.picker}
-				<Pagination
-					label="Job picker pages"
-					page={data.picker.page}
-					totalPages={data.picker.totalPages}
-					previous={href({ picker_page: data.picker.page - 1 })}
-					next={href({ picker_page: data.picker.page + 1 })}
-				/>
-			{/if}
-			<Field
-				id="link_notes"
-				label="Relationship note"
-				error={form?.action === 'network-linked' ? errors.notes : undefined}
-			>
-				{#snippet control(attrs)}<Textarea
-						{...attrs}
-						name="notes"
-						maxlength={2000}
-						rows={3}
-						value={form?.action === 'network-linked' ? values.notes : ''}
-					/>{/snippet}
-			</Field>
-			<Dialog.Footer>
-				<Button variant="ghost" href={href({ link_job: null, job_query: null, picker_page: null })}
-					>Cancel</Button
-				>
-				<Button type="submit" disabled={!data.picker?.jobs.length}>Link job</Button>
-			</Dialog.Footer>
-		</form>
-	</Dialog.Content>
-</Dialog.Root>
+{#if data.picker}
+	{#key person.id}<NetworkJobPicker {data} {form} />{/key}
+{/if}

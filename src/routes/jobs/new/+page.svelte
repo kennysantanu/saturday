@@ -24,9 +24,18 @@
 
 <PageShell title="Add job" width="form">
 	<PageHeader
-		back={{ href: data.returnTo, label: data.returnTo.startsWith('/jobs') ? 'Jobs' : 'Dashboard' }}
+		back={{
+			href: data.returnTo,
+			label: data.person
+				? data.person.name
+				: data.returnTo.startsWith('/jobs')
+					? 'Jobs'
+					: 'Dashboard'
+		}}
 		title="Add job"
-		description="Start with the title and company. You can add more later."
+		description={data.person
+			? `Start with the title and company. You can link ${data.person.name} next.`
+			: 'Start with the title and company. You can add more later.'}
 	/>
 
 	{#if errors.form}

@@ -64,14 +64,11 @@ test('Link person keeps its footer visible and preserves selection and notes thr
 		await page.setViewport({ width: 320, height: 740 });
 		await settle();
 		await page.locator('a[href*="link_person=1"]').click();
-		await page.waitForSelector('.person-picker');
+		await page.waitForSelector('.link-picker');
 		await settle();
-		assert.equal(
-			await page.$$eval('.person-picker input[type="radio"]', (items) => items.length),
-			5
-		);
+		assert.equal(await page.$$eval('.link-picker input[type="radio"]', (items) => items.length), 5);
 		assert.equal(await page.$eval('button[form="job-person-link"]', (el) => el.disabled), true);
-		await page.$eval('.person-picker-body', (el) => {
+		await page.$eval('.link-picker-body', (el) => {
 			el.scrollTop = el.scrollHeight;
 		});
 		assert(
@@ -87,24 +84,21 @@ test('Link person keeps its footer visible and preserves selection and notes thr
 			})
 		);
 		await page.screenshot({ path: '/tmp/saturday-person-picker-phone.png' });
-		const beforeSelection = await page.$eval('.person-picker', (el) => {
+		const beforeSelection = await page.$eval('.link-picker', (el) => {
 			const rect = el.getBoundingClientRect();
 			return { width: rect.width, height: rect.height };
 		});
-		await page.locator('.person-picker input[type="radio"]:not(:disabled)').click();
+		await page.locator('.link-picker input[type="radio"]:not(:disabled)').click();
 		assert.equal(await page.$$eval('#person_query', (els) => els.length), 1);
 		assert.equal(await page.$$eval('#new_network_relationship_note', (els) => els.length), 1);
 		assert.deepEqual(
-			await page.$eval('.person-picker', (el) => {
+			await page.$eval('.link-picker', (el) => {
 				const rect = el.getBoundingClientRect();
 				return { width: rect.width, height: rect.height };
 			}),
 			beforeSelection
 		);
-		assert.equal(
-			await page.$eval('.person-picker input[type="radio"]:checked', (el) => !!el),
-			true
-		);
+		assert.equal(await page.$eval('.link-picker input[type="radio"]:checked', (el) => !!el), true);
 		await page.waitForSelector('#new_network_relationship_note');
 		const chosenPerson = await page.$eval(
 			'#job-person-link input[name="network_id"]',
@@ -113,7 +107,6 @@ test('Link person keeps its footer visible and preserves selection and notes thr
 		await page.type('#new_network_relationship_note', 'Keep this relationship draft');
 		await page.waitForSelector('#person_query');
 		await page.locator('#person_query').fill('A navigation');
-		await page.click('button::-p-text(Search people)');
 		await page.waitForFunction(
 			() => new URL(location.href).searchParams.get('person_query') === 'A navigation'
 		);
@@ -135,7 +128,7 @@ test('Link person keeps its footer visible and preserves selection and notes thr
 			await page.$eval('#new_network_relationship_note', (el) => el.value),
 			'Keep this relationship draft'
 		);
-		await page.click('.person-picker > [data-slot="dialog-footer"] button[data-variant="ghost"]');
+		await page.click('.link-picker > [data-slot="dialog-footer"] button[data-variant="ghost"]');
 		await page.waitForSelector('button::-p-text(Keep editing)');
 		await button('Keep editing');
 		await page.waitForSelector('button::-p-text(Keep editing)', { hidden: true });
@@ -181,7 +174,7 @@ test('Link person keeps its footer visible and preserves selection and notes thr
 		await page.setViewport({ width: 1280, height: 960 });
 		await settle();
 		const fieldLayout = await page.evaluate(() => {
-			const dialog = document.querySelector('.person-picker');
+			const dialog = document.querySelector('.link-picker');
 			const search = document.querySelector('#person_query').getBoundingClientRect();
 			const note = document.querySelector('#new_network_relationship_note').getBoundingClientRect();
 			return {
@@ -197,7 +190,7 @@ test('Link person keeps its footer visible and preserves selection and notes thr
 		assert.equal(fieldLayout.padding, '28px');
 		await page.screenshot({ path: '/tmp/saturday-person-picker-selected.png' });
 		await page.click('button[form="job-person-link"]');
-		await page.waitForSelector('.person-picker', { hidden: true });
+		await page.waitForSelector('.link-picker', { hidden: true });
 		await settle();
 		assert.equal(
 			listNetworks({ job_id: layoutJob.id }).networks[0].job_link.notes,
