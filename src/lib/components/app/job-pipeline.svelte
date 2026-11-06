@@ -5,6 +5,7 @@
 	import { onMount, tick } from 'svelte';
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import Star from '@lucide/svelte/icons/star';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import Pagination from './pagination.svelte';
 	import { jobDetailUrl } from '$lib/job-navigation.js';
@@ -16,9 +17,27 @@
 		total: number;
 		page: number;
 		totalPages: number;
-		jobs: { id: number; title: string; company: string }[];
+		is_closed?: boolean;
+		jobs: {
+			id: number;
+			title: string;
+			company: string;
+			isStarred?: boolean;
+			nextReminder?: string | null;
+			daysInStage?: number | null;
+		}[];
 	};
-	let { columns }: { columns: Column[] } = $props();
+	let { columns, now = '' }: { columns: Column[]; now?: string } = $props();
+	const overdue = (job: Column['jobs'][number]) => !!job.nextReminder && job.nextReminder < now;
+	// Signals read at a glance and are repeated in the link's name for assistive technology.
+	function signals(job: Column['jobs'][number], closed: boolean) {
+		const names: string[] = [];
+		if (job.isStarred) names.push('starred');
+		if (overdue(job)) names.push('reminder overdue');
+		const age = !closed && job.daysInStage ? job.daysInStage : 0;
+		if (age) names.push(`${age} ${age === 1 ? 'day' : 'days'} in this stage`);
+		return { names, age };
+	}
 	let firstVisibleStageId = $state<number | null>(null);
 	let ready = $state(false);
 	let board: HTMLDivElement;
@@ -331,11 +350,27 @@
 													'#job-pipeline'
 												)
 											)}
-											aria-label={`Job #${job.id}: ${job.title} at ${job.company}`}
+											aria-label={`Job #${job.id}: ${job.title} at ${job.company}${signals(job, !!column.is_closed).names.length ? ', ' + signals(job, !!column.is_closed).names.join(', ') : ''}`}
 											title={`${job.title} · ${job.company}`}
 										>
-											<p class="truncate text-sm font-semibold">{job.title}</p>
-											<p class="truncate text-sm text-muted-foreground">{job.company}</p>
+											<p class="truncate text-sm font-semibold">
+												{#if job.isStarred}<Star
+														class="-mt-0.5 mr-1 inline size-3.5 fill-current text-primary"
+														aria-hidden="true"
+													/>{/if}{job.title}
+											</p>
+											<p class="pipeline-meta text-sm text-muted-foreground">
+												<span class="truncate">{job.company}</span>
+												{#if overdue(job)}<span
+														class="pipeline-flag"
+														title="Reminder overdue"
+														aria-hidden="true"
+													></span>{/if}
+												{#if signals(job, !!column.is_closed).age}<span
+														class="meta-text shrink-0 tabular-nums"
+														aria-hidden="true">{signals(job, !!column.is_closed).age}d</span
+													>{/if}
+											</p>
 										</a>
 									</li>
 								{/each}

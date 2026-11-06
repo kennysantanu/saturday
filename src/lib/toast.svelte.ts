@@ -41,20 +41,34 @@ export const SAVED_MESSAGES: Record<string, string> = {
 	reopened: 'Job reopened.'
 };
 
+export type ToastAction = { label: string; run: () => void | Promise<void> };
+
 let message = $state('');
+let action = $state<ToastAction | null>(null);
 let timer: ReturnType<typeof setTimeout> | undefined;
 
 export const toast = {
 	get message() {
 		return message;
 	},
-	show(text: string, duration = 5000) {
+	get action() {
+		return action;
+	},
+	/** `options` is a duration in ms, or `{ duration, action }` to add a button such as Undo. */
+	show(text: string, options: number | { duration?: number; action?: ToastAction } = 5000) {
+		const { duration = 5000, action: next = null } =
+			typeof options === 'number' ? { duration: options } : options;
 		clearTimeout(timer);
 		message = text;
-		timer = setTimeout(() => (message = ''), duration);
+		action = next;
+		timer = setTimeout(() => {
+			message = '';
+			action = null;
+		}, duration);
 	},
 	dismiss() {
 		clearTimeout(timer);
 		message = '';
+		action = null;
 	}
 };

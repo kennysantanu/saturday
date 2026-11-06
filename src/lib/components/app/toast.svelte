@@ -11,6 +11,19 @@
 		<div class="toast glass-surface">
 			<CircleCheck class="size-5" aria-hidden="true" />
 			<span>{toast.message}</span>
+			{#if toast.action}
+				{@const action = toast.action}
+				<Button
+					variant="ghost"
+					size="sm"
+					onclick={async () => {
+						// Read the action first: dismissing clears it.
+						const { run } = action;
+						toast.dismiss();
+						await run();
+					}}>{action.label}</Button
+				>
+			{/if}
 			<Button
 				variant="ghost"
 				size="icon"

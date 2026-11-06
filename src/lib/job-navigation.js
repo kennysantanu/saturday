@@ -33,3 +33,8 @@ export function jobDetailUrl(id, returnTo = '/jobs', saved) {
 	if (saved) query.set('saved', saved);
 	return `/jobs/${id}?${query}`;
 }
+
+/** The Add job form; `returnTo` is where Cancel and the back link lead (the Dashboard by default). */
+export function newJobUrl(returnTo = '/') {
+	return '/jobs/new?return_to=' + encodeURIComponent(jobReturn(returnTo));
+}
