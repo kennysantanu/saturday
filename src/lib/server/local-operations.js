@@ -14,7 +14,7 @@ import { Readable } from 'node:stream';
 import { createReadStream } from 'node:fs';
 import { getInstallation } from './installation.js';
 import { openDatabase } from './database.js';
-import { buildInfo } from './compatibility.js';
+import { applicationVersion, buildInfo, storageCompatibility } from './compatibility.js';
 
 const nodeContent = (stream) => (stream?.getReader ? Readable.fromWeb(stream) : stream);
 const webContent = (stream) =>
@@ -129,6 +129,11 @@ export const localOperations = {
 		const db = openDatabase({ migrate: false });
 		try {
 			return {
+				version: applicationVersion,
+				storage: {
+					database: storageCompatibility.database,
+					manifest: storageCompatibility.manifest
+				},
 				installation_id: installation.installation_id,
 				dataset_id: db.prepare('SELECT dataset_id FROM app_metadata WHERE id=1').get().dataset_id,
 				build: buildInfo,

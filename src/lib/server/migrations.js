@@ -1,5 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import baselines from '../../../release-baselines.json' with { type: 'json' };
 
 export const databaseFormat = 'saturday.database';
 
@@ -173,6 +174,40 @@ CREATE INDEX recent_networks_order ON recent_network_views(viewed_at DESC,networ
 ];
 
 export const schemaVersion = migrations.at(-1)?.version ?? 0;
+
+export function migrationChecksums() {
+	return migrations.map(({ version, name, sql }) => ({
+		version,
+		name,
+		sha256: createHash('sha256').update(sql.replaceAll('\r\n', '\n')).digest('hex')
+	}));
+}
+
+// Validate definitions before opening any database, including during setup/builds.
+if (baselines.format !== 'saturday.release-baselines' || baselines.version !== 1)
+	throw new Error('Unsupported release baseline lock.');
+const names = new Set();
+for (const [index, migration] of migrations.entries()) {
+	if (
+		migration.version !== index + 1 ||
+		typeof migration.name !== 'string' ||
+		!migration.name.trim() ||
+		names.has(migration.name) ||
+		typeof migration.sql !== 'string' ||
+		!migration.sql.trim()
+	)
+		throw new Error('Migrations must have unique names and consecutive versions starting at 1.');
+	names.add(migration.name);
+}
+const checksums = migrationChecksums();
+for (const release of baselines.releases)
+	for (const frozen of release.migrations) {
+		const current = checksums[frozen.version - 1];
+		if (current?.name !== frozen.name || current?.sha256 !== frozen.sha256)
+			throw new Error(
+				`Released migration ${frozen.version} is immutable. Restore it and append a new numbered migration.`
+			);
+	}
 const migrationTable = `CREATE TABLE IF NOT EXISTS schema_migrations (
  version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL
 );`;
@@ -271,3 +306,14 @@ export function applyMigrations(db, targetVersion = schemaVersion) {
 		throw error;
 	}
 }
+
+export function databaseSchemaChecksum(version = schemaVersion) {
+	return createHash('sha256').update(expectedSignature(version)).digest('hex');
+}
+// The ledger and complete initial table/index definitions are locked as well as SQL.
+for (const release of baselines.releases)
+	if (
+		databaseSchemaChecksum(release.storage.database.currentVersion) !==
+		release.database_schema_sha256
+	)
+		throw new Error('Released database schema is immutable. Append a numbered migration instead.');

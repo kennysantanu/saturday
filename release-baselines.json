@@ -1,0 +1,34 @@
+{
+	"format": "saturday.release-baselines",
+	"version": 1,
+	"releases": [
+		{
+			"version": "0.1.0",
+			"source_sha256": "5b5a2dc598bf5ddc66b9386c60f15d889d6d7c0c8d457dfcf0de0571a64da6a0",
+			"storage": {
+				"database": {
+					"format": "saturday.database",
+					"minimumVersion": 1,
+					"currentVersion": 1
+				},
+				"manifest": {
+					"format": "saturday.files",
+					"minimumVersion": 1,
+					"version": 1
+				}
+			},
+			"migrations": [
+				{
+					"version": 1,
+					"name": "create_initial_schema",
+					"sha256": "f850f36eb03f88f4b4f04a37a8e7c6cfe84bbfd11149811bce294dbf9826ec8e"
+				}
+			],
+			"database_schema_sha256": "12304d329ec2bba31e5458ace32ab5aa80fc05bf888ae2b241545e1016ef712e",
+			"fixture": {
+				"path": "tests/fixtures/release-0.1.0-current/expected.json",
+				"sha256": "cc51bc34c837099f78db3110347fcd418d17600347d287bf23647f0a91d822c9"
+			}
+		}
+	]
+}

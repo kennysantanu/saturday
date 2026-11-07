@@ -218,6 +218,8 @@ Source-channel updates compare exact `main` commits. Stable-release selection us
 
 After completion, reconnect MCP and [verify installation/dataset/build identities](assistant-guide.md#verify-the-connection). Regenerate configuration if runtime paths changed.
 
+A connected assistant can use `check_for_updates`, show the checked target for approval, then call `update_saturday` with its check ID and `confirm: true`. Disconnect all Saturday MCP clients immediately afterward. The independent controller stages software and waits up to two minutes for disconnection before publication. Check completion in Settings, then reconnect and verify app/storage versions and installation/dataset/build identity. See the [MCP update contract](mcp-reference.md#application-updates). Password recovery remains host-terminal-only.
+
 ## Repair
 
 **Repair installation** retries compatible setup without resetting records. From a source checkout, use `npm run repair -- --retry-pdf`; for an explicit installation:

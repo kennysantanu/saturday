@@ -1031,7 +1031,7 @@
 					<div class="status-row">
 						<p class="status-label">Installed</p>
 						<p class="status-value select-text">
-							{data.installation.release || data.installation.build?.id || data.buildInfo.id}
+							{data.applicationVersion}
 						</p>
 					</div>
 					{#if form?.installationError}<Notice tone="error" title="Installation operation failed"

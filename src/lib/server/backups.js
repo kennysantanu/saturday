@@ -37,7 +37,7 @@ import { getDatabasePath, getProjectRoot, inTransaction, reserveJobFileIds } fro
 import { applyMigrations, assertMigrationHistory } from './migrations.js';
 import { parseJobInput, parseAssessment, validDate, parseUpdateInput } from './validation.js';
 import { jobColumns, jobFields } from '../job-fields.js';
-import { storageCompatibility, buildInfo } from './compatibility.js';
+import { storageCompatibility, buildInfo, applicationVersion } from './compatibility.js';
 
 export const MAX_BACKUP_BYTES = 100 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -539,7 +539,7 @@ function publish(temp, kind, now) {
 		filename: `saturday-${kind}-${new Date(now).toISOString().replace(/[:.]/g, '-')}.sqlite`,
 		kind,
 		created_at: new Date(now).toISOString(),
-		app_version: '0.0.1',
+		app_version: applicationVersion,
 		creator_build: buildInfo.id,
 		...counts,
 		bytes: regular(temp).size,

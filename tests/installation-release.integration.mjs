@@ -9,14 +9,15 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer } from 'node:net';
+import { DatabaseSync } from 'node:sqlite';
 import { install, run as installerRun } from '../scripts/install.mjs';
 import { serverSummary } from '../src/lib/server/server-lifecycle.js';
 import { connectMcp } from './helpers/mcp-client.mjs';
 const exec = promisify(execFile);
 
 test(
-	'Settings installs checked fictional releases with preserved records, protected reopen and failed-download recovery',
-	{ timeout: 240000 },
+	'Settings and MCP install checked releases, preserve data through a forward migration and recover failed updates',
+	{ timeout: 360000 },
 	async () => {
 		const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'saturday-release-http-'))),
 			source = join(root, 'source'),
@@ -45,13 +46,17 @@ test(
 				join(source, 'src/lib/server/migrations.js'),
 				'utf8'
 			);
+			const migrationTwo =
+				"{version: 2, name: 'fictional_release_index', sql: 'CREATE INDEX fictional_release_upgrade ON jobs(company_name, id);'}";
 			for (const version of ['0.1.0', '0.1.1', '0.1.2', '0.1.3', '0.1.4', '0.1.5', '0.1.6']) {
+				const migrated = !['0.1.0', '0.1.1'].includes(version);
 				for (const file of ['package.json', 'package-lock.json']) {
 					const data = JSON.parse(await fs.readFile(join(source, file)));
 					data.version = version;
 					if (file === 'package.json') {
 						data.scripts.build = originalBuild;
-						data.saturday.storage.database.currentVersion = version === '0.1.4' ? 2 : 1;
+						data.saturday.storage.database.currentVersion =
+							version === '0.1.4' ? 3 : migrated ? 2 : 1;
 						data.saturday.lan_api = version === '0.1.5' ? 0 : 1;
 						data.saturday.access_api = version === '0.1.6' ? 0 : 1;
 					}
@@ -60,18 +65,19 @@ test(
 					if (data.packages?.['']) data.packages[''].version = version;
 					await fs.writeFile(join(source, file), JSON.stringify(data, null, 2));
 				}
-				await fs.writeFile(join(source, 'src/lib/server/migrations.js'), originalMigrations);
-				if (version === '0.1.4') {
-					// This deliberately failing migration exists only in the fictional tarball.
-					const path = join(source, 'src/lib/server/migrations.js');
-					const sql = await fs.readFile(path, 'utf8');
-					const changed = sql.replace(
+				if (migrated) {
+					// These migrations exist only in the fictional release tarballs.
+					const extra =
+						version === '0.1.4'
+							? `,\n{version: 3, name: 'fictional_copy_failure', sql: 'CREATE TABLE fictional_partial(id INTEGER); CREATE UNIQUE INDEX fictional_copy_failure ON jobs((1));'}`
+							: '';
+					const changed = originalMigrations.replace(
 						'\n];\n\nexport const schemaVersion',
-						`,\n{version: 2, name: 'fictional_copy_failure', sql: 'CREATE TABLE fictional_partial(id INTEGER); SELECT * FROM fictional_missing_table;'}\n];\n\nexport const schemaVersion`
+						`,\n${migrationTwo}${extra}\n];\n\nexport const schemaVersion`
 					);
-					assert.notEqual(changed, sql);
-					await fs.writeFile(path, changed);
-				}
+					assert.notEqual(changed, originalMigrations);
+					await fs.writeFile(join(source, 'src/lib/server/migrations.js'), changed);
+				} else await fs.writeFile(join(source, 'src/lib/server/migrations.js'), originalMigrations);
 				await git('add', '.');
 				await git(
 					'-c',
@@ -169,6 +175,28 @@ test(
 				...documentKeys
 			];
 			let baseline = await Promise.all(dataPaths.map((p) => fs.readFile(p)));
+			const records = () => {
+				const db = new DatabaseSync(config.database, { readOnly: true });
+				try {
+					return Object.fromEntries(
+						db
+							.prepare(
+								"SELECT name FROM sqlite_schema WHERE type='table' AND name!='schema_migrations' ORDER BY name"
+							)
+							.all()
+							.map(({ name }) => [
+								name,
+								db
+									.prepare(`SELECT * FROM "${name}" ORDER BY rowid`)
+									.all()
+									.map((row) => ({ ...row }))
+							])
+					);
+				} finally {
+					db.close();
+				}
+			};
+			const originalRecords = records();
 			let url = receipt.url,
 				cookies = new Map();
 			function remember(response) {
@@ -252,20 +280,68 @@ test(
 				}
 				state.selected = version;
 				await save();
-				assert.equal((await action('checkUpdates')).type, 'success');
-				const check = JSON.parse(
-					await fs.readFile(join(root, 'installation/installation.state/check.json'))
-				);
-				assert.equal(
-					(
-						await action('installationOperation', {
-							operation: 'update',
-							confirm: 'true',
-							check_id: check.id
-						})
-					).type,
-					'success'
-				);
+				if (version === '0.1.1') {
+					assert.equal((await action('checkUpdates')).type, 'success');
+					const check = JSON.parse(
+						await fs.readFile(join(root, 'installation/installation.state/check.json'))
+					);
+					assert.equal(
+						(
+							await action('installationOperation', {
+								operation: 'update',
+								confirm: 'true',
+								check_id: check.id
+							})
+						).type,
+						'success'
+					);
+				} else {
+					client = await connectMcp({
+						entry: join(config.code_root, 'build/mcp/index.js'),
+						env: process.env
+					});
+					const discovered = (await client.request('tools/list')).tools.map((tool) => tool.name);
+					for (const name of ['check_for_updates', 'update_saturday', 'get_update_status'])
+						assert(discovered.includes(name));
+					const check = await client.call('check_for_updates');
+					assert.equal(check.target.release, version);
+					assert.equal(
+						(await client.raw('update_saturday', { check_id: check.id, confirm: false })).isError,
+						true
+					);
+					assert.equal(
+						(
+							await client.raw('update_saturday', {
+								check_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+								confirm: true
+							})
+						).isError,
+						true
+					);
+					const queued = await client.call('update_saturday', {
+						check_id: check.id,
+						confirm: true
+					});
+					assert.equal(queued.reconnect_required, true);
+					let waiting;
+					for (let i = 0; i < 1200; i++) {
+						waiting = JSON.parse(
+							await fs.readFile(join(root, 'installation/installation.state/operation.json'))
+						);
+						if (waiting.status === 'waiting_for_disconnect' || waiting.error) break;
+						await new Promise((r) => setTimeout(r, 100));
+					}
+					assert.equal(waiting.status, 'waiting_for_disconnect', JSON.stringify(waiting));
+					assert.equal(waiting.error, undefined);
+					assert.equal(
+						(await client.call('get_update_status')).operation.status,
+						'waiting_for_disconnect'
+					);
+					assert.equal(JSON.parse(await fs.readFile(descriptor)).release, '0.1.1');
+					assert.deepEqual(records(), originalRecords);
+					await client.close();
+					client = null;
+				}
 				const completed = await terminal();
 				assert.equal(completed.status, 'complete', JSON.stringify(completed));
 				config = JSON.parse(await fs.readFile(descriptor));
@@ -273,8 +349,28 @@ test(
 				assert.equal(config.installation_id, receipt.installation_id);
 				assert.equal(config.build.commit, state.releases[version].metadata.commit);
 				url = completed.url ?? `http://127.0.0.1:${config.port}`;
-				for (let i = 0; i < dataPaths.length; i++)
+				for (let i = version === '0.1.2' ? 1 : 0; i < dataPaths.length; i++)
 					assert.deepEqual(await fs.readFile(dataPaths[i]), baseline[i], dataPaths[i]);
+				assert.deepEqual(records(), originalRecords);
+				const db = new DatabaseSync(config.database, { readOnly: true });
+				try {
+					assert.equal(
+						db.prepare('SELECT max(version) version FROM schema_migrations').get().version,
+						version === '0.1.2' ? 2 : 1
+					);
+					if (version === '0.1.2')
+						assert.equal(
+							db
+								.prepare(
+									"SELECT count(*) n FROM sqlite_schema WHERE name='fictional_release_upgrade'"
+								)
+								.get().n,
+							1
+						);
+				} finally {
+					db.close();
+				}
+				baseline[0] = await fs.readFile(config.database);
 				await settings(password);
 				client = await connectMcp({
 					entry: join(config.code_root, 'build/mcp/index.js'),
@@ -282,6 +378,8 @@ test(
 				});
 				const info = await client.call('get_saturday_info');
 				assert.equal(info.jobs, 2);
+				assert.equal(info.version, version);
+				assert.equal(info.storage.database.currentVersion, version === '0.1.2' ? 2 : 1);
 				assert.equal(info.build.commit, config.build.commit);
 				assert((await client.call('search_documentation', { query: 'phone' })).results.length);
 				await client.close();
@@ -340,7 +438,10 @@ test(
 			);
 			const migrationFailure = await terminal();
 			assert.equal(migrationFailure.status, 'failed');
-			assert.match(await fs.readFile(migrationFailure.log, 'utf8'), /fictional_missing_table/);
+			assert.match(
+				await fs.readFile(migrationFailure.log, 'utf8'),
+				/UNIQUE constraint failed.*fictional_copy_failure/
+			);
 			assert.equal(JSON.parse(await fs.readFile(descriptor)).release, '0.1.2');
 			url = JSON.parse(await fs.readFile(join(config.data_root, 'server.state/server.json'))).url;
 			await settings('fictional-test-password');

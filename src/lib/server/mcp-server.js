@@ -4,7 +4,7 @@ import { createDocumentationHelp } from '../documentation/help.js';
 import { createAssistantCatalog } from '../application/assistant-catalog.js';
 import { McpServer } from '@modelcontextprotocol/server';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
-import { localCapabilities } from './platform.js';
+import { localCapabilities, localPlatform } from './platform.js';
 import { assistantApplication } from './application.js';
 import { buildInfo } from './compatibility.js';
 import { ServiceError, ValidationError } from '../domain/validation.js';
@@ -75,6 +75,33 @@ function publicDeletionError(error) {
 }
 for (const [name, description, inputSchema, execute] of [
 	[
+		'check_for_updates',
+		'Check for a verified Saturday release for this installation. Returns a check ID and target. Read the result and obtain explicit user approval before update_saturday. Does not install software.',
+		z.object({}).strict(),
+		() => localPlatform.checkUpdates()
+	],
+	[
+		'get_update_status',
+		'Read the last Saturday installation operation and update check without starting another operation. After a queued update, disconnect all Saturday MCP clients; reconnect afterward and compare version/installation/dataset/build with Settings.',
+		z.object({}).strict(),
+		() => ({ operation: localPlatform.operationStatus(), check: localPlatform.installedCheck() })
+	],
+	[
+		'update_saturday',
+		'Queue the exact checked Saturday update after explicit user approval. Requires check_id from check_for_updates and confirm:true. The independent controller stages software, waits up to two minutes for all MCP clients to disconnect, then backs up, migrates and publishes. Disconnect immediately after this tool returns; reconnect only after completion in Settings. A queued result is not success. No arbitrary commands, paths, password changes or uninstall.',
+		z.object({ check_id: z.string().uuid(), confirm: z.literal(true) }).strict(),
+		async ({ check_id, confirm }) => ({
+			operation: await localPlatform.queueOperation('update', {
+				check_id,
+				confirm,
+				wait_for_disconnect: true
+			}),
+			reconnect_required: true,
+			next_step:
+				'Disconnect all Saturday MCP clients now. The independent controller continues. Check completion in Settings, reconnect, then call get_saturday_info and read a known record.'
+		})
+	],
+	[
 		'search_documentation',
 		'Search this build’s bundled Saturday guides for setup, phone/LAN, forgotten passwords, usage and development. Omit query for the guide index. Read-only, offline; does not access career records or execute recovery.',
 		z
@@ -99,11 +126,15 @@ for (const [name, description, inputSchema, execute] of [
 		{
 			description,
 			inputSchema,
-			annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
+			annotations: {
+				readOnlyHint: name !== 'update_saturday',
+				destructiveHint: name === 'update_saturday',
+				openWorldHint: name === 'update_saturday' || name === 'check_for_updates'
+			}
 		},
 		async (input) => {
 			try {
-				return toolResult(execute(input));
+				return toolResult(await execute(input));
 			} catch (error) {
 				return toolError(error);
 			}

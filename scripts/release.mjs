@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
 import { validateRelease } from '../src/lib/distribution.js';
 import { storageCompatibility } from '../src/lib/server/compatibility.js';
+import { checkReleasePolicy } from './check-release.mjs';
 
 function candidate({ root, commit, verifiedCommit, tag }) {
 	root = resolve(root);
@@ -45,6 +46,7 @@ function candidate({ root, commit, verifiedCommit, tag }) {
 		source: { type: 'github-source' }
 	};
 	validateRelease(metadata, { tag_name: tag });
+	checkReleasePolicy(root, { requireFrozen: true });
 	return metadata;
 }
 export function generateRelease(options) {
