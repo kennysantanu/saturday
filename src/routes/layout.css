@@ -288,21 +288,6 @@ p {
 	padding-top: 12px;
 	font-size: 0.875rem;
 }
-@media (width < 48rem) {
-	.recent-sheet[data-slot='dialog-content'] {
-		top: auto;
-		bottom: 0;
-		left: 0;
-		width: 100%;
-		max-width: 100%;
-		max-height: 85dvh;
-		overflow-y: auto;
-		transform: none;
-		translate: none;
-		border-radius: var(--r-group) var(--r-group) 0 0;
-		padding-bottom: max(16px, env(safe-area-inset-bottom));
-	}
-}
 .topbar-brand {
 	flex-shrink: 0;
 	white-space: nowrap;
@@ -855,29 +840,48 @@ details[open] > summary > .collapse-label {
 }
 
 /* ---- Toast ---- */
-.toast {
+.toast-region {
 	position: fixed;
 	z-index: 45;
 	left: 50%;
 	translate: -50% 0;
-	bottom: max(24px, env(safe-area-inset-bottom));
+	bottom: calc(var(--keyboard-inset, 0px) + max(24px, env(safe-area-inset-bottom)));
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	width: max-content;
+	max-width: min(440px, calc(100% - 32px));
+	pointer-events: none;
+}
+.toast {
+	pointer-events: auto;
 	display: flex;
 	align-items: center;
 	gap: 12px;
-	width: max-content;
-	max-width: min(440px, calc(100% - 32px));
+	max-width: 100%;
 	padding: 10px 10px 10px 18px;
 	border-radius: var(--r-shell);
 	font-size: 0.9375rem;
 	font-weight: 550;
 	animation: toast-in 220ms ease-out;
 }
+.toast > span {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
 .toast > svg {
 	flex-shrink: 0;
 	color: var(--success);
 }
+.toast[data-tone='error'] > svg {
+	color: var(--destructive);
+}
+.toast[data-tone='info'] > svg {
+	color: var(--primary);
+}
 .toast [data-slot='button'] {
-	border-radius: 50%;
+	border-radius: 999px;
 	min-width: 40px;
 	min-height: 40px;
 }
@@ -1712,8 +1716,10 @@ html {
 		padding: 6px;
 		border-radius: var(--r-shell);
 	}
-	.toast {
-		bottom: calc(var(--tabbar-h) + max(12px, env(safe-area-inset-bottom)) + 12px);
+	.toast-region {
+		bottom: calc(
+			var(--keyboard-inset, 0px) + var(--tabbar-h) + max(12px, env(safe-area-inset-bottom)) + 12px
+		);
 	}
 	.app-main {
 		padding: 28px 0 32px;
@@ -1755,8 +1761,10 @@ html {
 	}
 	/* Dialogs become bottom sheets on narrow screens, anchored within reach of the thumb. */
 	[data-slot='dialog-content'] {
-		inset: auto max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom))
+		inset: auto max(8px, env(safe-area-inset-right))
+			calc(var(--keyboard-inset, 0px) + max(8px, env(safe-area-inset-bottom)))
 			max(8px, env(safe-area-inset-left));
+		max-height: calc(100dvh - 32px - var(--keyboard-inset, 0px));
 		width: auto;
 		max-width: none;
 		padding: 24px 20px;
@@ -1782,7 +1790,8 @@ html {
 @media (pointer: coarse) {
 	[data-slot='button'],
 	summary,
-	button {
+	button,
+	.action-menu-item {
 		min-height: 44px;
 	}
 	[data-slot='dialog-close'] {
@@ -1905,11 +1914,13 @@ html {
 	flex-shrink: 0;
 }
 /* A submit button shows a small spinner while its form is being sent. */
-form[aria-busy='true'] [data-slot='button'][type='submit'] {
+form[aria-busy='true'] [data-slot='button'][type='submit'],
+[data-slot='dialog-content'][aria-busy='true'] [data-slot='dialog-footer'] [type='submit'] {
 	pointer-events: none;
 	opacity: 0.7;
 }
-form[aria-busy='true'] [data-slot='button'][type='submit']::after {
+form[aria-busy='true'] [data-slot='button'][type='submit']::after,
+[data-slot='dialog-content'][aria-busy='true'] [data-slot='dialog-footer'] [type='submit']::after {
 	content: '';
 	width: 14px;
 	height: 14px;

@@ -77,7 +77,7 @@
 		if (result.type === 'success') {
 			await invalidateAll();
 			toast.show('Reminder restored.');
-		} else toast.show('Saturday could not restore this reminder.');
+		} else toast.error('Saturday could not restore this reminder.');
 	}
 	// Scripts get data back (no redirect) so the toast can offer Undo.
 	const dismissing =
@@ -88,11 +88,10 @@
 				if (result.type === 'success') {
 					await update({ reset: false });
 					toast.show('Reminder dismissed.', {
-						duration: 8000,
 						action: { label: 'Undo', run: () => undo(item) }
 					});
 				} else {
-					toast.show(
+					toast.error(
 						result.type === 'failure' && typeof result.data?.error === 'string'
 							? result.data.error
 							: 'Saturday could not dismiss this reminder.'

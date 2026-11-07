@@ -11,12 +11,10 @@
 
 	let {
 		settings,
-		error,
-		message
+		error
 	}: {
 		settings: { enabled: boolean; limit: number } | null;
 		error?: string;
-		message?: string;
 	} = $props();
 </script>
 
@@ -31,7 +29,6 @@
 			>Navigation settings are unavailable. Repair storage before changing recently viewed.</Notice
 		>{/if}
 	{#if error}<Notice tone="error">{error}</Notice>{/if}
-	{#if message}<Notice tone="success">{message}</Notice>{/if}
 	{#if settings}
 		<form
 			method="POST"

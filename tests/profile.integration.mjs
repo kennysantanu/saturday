@@ -138,7 +138,7 @@ test('profile: grouped slots, document picker, upload into a slot and clearing',
 		await page.waitForFunction(() => !location.search.includes('page=2'));
 
 		// Search follows typing and lists only matches.
-		await page.type('#profile_query', 'direction');
+		await page.type('#picker_query', 'direction');
 		await page.waitForFunction(() => location.search.includes('query=direction'));
 		await page.waitForFunction(() => document.querySelectorAll('.picker-option').length === 2);
 		assert.match(await text('[data-slot="dialog-content"] [role="status"]'), /matching search/);

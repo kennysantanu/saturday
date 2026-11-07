@@ -191,17 +191,18 @@ test('page-specific Recent buttons precede Add actions without tabs and preserve
 		await phone.goto(base + '/jobs', { waitUntil: 'networkidle0' });
 		assert(await actionOrder(phone, trigger));
 		await phone.click(trigger);
-		await phone.waitForSelector('.recent-sheet .recent-results .recent-list a');
-		await phone.$eval('.recent-sheet', async (el) => {
+		await phone.waitForSelector('[data-slot=dialog-content] .recent-results .recent-list a');
+		await phone.$eval('[data-slot=dialog-content]', async (el) => {
 			await Promise.all(el.getAnimations().map((animation) => animation.finished));
 		});
-		const geometry = await phone.$eval('.recent-sheet', (el) => {
+		const geometry = await phone.$eval('[data-slot=dialog-content]', (el) => {
 			const r = el.getBoundingClientRect();
 			return { bottom: r.bottom, width: r.width, height: r.height, viewport: innerHeight };
 		});
 		await phone.screenshot({ path: '/tmp/saturday-recents-mobile.png' });
-		assert(Math.abs(geometry.bottom - geometry.viewport) < 2, JSON.stringify(geometry));
-		assert(geometry.width <= 390 && geometry.height <= 844 * 0.85 + 1);
+		// The standard bottom sheet floats 8px above the bottom edge and keeps 8px side insets.
+		assert(Math.abs(geometry.viewport - geometry.bottom - 8) < 2, JSON.stringify(geometry));
+		assert(geometry.width <= 390 - 16 + 1 && geometry.height <= 844 - 32 + 1);
 		assert.equal(
 			await phone.$eval('.recent-results .recent-list a .font-medium', (el) => el.textContent),
 			'Frontend Engineer'
@@ -211,12 +212,12 @@ test('page-specific Recent buttons precede Add actions without tabs and preserve
 		await phone.goto(base + '/networks', { waitUntil: 'networkidle0' });
 		assert(await actionOrder(phone, peopleTrigger));
 		await phone.click(peopleTrigger);
-		await phone.waitForSelector('.recent-sheet .recent-list a');
+		await phone.waitForSelector('[data-slot=dialog-content] .recent-list a');
 		assert.equal(
 			await phone.$eval('.recent-list a .font-medium', (el) => el.textContent),
 			'Alex Morgan'
 		);
-		assert.equal(await phone.$('.recent-sheet [role="tablist"]'), null);
+		assert.equal(await phone.$('[data-slot=dialog-content] [role="tablist"]'), null);
 		await phone.click('.recent-settings');
 		await phone.waitForSelector('#recent-limit');
 		await phone.waitForNetworkIdle();
@@ -235,7 +236,7 @@ test('page-specific Recent buttons precede Add actions without tabs and preserve
 		]);
 		await phone.waitForNetworkIdle();
 		await phone.waitForFunction(() =>
-			document.querySelector('#navigation [role="status"]')?.textContent.includes('saved')
+			document.querySelector('.toast')?.textContent.includes('saved')
 		);
 		assert.equal((await app.getNavigationSettings()).limit, 5);
 		await Promise.all([
@@ -264,7 +265,7 @@ test('page-specific Recent buttons precede Add actions without tabs and preserve
 		assert.equal((await app.listRecentViews()).jobs[0].id, a.id);
 		await phone.click('#navigation form:has(input[name="kind"]) button');
 		await phone.waitForFunction(() =>
-			document.querySelector('#navigation [role="status"]')?.textContent.includes('cleared')
+			document.querySelector('.toast')?.textContent.includes('cleared')
 		);
 		assert.equal((await app.listRecentViews()).jobs.length, 0);
 		assert.equal((await app.listRecentViews()).people.length, 0);

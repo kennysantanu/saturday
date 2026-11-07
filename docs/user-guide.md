@@ -133,9 +133,15 @@ Open **Profile** from the Documents header to choose the documents your assistan
 
 For an empty slot choose **Select document** to pick an existing file (search by filename; the list shows only files the slot can use), or open its menu to **Upload a file** or **Create new document**. For a slot that is set, **Edit** changes the file, and the menu offers **Choose another document**, **Upload a replacement**, **Create new document** and **Clear selection**. The picker also has **Upload** and **Create new**, and the file you upload or save is selected automatically. Selected files must be readable UTF-8 within the 1 MiB limit. They remain ordinary Documents entries with designation labels. Clearing or replacing a selection keeps the old file. If one selected file can no longer be read, only that slot shows an error; select another document or clear it. PDF/Word conversion is not included.
 
-On a job, choose **Manage documents** to upload/create attachments or **Copy to this job** for an independent copy of a reusable document. Editing a job copy never edits its source. The main Documents page does not browse job folders.
+On a job, choose **Manage documents** to upload/create attachments or **Copy to this job** for an independent copy of a reusable document (search by filename, pick a file, and adjust the destination name). Editing a job copy never edits its source. The main Documents page does not browse job folders.
 
 To export a resume, save self-contained HTML and choose **Generate PDF** from its preview. Saturday saves a new PDF beside the HTML; existing PDFs are preserved with numbered filenames. Later HTML edits do not update previous PDFs. Scripts and external resources are blocked, so use self-contained print CSS and installed fonts. PDF generation requires Chrome prepared during setup.
+
+## Messages and confirmations
+
+Short confirmations ("Document saved.", "Reminder dismissed.") appear as a message at the bottom of the screen and fade after a few seconds. Moving the pointer onto a message, or tabbing into it, keeps it on screen. A message with an action, such as **Undo**, stays longer. Failures appear in red and stay until you dismiss them with the **×** button. A newer confirmation replaces an older one; errors and messages with an action can stack, and the oldest leaves first.
+
+Actions that delete or replace data, or that lower protection (such as turning off the password), ask you to confirm in a dialog. While Saturday is carrying out the action the dialog cannot be closed and its buttons are disabled, so it cannot be submitted twice. On a phone, dialogs rise above the on-screen keyboard.
 
 ## Appearance
 

@@ -11,18 +11,16 @@
 	import EmptyState from './empty-state.svelte';
 	import ConfirmDialog from './confirm-dialog.svelte';
 	import DocumentRow from './document-row.svelte';
+	import DocumentPickerDialog, { type DocumentChoice } from './document-picker-dialog.svelte';
 	import FilterBar from './filter-bar.svelte';
 	import SearchField from './search-field.svelte';
-	import SearchEmpty from './search-empty.svelte';
 	import { filterLabels, resultCount, noMatchHint } from '$lib/filter-labels.js';
 	import { buildChips } from '$lib/filter-chips.js';
 	import { page } from '$app/state';
 	import Field from './field.svelte';
 	import NativeSelect from './native-select.svelte';
 	import Pagination from './pagination.svelte';
-	import RadioOption from './radio-option.svelte';
 	import RowActions from './row-actions.svelte';
-	import Skeleton from './skeleton.svelte';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -49,12 +47,13 @@
 	let uploadInput: HTMLInputElement;
 	let picker = $state(false),
 		pickerQuery = $state(''),
+		pickerApplied = $state(''),
 		pickerPage = $state(1),
 		pickerTotal = $state(0),
+		pickerCount = $state(0),
 		pickerLoading = $state(false),
-		candidates = $state<any[]>([]),
-		picked = $state(''),
-		pickedToken = $state(''),
+		candidates = $state<DocumentChoice[]>([]),
+		pickedDoc = $state<DocumentChoice | null>(null),
 		catalog = $state(''),
 		pickerError = $state('');
 	let selected = $state<any>(null),
@@ -95,27 +94,35 @@
 		pickerError = '';
 		pickerLoading = true;
 		try {
+			const query = pickerQuery.trim();
 			const r = await fetch(
-				`/api/documents?${new URLSearchParams({ query: pickerQuery, page: String(page) })}`
+				`/api/documents?${new URLSearchParams({ query, page: String(page), limit: '5' })}`
 			);
 			checkAuthResponse(r);
 			const value = await r.json();
 			if (!r.ok) throw new Error(value.error);
 			candidates = value.documents;
-			const current = candidates.find((d) => d.id === picked);
-			if (current) pickedToken = current.token;
+			pickerApplied = query;
 			pickerTotal = value.totalPages;
+			pickerCount = value.total;
 			catalog = value.catalog_token;
+			// A chosen file keeps a fresh token after the catalog changes.
+			const same = candidates.find((d) => d.id === pickedDoc?.id);
+			if (same) pickedDoc = same;
 		} catch (e) {
 			pickerError = (e as Error).message;
 		} finally {
 			pickerLoading = false;
 		}
 	}
+	// Choosing a file proposes its name for the copy.
+	$effect(() => {
+		if (pickedDoc) newName = pickedDoc.filename;
+	});
 
 	async function copyToJob() {
-		picked = '';
-		pickedToken = '';
+		pickedDoc = null;
+		pickerQuery = '';
 		newName = '';
 		picker = true;
 		await choices();
@@ -352,64 +359,32 @@
 	</div>
 </PageShell>
 
-<Dialog.Root bind:open={picker}>
-	<Dialog.Content class="sm:max-w-2xl">
-		<Dialog.Header>
-			<Dialog.Title>Copy to this job</Dialog.Title>
-			<Dialog.Description>Choose a user document to copy. The original is kept.</Dialog.Description>
-		</Dialog.Header>
-		{#if pickerError}<Notice tone="error" title="Documents could not be loaded"
-				>{pickerError}</Notice
-			>{/if}
-		{#if form?.fileError}<Notice tone="error" title="The document action failed"
-				>{form.fileError}</Notice
-			>{/if}
-		<form
-			onsubmit={(e) => {
-				e.preventDefault();
-				choices();
-			}}
-			class="flex flex-wrap items-end gap-2"
-		>
-			<div class="min-w-48 flex-1">
-				<SearchField
-					id="picker_query"
-					label="Search documents"
-					name="picker_query"
-					bind:value={pickerQuery}
-				/>
-			</div>
-			<Button variant="outline" type="submit">Search</Button>
-		</form>
-		<form method="POST" action="?/copy" use:enhance={withPending(finishDialog)} class="space-y-4">
-			<input type="hidden" name="id" value={picked} /><input
-				type="hidden"
-				name="token"
-				value={pickedToken}
-			/><input type="hidden" name="catalog_token" value={catalog} />
-			<fieldset class="max-h-64 space-y-2 overflow-auto" aria-busy={pickerLoading}>
-				<legend class="sr-only">Available documents</legend>
-				{#if pickerLoading}
-					<Skeleton class="h-12 w-full" /><Skeleton class="h-12 w-full" /><Skeleton
-						class="h-12 w-full"
-					/>
-				{:else}
-					{#each candidates as doc (doc.id)}
-						<RadioOption
-							name="choice"
-							value={doc.id}
-							checked={picked === doc.id}
-							label={doc.filename}
-							onchange={() => {
-								picked = doc.id;
-								pickedToken = doc.token;
-								newName = doc.filename;
-							}}
-						/>
-					{/each}
-					{#if !candidates.length}<SearchEmpty noun="documents" />{/if}
-				{/if}
-			</fieldset>
+{#if picker}
+	<DocumentPickerDialog
+		bind:open={picker}
+		bind:selected={pickedDoc}
+		bind:query={pickerQuery}
+		title="Copy to this job"
+		description="Choose one of your documents to copy. The original is kept."
+		choices={candidates}
+		page={pickerPage}
+		totalPages={Math.max(1, pickerTotal)}
+		total={pickerCount}
+		queryValue={pickerApplied}
+		loading={pickerLoading}
+		error={pickerError || form?.fileError || null}
+		errorTitle="The document could not be copied"
+		formId="copy-document"
+		formAction="?/copy"
+		hidden={{ catalog_token: catalog }}
+		submit={finishDialog}
+		submitLabel={(chosen) => (chosen ? `Copy ${chosen.filename}` : 'Copy document')}
+		emptyText="You have no documents to copy yet. Upload a file or create a document first."
+		pagerLabel="Available document pages"
+		onsearch={() => choices(1)}
+		onpage={(target) => choices(target)}
+	>
+		{#snippet extra()}
 			<Field id="copy_filename" label="Destination filename" required>
 				{#snippet control(attrs)}<Input
 						{...attrs}
@@ -418,20 +393,9 @@
 						required
 					/>{/snippet}
 			</Field>
-			<Pagination
-				label="Available document pages"
-				page={pickerPage}
-				totalPages={pickerTotal}
-				previous={() => choices(pickerPage - 1)}
-				next={() => choices(pickerPage + 1)}
-			/>
-			<Dialog.Footer>
-				<Button type="button" variant="ghost" onclick={() => (picker = false)}>Cancel</Button>
-				<Button type="submit" disabled={!picked}>Copy document</Button>
-			</Dialog.Footer>
-		</form>
-	</Dialog.Content>
-</Dialog.Root>
+		{/snippet}
+	</DocumentPickerDialog>
+{/if}
 
 <Dialog.Root bind:open={rename}>
 	<Dialog.Content class="sm:max-w-md">

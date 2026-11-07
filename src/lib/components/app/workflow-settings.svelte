@@ -91,10 +91,6 @@
 		{#if form?.workflowError}<Notice tone="error" title="Workflow was not saved"
 				>{form.workflowError}</Notice
 			>{/if}
-		{#if form?.workflowSaved}<Notice tone="success" title="Workflow saved"
-				>Stage names, order and availability are updated across Jobs and Dashboard. Refresh other
-				open clients to see the changes.</Notice
-			>{/if}
 		{#if pending}
 			<form
 				id="workflow-confirm"
@@ -120,7 +116,7 @@
 				bind:open={confirming}
 				title="Change the starting stage?"
 				description="This action changes where future jobs start. Existing jobs and their history stay in their current stages."
-				confirmLabel="Confirm change"
+				confirmLabel="Change starting stage"
 				formId="workflow-confirm"
 			/>
 		{/if}

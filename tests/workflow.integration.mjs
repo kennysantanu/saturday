@@ -802,7 +802,7 @@ test('production stage/history actions, result round trips and read-only overvie
 			`#workflow-stage-${custom.id} form:has(input[value="rename"]) button[type="submit"]`
 		);
 		await page.waitForFunction(() =>
-			document.querySelector('#workflow')?.textContent.includes('Workflow saved')
+			document.querySelector('.toast')?.textContent.includes('Workflow saved')
 		);
 		assert.equal(listWorkflowStages().find((s) => s.id === custom.id).name, 'Conversation again');
 		const screening = listWorkflowStages().find((s) => s.name === 'Screening');
