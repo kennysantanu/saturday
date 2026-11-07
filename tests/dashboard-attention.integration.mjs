@@ -103,8 +103,10 @@ test('Dashboard groups attention by urgency, caps the list, dismisses with Undo 
 		const plain = await browser.newPage();
 		await plain.setJavaScriptEnabled(false);
 		await plain.goto(base, { waitUntil: 'networkidle0' });
-		await plain.click('#needs-attention .attention-action button');
-		await plain.waitForNavigation({ waitUntil: 'networkidle0' });
+		await Promise.all([
+			plain.waitForNavigation({ waitUntil: 'networkidle0' }),
+			plain.click('#needs-attention .attention-action button')
+		]);
 		assert.equal(new URL(plain.url()).pathname, '/');
 		assert.equal(
 			listReminders({ job_id: jobs[0].id, view: 'all' }).reminders.find(

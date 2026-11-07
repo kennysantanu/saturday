@@ -5,11 +5,13 @@ import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readBuildInfo } from './build-info.mjs';
+import { checkReleasePolicy } from './check-release.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const outfile = join(root, 'build', 'mcp', 'index.js');
 
 try {
+	checkReleasePolicy(root);
 	await generateExtensions();
 	await mkdir(dirname(outfile), { recursive: true });
 	await build({

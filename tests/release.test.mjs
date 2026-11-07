@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
 	mkdtempSync,
 	copyFileSync,
+	cpSync,
 	writeFileSync,
 	readFileSync,
 	rmSync,
@@ -10,16 +11,24 @@ import {
 	symlinkSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { generateRelease, checkRelease } from '../scripts/release.mjs';
 import { selectTarget } from '../src/lib/server/installation-operations.js';
+import { releaseSourceFiles } from '../scripts/check-release.mjs';
 function fixture() {
 	const base = mkdtempSync(join(tmpdir(), 'saturday-release-')),
 		root = join(base, 'source');
 	mkdirSync(root);
-	for (const file of ['package.json', 'package-lock.json']) copyFileSync(file, join(root, file));
-	writeFileSync(join(root, 'README.md'), '# Fictional release fixture\n');
+	for (const file of [...releaseSourceFiles(), 'release-baselines.json']) {
+		mkdirSync(dirname(join(root, file)), { recursive: true });
+		copyFileSync(file, join(root, file));
+	}
+	cpSync(
+		'tests/fixtures/release-0.1.0-current',
+		join(root, 'tests/fixtures/release-0.1.0-current'),
+		{ recursive: true }
+	);
 	const git = (...args) =>
 		execFileSync('git', ['-C', root, ...args], {
 			encoding: 'utf8',
@@ -121,9 +130,10 @@ test('release generation refuses dirty/unverified revisions, wrong tags and sour
 			() => generateRelease({ ...f.options, output: join(f.base, 'linked-source', 'asset.json') }),
 			/outside/
 		);
+		const originalReadme = readFileSync(join(f.root, 'README.md'));
 		writeFileSync(join(f.root, 'README.md'), 'dirty');
 		assert.throws(() => generateRelease(f.options), /clean/);
-		writeFileSync(join(f.root, 'README.md'), '# Fictional release fixture\n');
+		writeFileSync(join(f.root, 'README.md'), originalReadme);
 		writeFileSync(join(f.root, 'untracked'), 'dirty');
 		assert.throws(() => generateRelease(f.options), /clean/);
 	} finally {

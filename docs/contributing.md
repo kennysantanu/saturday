@@ -15,9 +15,23 @@ For an isolated source workspace, set absolute `SATURDAY_DB_PATH`, `SATURDAY_FIL
 
 ## Release and compatibility policy
 
-Saturday is preparing its first `0.1.0` release. Available features and automated checks do not establish platform certification; use the support matrix below when evaluating an installation.
+Saturday `0.1.0` establishes the first frozen release baseline. Available features and automated checks do not establish platform certification; use the support matrix below when evaluating an installation.
 
 Released storage baselines are immutable. Append migrations for supported data changes and test upgrades with populated fixtures. Database and file-format versions advance independently of the application version. Setup and updates must never reset existing data silently. Preserve recovery backups and their compatible application build.
+
+### Version changes after 0.1.0
+
+`release-baselines.json` freezes shipped source, storage declarations, numbered migration checksums and a populated compatibility fixture. `npm run check:release` runs during checks and production builds; release metadata generation also requires a frozen version. Changes to app code, dependencies, installers, build code, icons, bundled guides or extension examples require a newer app version. Tests alone do not. Hashes tolerate Git CRLF conversion and ignore generated extension registrations.
+
+| Change             | Required version change                                                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Shipped app change | Bump package and lockfile root versions together, normally `npm version patch --no-git-tag-version`                            |
+| Database change    | Also append migration 2, 3, and so on, and advance `saturday.storage.database.currentVersion` to match; never edit migration 1 |
+| File format change | Also advance the independent manifest version and implement compatible reading/upgrading                                       |
+
+Released migration SQL and names are checked before any database is opened. Rewriting or removing a released migration fails even after an app bump. App-only changes keep the database version unchanged. Retain released fixtures byte for byte and add populated upgrade/restore coverage for storage changes.
+
+Develop the next version after bumping it. Before release, finalize source and notes, then run `npm run release:freeze` to append the new immutable baseline. Unchanged storage can reuse the previous populated fixture; a storage change requires `-- --fixture tests/fixtures/<new-fixture>/expected.json` matching its new versions. Freezing cannot replace an existing release. Commit the baseline with its source, then verify the exact clean commit before generating the metadata asset. Local checks do not configure remote branch protection.
 
 ### Build identity
 
@@ -224,7 +238,7 @@ Repository setup requires separate authorized actions:
 
 ## Prepare a release
 
-The package/lockfile root versions must agree. Storage/API versions are separate and released migrations remain immutable. Update the [release notes](release-notes.md), then:
+The package/lockfile root versions must agree. Storage/API versions are separate and released migrations remain immutable. Update the [release notes](release-notes.md), run `npm run release:freeze` for the new app version, then:
 
 1. Run relevant checks and commit the release source. Keep generated release assets outside the source tree; an asset cannot contain the SHA of a commit that also contains that asset.
 2. Run `npm run verify` against the exact clean commit, rebuilding web/MCP and their embedded guides. Record its full SHA, environment, results and manual/platform limitations. A source fix requires a new candidate and another verification of affected behavior.

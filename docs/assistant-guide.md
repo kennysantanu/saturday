@@ -103,6 +103,8 @@ Career data is stored locally. Records read by an assistant are handled under th
 
 The assistant client owns its MCP process, so it can work while Saturday's UI is stopped. A UI-only restart does not require reconnecting MCP. For code updates, disconnect MCP before publication, reconnect after completion, and repeat the identity/read verification. Copy fresh configuration if runtime paths changed.
 
+You can ask a connected assistant to check for updates. It calls `check_for_updates`, explains the target, and waits for your approval before `update_saturday`. Disconnect all Saturday MCP clients immediately after that tool returns; the independent controller continues and waits up to two minutes for disconnection before publication. Follow completion in Settings, then reconnect and verify `get_saturday_info` plus a known record. A queued response is not installation success. See the [MCP update contract](mcp-reference.md#application-updates).
+
 Follow the [installation guide](installation-guide.md#updates) for update/repair/uninstall commands. Uninstall retains client configuration; remove only Saturday's authorized entry separately, preferably before removing its runtime. See [client configuration formats](#client-configuration-formats) for the JSON helper and TOML handling.
 
 Reminder tools manage independent job/person prompts. Use create/list/edit/dismiss/delete reminder operations from the [MCP reference](mcp-reference.md#reminders). Dismissal does not record a completed appointment; record outcomes in history or interactions. Fixed reminder schedules do not convert timezones.

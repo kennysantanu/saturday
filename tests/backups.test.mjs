@@ -79,6 +79,7 @@ test('populated round-trip preserves records, status, counts, insertion order an
 	const before = rows();
 	const stats = getDashboardStats().stats;
 	const backup = backups.createBackup();
+	assert.equal(backup.app_version, JSON.parse(readFileSync('package.json', 'utf8')).version);
 	const ledger = raw();
 	const migrations = ledger.prepare('SELECT * FROM schema_migrations').all();
 	ledger.close();
@@ -488,6 +489,8 @@ test('built MCP exposes career/document tools and complete backup/restore workfl
 		const info = await call('get_saturday_info', {});
 		assert.equal(typeof info.dataset_id, 'string');
 		assert.equal(info.jobs, 0);
+		assert.equal(info.version, JSON.parse(readFileSync('package.json', 'utf8')).version);
+		assert.equal(info.storage.database.currentVersion, schemaVersion);
 		assert.equal(info.build.id, initialized.serverInfo.version);
 		assert.equal(
 			listing.tools.find((t) => t.name === 'get_saturday_info').annotations.readOnlyHint,
@@ -541,7 +544,22 @@ test('built MCP exposes career/document tools and complete backup/restore workfl
 			score_comment: 'Initial fit'
 		});
 		assert.equal(job.id, 1);
-		assert.equal(listing.tools.length, 61);
+		assert.equal(listing.tools.length, 64);
+		for (const name of ['check_for_updates', 'get_update_status', 'update_saturday'])
+			assert.ok(listing.tools.some((tool) => tool.name === name));
+		const updateTool = listing.tools.find((tool) => tool.name === 'update_saturday');
+		assert.equal(updateTool.annotations.readOnlyHint, false);
+		assert.deepEqual(updateTool.inputSchema.required.toSorted(), ['check_id', 'confirm']);
+		assert.equal(updateTool.inputSchema.additionalProperties, false);
+		assert.equal(
+			(
+				await request('tools/call', {
+					name: 'update_saturday',
+					arguments: { check_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', confirm: false }
+				})
+			).isError,
+			true
+		);
 		for (const name of [
 			'list_networks',
 			'get_network',

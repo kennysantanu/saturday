@@ -1,6 +1,6 @@
 # Saturday 0.1.0 — Private Beta
 
-This is the first personal-workspace release candidate. Publication and platform acceptance are separate from implemented features. Install only an identified build and keep backups before updating or testing recovery.
+This is the first personal-workspace release baseline. Publication and platform acceptance are separate from implemented features. Install only an identified build and keep backups before updating or testing recovery.
 
 ## Included workflows
 
@@ -15,11 +15,13 @@ This is the first personal-workspace release candidate. Publication and platform
 
 Use the [installation guide](installation-guide.md) for the desktop shortcut, optional start at login, update, repair and uninstall. Source and managed installations identify their actual data paths. Uninstall retains data by default; deleting owned data requires separate confirmation.
 
-Database schema 1 and file manifest 1 are independent of app version `0.1.0`. Supported updates preserve user data through forward migrations. Unsupported storage rejects unchanged. Never manually edit version or dataset markers to force compatibility. Back up files as well as the database; core backups exclude extension-owned databases and access settings.
+Database schema 1 and file manifest 1 are frozen independently of app version `0.1.0`. Shipped changes after this baseline require a new app version; database changes also append a new integer migration. Released migrations and fixtures remain immutable. Supported updates preserve user data through forward migrations. Unsupported storage rejects unchanged. Never manually edit version or dataset markers to force compatibility. Back up files as well as the database; core backups exclude extension-owned databases and access settings.
+
+Settings and local MCP share the checked-release update controller. An assistant can check, request approval and queue an update. Disconnect MCP before publication, follow completion in Settings, then reconnect and verify identity and a known record. A queued response is not a completed installation.
 
 ## Verification and known limits
 
-Automated service/protocol, Cloudflare-core, production browser and recovery checks have passed on macOS 26.4.1 arm64 with Node 25.9.0 and Chrome 154.0.8037.57. A separate isolated managed macOS installation exercised private Node 24.21.0, PDF generation, populated backup/restore and launcher-process readiness. Its earlier snapshot is recorded in `tests/verification/macos-0.1.0.json`; it is not a fresh installation of every later candidate. Run `npm run verify` on the exact final clean revision and retain its receipt before preparing distribution metadata.
+Automated service/protocol, Cloudflare-core, production browser and recovery checks have passed on macOS 26.4.1 arm64 with Node 25.9.0 and Chrome 156.0.8078.47. A separate isolated managed macOS installation exercised private Node 24.21.0, PDF generation, populated backup/restore and launcher-process readiness. Its earlier snapshot is recorded in `tests/verification/macos-0.1.0.json`; it is not a fresh installation of every later candidate. Run `npm run verify` on the exact final clean revision and retain its receipt before preparing distribution metadata.
 
 These automated results do not certify a platform or assistant client. Windows 11 x64, Ubuntu 22.04/24.04 x64 GNOME, other Mac architectures/minimum OS versions, real desktop/login behavior, physical phones, screen readers and actual assistant-client connections require hands-on acceptance before advertising support. Headless PDF checks exercise generation/download and source retention; embedded-preview navigation, appearance and selectable content remain manual checks.
 
@@ -29,6 +31,6 @@ Reminders use fixed date/time values and the server's local clock; they do not c
 
 ## Release status
 
-**Code complete — User tests deferred.** The `0.1.0` candidate is frozen for verification and user acceptance; subsequent changes should address reproduced blockers and require a new source receipt and matching metadata. Database schema and file manifest remain at version 1. This status does not mark the beta published or manually accepted.
+**Release baseline finalized — awaiting publication.** App `0.1.0` is frozen; subsequent shipped changes require a new app version and matching source verification/metadata. Database schema and file manifest remain at version 1. This status does not mark the beta published or manually accepted.
 
 A verified source commit, matching metadata asset, applicable user-test results and publication approval are still required before distribution. See the [release procedure](contributing.md#prepare-a-release) and [support matrix](contributing.md#provisional-support-matrix). No tag, remote branch or public release is created by the local preparation commands.

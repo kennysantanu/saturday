@@ -66,7 +66,7 @@ import { publicBackupError, MAX_BACKUP_BYTES, BackupError } from '$lib/server/ba
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDatabasePath, getProjectRoot } from '$lib/server/database.js';
-import { buildInfo, storageCompatibility } from '$lib/server/compatibility.js';
+import { applicationVersion, buildInfo, storageCompatibility } from '$lib/server/compatibility.js';
 export async function load(event) {
 	const { setHeaders, url } = event;
 	setHeaders({ 'x-saturday-build': buildInfo.id });
@@ -165,6 +165,7 @@ export async function load(event) {
 		backupPages,
 		backupTotal: history.total,
 		buildInfo,
+		applicationVersion,
 		storageCompatibility,
 		databasePath,
 		filesError,

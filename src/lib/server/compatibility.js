@@ -1,4 +1,7 @@
 import { schemaVersion, databaseFormat } from './migrations.js';
+import pkg from '../../../package.json' with { type: 'json' };
+
+export const applicationVersion = pkg.version;
 
 // The builders replace this constant with captured commit/build information.
 // Direct source commands have no compiled build identity and do not run Git.

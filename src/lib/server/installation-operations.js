@@ -464,7 +464,14 @@ export async function assertSafeRemoval(paths) {
 }
 export async function queueOperation(
 	operation,
-	{ check_id, confirm = false, delete_data = false, source, retry_pdf = false } = {}
+	{
+		check_id,
+		confirm = false,
+		delete_data = false,
+		source,
+		retry_pdf = false,
+		wait_for_disconnect = false
+	} = {}
 ) {
 	if (!['update', 'repair', 'uninstall'].includes(operation))
 		throw new Error('Choose update, repair or uninstall.');
@@ -543,6 +550,7 @@ export async function queueOperation(
 			delete_data,
 			source: source ? resolve(source) : null,
 			retry_pdf,
+			wait_for_disconnect: operation === 'update' && wait_for_disconnect === true,
 			worker,
 			log: join(paths.root, `${id}.log`)
 		};
@@ -680,9 +688,23 @@ async function assertClientsStopped(config) {
 		if (!/^\d+\.json$/.test(name)) throw new Error('Unrecognized client lease requires repair.');
 		const pid = Number(name.slice(0, -5));
 		if (pid !== process.pid && alive(pid))
-			throw new Error(
-				'Waiting for assistant disconnect. Pause/disconnect all Saturday MCP clients, then retry.'
+			throw Object.assign(
+				new Error(
+					'Waiting for assistant disconnect. Pause/disconnect all Saturday MCP clients, then retry.'
+				),
+				{ code: 'MCP_CONNECTED' }
 			);
+	}
+}
+async function waitForClientsStopped(config, wait) {
+	const deadline = Date.now() + (wait ? 120000 : 0);
+	for (;;) {
+		try {
+			return await assertClientsStopped(config);
+		} catch (error) {
+			if (error.code !== 'MCP_CONNECTED' || Date.now() >= deadline) throw error;
+			await pause(250);
+		}
 	}
 }
 async function assertSourcePublicationSafe(config, candidate) {
@@ -1117,7 +1139,7 @@ export async function executeOperation(
 				throw new Error('Source changed while staging; publication stopped.');
 			await update('waiting_for_disconnect', 'Stopping UI; waiting for assistant disconnect');
 			wasRunning = await stopOwnedServer();
-			await assertClientsStopped(config);
+			await waitForClientsStopped(config, state.wait_for_disconnect);
 			admission = await claimInstallationMaintenance({ persistent: true });
 			process.env.SATURDAY_MAINTENANCE_TOKEN = readJson(serverPaths().maintenance).token;
 			await assertClientsStopped(config);
