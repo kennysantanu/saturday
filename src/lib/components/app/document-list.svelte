@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { checkAuthResponse, authenticationRequired } from '$lib/auth-notice.svelte';
+	import { checkAuthResponse } from '$lib/auth-notice.svelte';
+	import { uploadFile } from '$lib/upload';
 	import { tick } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { enhance } from '$app/forms';
@@ -35,15 +36,8 @@
 	import Copy from '@lucide/svelte/icons/copy';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import UserRound from '@lucide/svelte/icons/user-round';
-	import FileAudio from '@lucide/svelte/icons/file-audio';
-	import FileVideo from '@lucide/svelte/icons/file-video';
-	import FileChartColumn from '@lucide/svelte/icons/file-chart-column';
 	import FileText from '@lucide/svelte/icons/file-text';
-	import FileCode from '@lucide/svelte/icons/file-code';
-	import FileImage from '@lucide/svelte/icons/file-image';
-	import FileArchive from '@lucide/svelte/icons/file-archive';
-	import FileSpreadsheet from '@lucide/svelte/icons/file-spreadsheet';
-	import FileIcon from '@lucide/svelte/icons/file';
+	import { fileIconFor } from '$lib/file-icons';
 	import { fileType, documentDesignations, documentKinds, documentSorts } from '$lib/file-types';
 	import { formatBytes, formatDateTime } from '$lib/format';
 	import { toast } from '$lib/toast.svelte';
@@ -67,20 +61,6 @@
 		remove = $state(false),
 		rename = $state(false),
 		newName = $state('');
-	const icons: Record<string, typeof FileIcon> = {
-		markdown: FileText,
-		text: FileText,
-		pdf: FileText,
-		html: FileCode,
-		image: FileImage,
-		sheet: FileSpreadsheet,
-		archive: FileArchive,
-		document: FileText,
-		audio: FileAudio,
-		video: FileVideo,
-		presentation: FileChartColumn
-	};
-	const iconFor = (name: string) => icons[fileType(name).icon] ?? FileIcon;
 	const chips = $derived([
 		...buildChips(data.base, page.url.searchParams, data, [
 			['query', 'Filename contains'],
@@ -145,35 +125,19 @@
 		uploadError = '';
 		uploading = true;
 		progress = 0;
-		const xhr = new XMLHttpRequest();
-		xhr.open(
-			'POST',
-			`/api/files/upload?${new URLSearchParams({ scope: data.scope, filename: file.name })}`
-		);
-		xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-		xhr.upload.onprogress = (e) => {
-			if (e.lengthComputable) progress = Math.round((100 * e.loaded) / e.total);
-		};
-		xhr.onerror = () => {
-			uploadError = 'Upload interrupted. Inspect the list before retrying.';
+		try {
+			await uploadFile(
+				file,
+				{ scope: data.scope },
+				{ onprogress: (percent) => (progress = percent), retry: () => upload(file) }
+			);
+			toast.show('Document uploaded.');
+			await invalidateAll();
+		} catch (e) {
+			uploadError = (e as Error).message;
+		} finally {
 			uploading = false;
-		};
-		xhr.onload = async () => {
-			uploading = false;
-			if (xhr.status < 300) {
-				toast.show('Document uploaded.');
-				await invalidateAll();
-			} else {
-				try {
-					uploadError = JSON.parse(xhr.responseText).error;
-				} catch {
-					uploadError = 'Upload failed.';
-				}
-				if (xhr.status === 401 && xhr.getResponseHeader('x-saturday-auth') === 'required')
-					authenticationRequired({ label: file.name, run: () => upload(file) });
-			}
-		};
-		xhr.send(file);
+		}
 	}
 	async function afterMenu(doc: any, step: () => void) {
 		selected = doc;
@@ -351,7 +315,7 @@
 		{:else}
 			<Card.Root class="gap-0 divide-y divide-border p-0">
 				{#each data.documents as doc (doc.id)}
-					{@const Icon = iconFor(doc.filename)}
+					{@const Icon = fileIconFor(doc.filename)}
 					<DocumentRow>
 						{#snippet icon()}<Icon class="size-5" />{/snippet}
 						{#snippet title()}

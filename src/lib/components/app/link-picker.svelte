@@ -18,7 +18,7 @@
 	import { goto } from '$app/navigation';
 	import { page as currentPage } from '$app/state';
 	import { enhance } from '$app/forms';
-	import { focusFirstError, withPending } from '$lib/forms';
+	import { focusFirstError, skipKeyboardFocus, withPending } from '$lib/forms';
 	import { UnsavedChanges } from '$lib/unsaved.svelte';
 	import { resultCount } from '$lib/filter-labels.js';
 	import UnsavedDialog from './unsaved-dialog.svelte';
@@ -206,7 +206,7 @@
 
 <UnsavedDialog bind:open {guard}>
 	{#snippet children(close)}
-		<Dialog.Content class="link-picker sm:max-w-lg">
+		<Dialog.Content class="link-picker sm:max-w-lg" onOpenAutoFocus={skipKeyboardFocus}>
 			<Dialog.Header>
 				<Dialog.Title>{title}</Dialog.Title>
 				<Dialog.Description>{description}</Dialog.Description>

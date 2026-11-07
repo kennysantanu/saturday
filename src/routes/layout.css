@@ -2545,3 +2545,21 @@ html:has(.editor-sticky) {
 	scroll-padding-top: 9rem;
 	scroll-padding-bottom: 8rem;
 }
+/* ---- Profile slots ---- */
+.profile-slot-notice {
+	padding: 0 20px 16px;
+}
+@media (max-width: 39.99rem) {
+	/* Actions drop under the text so the filename keeps the full width. */
+	.profile-slot .list-row[data-static] {
+		grid-template-columns: 20px minmax(0, 1fr);
+	}
+	.profile-slot .list-row-actions {
+		grid-column: 2;
+		flex-wrap: wrap;
+		justify-self: start;
+	}
+	.profile-slot-notice {
+		padding: 0 16px 16px;
+	}
+}

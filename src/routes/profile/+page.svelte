@@ -1,80 +1,96 @@
 <script lang="ts">
-	import { checkAuthResponse } from '$lib/auth-notice.svelte';
 	import { tick } from 'svelte';
-	import { invalidateAll } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { enhance } from '$app/forms';
-	import { enhanceWithFocus, withPending, focusFirstError } from '$lib/forms';
-	import { documentDesignations } from '$lib/file-types';
+	import { focusFirstError, withPending } from '$lib/forms';
+	import { uploadFile } from '$lib/upload';
+	import { fileIconFor } from '$lib/file-icons';
+	import { documentDesignations, documentDesignationGroups, fileType } from '$lib/file-types';
+	import { formatBytes, formatDateTime } from '$lib/format';
 	import PageShell from '$lib/components/app/page-shell.svelte';
 	import PageHeader from '$lib/components/app/page-header.svelte';
-	import SectionCard from '$lib/components/app/section-card.svelte';
 	import Notice from '$lib/components/app/notice.svelte';
-	import FilterBar from '$lib/components/app/filter-bar.svelte';
-	import SearchField from '$lib/components/app/search-field.svelte';
-	import SearchEmpty from '$lib/components/app/search-empty.svelte';
-	import { filterLabels } from '$lib/filter-labels.js';
-	import Pagination from '$lib/components/app/pagination.svelte';
-	import RadioOption from '$lib/components/app/radio-option.svelte';
+	import RowActions from '$lib/components/app/row-actions.svelte';
 	import ActionMenu from '$lib/components/app/action-menu.svelte';
 	import ConfirmDialog from '$lib/components/app/confirm-dialog.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Dialog from '$lib/components/ui/dialog';
+	import DocumentPicker from '$lib/components/app/document-picker.svelte';
+	import { Badge } from '$lib/components/ui/badge/index.js';
+	import { Button } from '$lib/components/ui/button/index.js';
+	import * as Card from '$lib/components/ui/card/index.js';
+	import FileUser from '@lucide/svelte/icons/file-user';
+	import Compass from '@lucide/svelte/icons/compass';
+	import Sparkles from '@lucide/svelte/icons/sparkles';
+	import LayoutTemplate from '@lucide/svelte/icons/layout-template';
+	import Mail from '@lucide/svelte/icons/mail';
+	import Link2 from '@lucide/svelte/icons/link-2';
 	import Upload from '@lucide/svelte/icons/upload';
 	import Plus from '@lucide/svelte/icons/plus';
-	import Link2 from '@lucide/svelte/icons/link-2';
-	import Pencil from '@lucide/svelte/icons/pencil';
 	import X from '@lucide/svelte/icons/x';
 	import { toast } from '$lib/toast.svelte';
 	let { data, form } = $props();
-	let picker = $state(false),
-		picked = $state(''),
-		pickedToken = $state('');
+
+	const slotIcons = {
+		master_cv: FileUser,
+		career_direction: Compass,
+		assistant_preferences: Sparkles,
+		resume_template: LayoutTemplate,
+		cover_letter_template: Mail
+	};
+	const selected = $derived(data.selected as Record<string, any>);
+	const slotErrors = $derived((data.slotErrors ?? {}) as Record<string, string>);
+	const slotCount = Object.keys(documentDesignations).length;
+	const setCount = $derived(
+		Object.keys(documentDesignations).filter((key) => selected[key]).length
+	);
+	const formatLabel = (key: string) => fileType(`x${documentDesignations[key].extension}`).label;
+
 	let clearing = $state(false),
 		clearKey = $state('');
 	let uploading = $state(false),
+		progress = $state(0),
 		uploadKey = $state(''),
-		uploadError = $state('');
+		uploadError = $state<{ key: string; message: string } | null>(null);
 	let uploadInput: HTMLInputElement;
-	$effect(() => {
-		picker = Boolean(data.select);
-		picked = data.select ? (selected[data.select]?.id ?? '') : '';
-		pickedToken = data.select ? (selected[data.select]?.token ?? '') : '';
-	});
-	$effect(() => {
-		if (!picker && data.select) {
-			const key = data.select;
-			tick().then(() =>
-				document.querySelector<HTMLAnchorElement>(`a[href="/profile?select=${key}"]`)?.focus()
-			);
-		}
-	});
+	// Bound menu triggers must start as null, not undefined.
+	let menuRefs = $state<Record<string, HTMLButtonElement | null>>(
+		Object.fromEntries(Object.keys(documentDesignations).map((key) => [key, null]))
+	);
+	const locked = $derived(uploading || !data.catalog_token);
 
-	const selected = $derived(data.selected as Record<string, any>);
-	const choiceHref = (page: number) =>
-		`?${new URLSearchParams({ select: data.select ?? '', query: data.query, page: String(page) })}`;
-	async function upload(file: File) {
+	function chooseUpload(key: string) {
+		uploadKey = key;
+		void tick().then(() => uploadInput.click());
+	}
+	function askClear(key: string) {
+		clearKey = key;
+		clearing = true;
+	}
+	function returnFocus(key: string) {
+		(document.querySelector<HTMLElement>(`[data-select="${key}"]`) ?? menuRefs[key])?.focus();
+	}
+	async function upload(file: File, key: string) {
 		if (uploading) return;
-		const key = uploadKey;
 		uploading = true;
-		uploadError = '';
+		progress = 0;
+		uploadError = null;
 		try {
-			const r = await fetch(
-				`/api/files/upload?${new URLSearchParams({ scope: 'documents', filename: file.name, designation: uploadKey, catalog_token: data.catalog_token })}`,
-				{ method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file }
+			const value = await uploadFile(
+				file,
+				{
+					scope: 'documents',
+					designation: key,
+					catalog_token: data.catalog_token
+				},
+				{ onprogress: (percent) => (progress = percent), retry: () => upload(file, key) }
 			);
-			checkAuthResponse(r, {
-				label: file.name,
-				run: () => {
-					uploadKey = key;
-					return upload(file);
-				}
-			});
-			const value = await r.json();
-			if (!r.ok) throw new Error(value.error);
-			toast.show('Document uploaded and selected.');
+			toast.show(`Uploaded ${value?.filename ?? file.name} as ${documentDesignations[key].label}.`);
+			// Close an open picker; the new file is already selected.
+			if (data.select) await goto('/profile', { replaceState: true, noScroll: true });
 			await invalidateAll();
+			await tick();
+			returnFocus(key);
 		} catch (e) {
-			uploadError = (e as Error).message;
+			uploadError = { key, message: (e as Error).message };
 			await tick();
 			focusFirstError();
 		} finally {
@@ -87,11 +103,14 @@
 	<PageHeader
 		title="Profile"
 		back={{ href: '/documents', label: 'documents' }}
-		description="Documents your assistant can use for your applications."
-	/>
-	{#if data.fileError || form?.fileError || uploadError}<Notice
-			tone="error"
-			title="The Profile action failed">{data.fileError || form?.fileError || uploadError}</Notice
+		description="Documents your assistant reads when it tailors your applications."
+	>
+		{#snippet meta()}
+			<Badge variant="secondary">{setCount} of {slotCount} set up</Badge>
+		{/snippet}
+	</PageHeader>
+	{#if data.fileError}<Notice tone="error" title="The Profile could not be loaded"
+			>{data.fileError}</Notice
 		>{/if}
 	<input
 		type="file"
@@ -102,131 +121,169 @@
 		onchange={(e) => {
 			const file = e.currentTarget.files?.[0];
 			e.currentTarget.value = '';
-			if (file) upload(file);
+			if (file) void upload(file, uploadKey);
 		}}
 	/>
-	{#each Object.entries(documentDesignations) as [key, definition] (key)}
-		{@const doc = selected[key]}
-		<SectionCard title={definition.label} description={definition.description}>
-			<div class="flex flex-wrap items-center justify-between gap-3">
-				{#if doc}<a class="link min-w-0 break-all" href={`/documents/${doc.id}?return=profile`}
-						>{doc.filename}</a
-					>{:else}<p class="text-sm text-muted-foreground">No document selected.</p>{/if}
-				{#if doc}<div class="flex items-center gap-2">
-						<Button variant="outline" size="sm" href={`/documents/${doc.id}?edit=1&return=profile`}
-							><Pencil data-icon="inline-start" />Edit</Button
-						><ActionMenu
-							label={`More actions for ${definition.label}`}
-							items={[
-								{
-									label: 'Clear selection',
-									icon: X,
-									onselect: () => {
-										clearKey = key;
-										clearing = true;
-									}
-								}
-							]}
-						/>
-					</div>{/if}
+	{#each documentDesignationGroups as group (group.id)}
+		<section class="space-y-3" aria-labelledby={`profile-${group.id}`}>
+			<div class="space-y-1">
+				<h2 id={`profile-${group.id}`} class="text-base leading-snug font-medium">
+					{group.title}
+				</h2>
+				<p class="text-sm text-muted-foreground">{group.description}</p>
 			</div>
-			<div class="flex flex-wrap gap-2">
-				<Button
-					variant="outline"
-					href={`/profile?select=${key}`}
-					disabled={uploading || !data.catalog_token}
-					><Link2 data-icon="inline-start" />Select document</Button
-				>
-				<Button
-					variant="outline"
-					disabled={uploading || !data.catalog_token}
-					onclick={async () => {
-						uploadKey = key;
-						await tick();
-						uploadInput.click();
-					}}
-					><Upload data-icon="inline-start" />{uploading && uploadKey === key
-						? 'Uploading…'
-						: 'Upload'}</Button
-				>
-				<Button
-					variant="outline"
-					href={`/documents/new?designation=${key}`}
-					disabled={uploading || !data.catalog_token}
-					><Plus data-icon="inline-start" />Create new</Button
-				>
-			</div>
-		</SectionCard>
+			<Card.Root class="gap-0 divide-y divide-border p-0">
+				{#each group.keys as key (key)}
+					{@const definition = documentDesignations[key]}
+					{@const doc = selected[key]}
+					{@const Mark = slotIcons[key as keyof typeof slotIcons]}
+					{@const DocIcon = doc ? fileIconFor(doc.filename) : null}
+					<div class="profile-slot">
+						<div class="list-row" data-static>
+							<span class="list-row-icon" aria-hidden="true"><Mark class="size-5" /></span>
+							<div class="list-row-body">
+								<p class="flex flex-wrap items-center gap-2 font-semibold">
+									{definition.label}
+									<Badge variant="secondary">{formatLabel(key)}</Badge>
+									{#if !doc}<Badge variant="outline">Not set</Badge>{/if}
+								</p>
+								{#if doc && DocIcon}
+									<p class="flex min-w-0 items-center gap-2 text-sm">
+										<DocIcon class="size-4 shrink-0 text-muted-foreground" />
+										<a class="link min-w-0 break-words" href={`/documents/${doc.id}?return=profile`}
+											>{doc.filename}</a
+										>
+									</p>
+									<p class="list-row-meta">
+										{fileType(doc.filename).label} · {formatBytes(doc.size)} · {formatDateTime(
+											doc.updated_at
+										)}
+									</p>
+								{:else}
+									<p class="list-row-meta">{definition.description}</p>
+								{/if}
+								{#if uploading && uploadKey === key}
+									<div role="status" class="space-y-1">
+										<p class="text-sm text-muted-foreground">Uploading… {progress}%</p>
+										<progress class="h-1.5 w-full accent-primary" max="100" value={progress}
+										></progress>
+									</div>
+								{/if}
+							</div>
+							<div class="list-row-actions">
+								{#if doc}
+									<RowActions
+										label={definition.label}
+										editHref={doc.can_edit_text
+											? `/documents/${doc.id}?edit=1&return=profile`
+											: undefined}
+										bind:menuRef={menuRefs[key]}
+										menu={[
+											{
+												label: 'Choose another document',
+												icon: Link2,
+												href: `/profile?select=${key}`
+											},
+											{
+												label: 'Upload a replacement',
+												icon: Upload,
+												onselect: () => chooseUpload(key)
+											},
+											{
+												label: 'Create new document',
+												icon: Plus,
+												href: `/documents/new?designation=${key}`
+											},
+											{
+												label: 'Clear selection',
+												icon: X,
+												separated: true,
+												onselect: () => askClear(key)
+											}
+										]}
+									/>
+								{:else}
+									<Button
+										variant="outline"
+										size="sm"
+										href={`/profile?select=${key}`}
+										data-select={key}
+										disabled={locked}
+										aria-label={`Select document for ${definition.label}`}
+										><Link2 data-icon="inline-start" />Select document</Button
+									>
+									<ActionMenu
+										bind:ref={menuRefs[key]}
+										label={`More ways to add ${definition.label}`}
+										disabled={locked}
+										items={[
+											{
+												label: 'Upload a file',
+												icon: Upload,
+												onselect: () => chooseUpload(key)
+											},
+											{
+												label: 'Create new document',
+												icon: Plus,
+												href: `/documents/new?designation=${key}`
+											},
+											...(slotErrors[key]
+												? [
+														{
+															label: 'Clear selection',
+															icon: X,
+															separated: true,
+															onselect: () => askClear(key)
+														}
+													]
+												: [])
+										]}
+									/>
+								{/if}
+							</div>
+						</div>
+						{#if slotErrors[key]}
+							<div class="profile-slot-notice">
+								<Notice tone="error" title={`${definition.label} could not be read`}
+									>{slotErrors[key]} Select another document or clear the selection.</Notice
+								>
+							</div>
+						{/if}
+						{#if uploadError?.key === key && !data.select}
+							<div class="profile-slot-notice">
+								<Notice tone="error" title="The upload failed">{uploadError.message}</Notice>
+							</div>
+						{/if}
+					</div>
+				{/each}
+			</Card.Root>
+		</section>
 	{/each}
 </PageShell>
 
-<Dialog.Root bind:open={picker}>
-	<Dialog.Content class="sm:max-w-2xl">
-		<Dialog.Header
-			><Dialog.Title
-				>Select {data.select ? documentDesignations[data.select].label : 'document'}</Dialog.Title
-			><Dialog.Description
-				>Choose an existing compatible file from Documents. The previous file is kept.</Dialog.Description
-			></Dialog.Header
-		>
-		{#if form?.fileError}<Notice tone="error" title="The selection was not saved"
-				>{form.fileError}</Notice
-			>{/if}
-		<FilterBar
-			label="Search eligible documents"
-			action="/profile"
-			clearHref={`/profile?select=${data.select}`}
-			applyLabel={filterLabels.search}
-			clearLabel={filterLabels.clearSearch}
-			showClear={Boolean(data.query)}
-			navigate
-		>
-			<input type="hidden" name="select" value={data.select ?? ''} />
-			<SearchField id="profile_query" label="Search filenames" value={data.query} />
-		</FilterBar>
-		<form method="POST" action="?/select" use:enhance={enhanceWithFocus} class="space-y-4">
-			<input type="hidden" name="designation" value={data.select ?? ''} /><input
-				type="hidden"
-				name="id"
-				value={picked}
-			/><input type="hidden" name="token" value={pickedToken} /><input
-				type="hidden"
-				name="catalog_token"
-				value={data.catalog_token}
-			/>
-			<fieldset class="max-h-64 space-y-2 overflow-auto">
-				<legend class="sr-only">Eligible documents</legend>
-				{#each data.choices?.documents ?? [] as doc (doc.id)}<RadioOption
-						name="choice"
-						value={doc.id}
-						label={doc.filename}
-						checked={picked === doc.id}
-						onchange={() => {
-							picked = doc.id;
-							pickedToken = doc.token;
-						}}
-					/>{/each}
-				{#if !data.choices?.documents.length}<SearchEmpty
-						noun="documents"
-						hint="Upload or create a document from Profile."
-					/>{/if}
-			</fieldset>
-			<Pagination
-				label="Eligible document pages"
-				page={data.choices?.page ?? 1}
-				totalPages={Math.max(1, data.choices?.totalPages ?? 1)}
-				previous={choiceHref((data.choices?.page ?? 1) - 1)}
-				next={choiceHref((data.choices?.page ?? 1) + 1)}
-			/>
-			<Dialog.Footer
-				><Button variant="ghost" href="/profile">Cancel</Button><Button
-					type="submit"
-					disabled={!picked || picked === selected[data.select ?? '']?.id}>Use selected file</Button
-				></Dialog.Footer
-			>
-		</form>
-	</Dialog.Content>
-</Dialog.Root>
+{#if data.select}
+	{@const key = data.select}
+	{#key key}
+		<DocumentPicker
+			designation={key}
+			label={documentDesignations[key].label}
+			formatLabel={formatLabel(key)}
+			choices={data.choices?.documents ?? []}
+			page={data.choices?.page ?? 1}
+			totalPages={Math.max(1, data.choices?.totalPages ?? 1)}
+			total={data.choices?.total ?? 0}
+			current={selected[key] ?? null}
+			queryValue={data.query}
+			catalogToken={data.catalog_token}
+			error={form?.fileError ?? (uploadError?.key === key ? uploadError.message : null)}
+			uploadLabel={uploading && uploadKey === key ? `Uploading ${progress}%` : 'Upload'}
+			busy={locked}
+			createHref={`/documents/new?designation=${key}`}
+			onupload={() => chooseUpload(key)}
+			onclosed={() => returnFocus(key)}
+		/>
+	{/key}
+{/if}
 <form
 	id="clear-profile-selection"
 	method="POST"

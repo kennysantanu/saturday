@@ -94,3 +94,19 @@ export const documentDesignations = Object.freeze({
 		description: 'How you want your assistant to help.'
 	}
 });
+
+/** How Profile groups the designations: notes about you, then the HTML layouts. */
+export const documentDesignationGroups = Object.freeze([
+	{
+		id: 'about-you',
+		title: 'About you',
+		description: 'Markdown your assistant reads to learn who you are and what you want.',
+		keys: Object.freeze(['master_cv', 'career_direction', 'assistant_preferences'])
+	},
+	{
+		id: 'templates',
+		title: 'Templates',
+		description: 'HTML layouts your assistant fills in for each job.',
+		keys: Object.freeze(['resume_template', 'cover_letter_template'])
+	}
+]);
