@@ -44,6 +44,12 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 
 	let { data, form } = $props();
+	// Saves that finish with a result (not a redirect) confirm with a toast; it repeats for every save.
+	$effect(() => {
+		if (form?.navigationMessage) toast.show(form.navigationMessage);
+		if (form?.workflowSaved)
+			toast.show('Workflow saved. Refresh other open windows to see the changes.');
+	});
 	let updateDialog = $state(false),
 		uninstallDialog = $state(false),
 		deleteUserData = $state(false);
@@ -403,11 +409,7 @@
 					description="How Saturday looks in this browser and what it remembers about your recent work."
 				>
 					<ThemeSettings />
-					<NavigationSettings
-						settings={data.navigationSettings}
-						error={form?.navigationError}
-						message={form?.navigationMessage}
-					/>
+					<NavigationSettings settings={data.navigationSettings} error={form?.navigationError} />
 				</SectionCard>
 				<a class="settings-top-link" href="#main">Back to top</a>
 			</div>
@@ -1219,6 +1221,7 @@
 								title="Stop Saturday’s UI server?"
 								description="The dashboard will become unavailable. Use Open Saturday or npm run open to start it again. Your assistant’s MCP connection will remain independent."
 								confirmLabel="Stop server"
+								destructive
 								formId="stop-server"
 							/>
 						{/if}

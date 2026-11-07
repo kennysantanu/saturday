@@ -106,6 +106,7 @@
 			title="Allow LAN access?"
 			description={warning}
 			confirmLabel="Allow LAN access"
+			destructive
 			formId="allow-lan"
 		/>
 	{:else}

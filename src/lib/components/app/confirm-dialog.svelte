@@ -6,6 +6,11 @@
 	/**
 	 * Confirmation for an action that is hard to undo. The confirm button submits the form named
 	 * by `formId`, so the dialog can sit outside the form. The page closes it after the submit.
+	 * While that form is being sent (`withPending` marks it `aria-busy`) the dialog locks itself:
+	 * Cancel, Escape, the backdrop and a second confirm are all ignored, so `pending` is only
+	 * needed for work the form does not cover.
+	 *
+	 * `destructive` is for actions that delete data, replace data, or remove protection.
 	 */
 	let {
 		open = $bindable(false),
@@ -37,20 +42,34 @@
 		children?: Snippet;
 	} = $props();
 	let cancelButton = $state<HTMLButtonElement | null>(null);
+	let sending = $state(false);
+	$effect(() => {
+		const form = open ? document.getElementById(formId) : null;
+		if (!form) {
+			sending = false;
+			return;
+		}
+		const read = () => (sending = form.getAttribute('aria-busy') === 'true');
+		read();
+		const observer = new MutationObserver(read);
+		observer.observe(form, { attributes: true, attributeFilter: ['aria-busy'] });
+		return () => observer.disconnect();
+	});
+	const locked = $derived(pending || sending);
 </script>
 
 <Dialog.Root
 	bind:open={
 		() => open,
 		(next) => {
-			if (!pending) open = next;
+			if (!locked) open = next;
 		}
 	}
 >
 	<Dialog.Content
 		class="sm:max-w-md"
-		aria-busy={pending}
-		showCloseButton={!pending}
+		aria-busy={locked}
+		showCloseButton={!locked}
 		onOpenAutoFocus={(event) => {
 			if (focusCancel) {
 				event.preventDefault();
@@ -64,10 +83,10 @@
 			}
 		}}
 		onEscapeKeydown={(event) => {
-			if (pending) event.preventDefault();
+			if (locked) event.preventDefault();
 		}}
 		onInteractOutside={(event) => {
-			if (pending) event.preventDefault();
+			if (locked) event.preventDefault();
 		}}
 	>
 		<Dialog.Header>
@@ -80,7 +99,7 @@
 				bind:ref={cancelButton}
 				type="button"
 				variant="ghost"
-				disabled={pending}
+				disabled={locked}
 				onclick={() => (open = false)}>Cancel</Button
 			>
 			<Button
@@ -88,7 +107,7 @@
 				form={formId}
 				formaction={formAction}
 				formnovalidate={formNoValidate}
-				disabled={pending || disabled}
+				disabled={locked || disabled}
 				variant={destructive ? 'destructive' : 'default'}>{confirmLabel}</Button
 			>
 		</Dialog.Footer>

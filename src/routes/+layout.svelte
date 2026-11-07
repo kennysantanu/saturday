@@ -65,6 +65,34 @@
 		}
 	});
 
+	// Keep bars, sheets and toasts above a soft keyboard (iOS does not resize the layout). Only the
+	// viewport's resize is followed, once per frame and only when the value changes, so the page is
+	// left alone while text is being selected or scrolled.
+	$effect(() => {
+		const viewport = window.visualViewport;
+		if (!viewport) return;
+		let frame = 0,
+			last = 0;
+		const update = () => {
+			cancelAnimationFrame(frame);
+			frame = requestAnimationFrame(() => {
+				const raw = window.innerHeight - viewport.height - viewport.offsetTop;
+				// Small differences are browser chrome, not a keyboard.
+				const inset = raw > 120 ? Math.round(raw) : 0;
+				if (inset === last) return;
+				last = inset;
+				document.documentElement.style.setProperty('--keyboard-inset', `${inset}px`);
+			});
+		};
+		update();
+		viewport.addEventListener('resize', update);
+		return () => {
+			cancelAnimationFrame(frame);
+			viewport.removeEventListener('resize', update);
+			document.documentElement.style.removeProperty('--keyboard-inset');
+		};
+	});
+
 	// A short cross-fade between routes, skipped when the user prefers reduced motion.
 	onNavigate((navigation) => {
 		// Dashboard stage paging has its own horizontal slide rather than a route cross-fade.

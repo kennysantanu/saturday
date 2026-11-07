@@ -142,33 +142,7 @@
 		clearDraft();
 		draft = null;
 	}
-	// ----- Keep the action bar above a soft keyboard (iOS does not resize the layout). Only the
-	// viewport's resize is followed, once per frame and only when the value changes, so the page
-	// is left alone while text is being selected or scrolled.
-	$effect(() => {
-		if (!editing || !window.visualViewport) return;
-		const viewport = window.visualViewport;
-		let frame = 0,
-			last = 0;
-		const update = () => {
-			cancelAnimationFrame(frame);
-			frame = requestAnimationFrame(() => {
-				const raw = window.innerHeight - viewport.height - viewport.offsetTop;
-				// Small differences are browser chrome, not a keyboard.
-				const inset = raw > 120 ? Math.round(raw) : 0;
-				if (inset === last) return;
-				last = inset;
-				document.documentElement.style.setProperty('--keyboard-inset', `${inset}px`);
-			});
-		};
-		update();
-		viewport.addEventListener('resize', update);
-		return () => {
-			cancelAnimationFrame(frame);
-			viewport.removeEventListener('resize', update);
-			document.documentElement.style.removeProperty('--keyboard-inset');
-		};
-	});
+	// The soft keyboard offset (`--keyboard-inset`) is tracked once for the whole app in +layout.
 	// Dropping a file on the page would navigate away from the draft.
 	const blockFileDrop = (event: DragEvent) => {
 		if (editing && Array.from(event.dataTransfer?.types ?? []).includes('Files'))

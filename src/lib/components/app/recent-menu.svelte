@@ -133,7 +133,7 @@
 						aria-label={title}>{@render triggerContent()}</Button
 					>{/snippet}
 			</Dialog.Trigger>
-			<Dialog.Content class="recent-sheet">
+			<Dialog.Content>
 				<Dialog.Header
 					><Dialog.Title>{title}</Dialog.Title><Dialog.Description
 						>Return to {kind} you opened recently.</Dialog.Description

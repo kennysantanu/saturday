@@ -205,6 +205,7 @@
 				? 'Reachable network devices will be able to read and edit Saturday without a password. All existing sessions will be revoked.'
 				: 'Saturday will open without a password, and all existing sessions will be revoked.'}
 			confirmLabel="Disable password login"
+			destructive
 			formId="disable-password"
 		/>
 		<div class="form-actions">
@@ -233,6 +234,7 @@
 			title="Log out all devices?"
 			description="Every session will be revoked, including this browser. You will need to sign in again."
 			confirmLabel="Log out all devices"
+			destructive
 			formId="logout-all"
 		/>
 	{/if}

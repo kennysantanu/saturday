@@ -48,8 +48,8 @@
 	</DropdownMenu.Trigger>
 	<DropdownMenu.Portal>
 		<DropdownMenu.Content align="end" sideOffset={4} class="action-menu">
-			{#each items as item (item.label)}
-				{#if item.separated}<DropdownMenu.Separator class="my-1 h-px bg-border" />{/if}
+			{#each items as item, index (item.label)}
+				{#if item.separated && index > 0}<DropdownMenu.Separator class="my-1 h-px bg-border" />{/if}
 				<DropdownMenu.Item
 					class="action-menu-item"
 					data-variant={item.destructive ? 'destructive' : undefined}
