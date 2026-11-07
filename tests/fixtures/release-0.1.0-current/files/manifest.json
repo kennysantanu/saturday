@@ -1,0 +1,75 @@
+{
+  "format": "saturday.files",
+  "format_version": 1,
+  "dataset_id": "41947769-567b-41a4-99b5-2048e98e7d28",
+  "token": "16586dbe-b572-4ca0-b277-2ee6661384e4",
+  "documents": [
+    {
+      "id": "05e64952-94b5-4ee2-ace3-247fe9c55ad2",
+      "key": "documents/fictional-cv.md",
+      "created_via": "manual",
+      "created_at": "2026-11-07T10:52:26.555Z",
+      "updated_at": "2026-11-07T10:52:26.555Z",
+      "token": "a09247dc-3fd6-46b2-99b3-ea0f106e7f3a",
+      "size": 41,
+      "sha256": "91dea2037edf9ee6e8f6ba9d1af41f8d48bffa5dd7d0fc430df5065fd8dcb5e4"
+    },
+    {
+      "id": "e029dfa0-d830-4404-af73-812b088c73e4",
+      "key": "documents/resume.html",
+      "created_via": "manual",
+      "created_at": "2026-11-07T10:52:26.628Z",
+      "updated_at": "2026-11-07T10:52:26.628Z",
+      "token": "b1345e4c-891c-4b32-b207-c967691eee2f",
+      "size": 69,
+      "sha256": "e0892f669771202c5b710a863c8502ad4cfcd6ab3932ebf5b10ba62a3fb8d438"
+    },
+    {
+      "id": "cefdcbc3-d407-4298-84b7-82bd1c8e5e0d",
+      "key": "documents/cover-letter.html",
+      "created_via": "manual",
+      "created_at": "2026-11-07T10:52:26.708Z",
+      "updated_at": "2026-11-07T10:52:26.708Z",
+      "token": "bc099f15-c866-4daf-9834-b8c189d6a023",
+      "size": 75,
+      "sha256": "188fc61d472dc5a59007c3b78365a97cc60ae85144c1791b95479ee97edda87c"
+    },
+    {
+      "id": "f53a6f41-7613-4fc4-ad8d-f059378d001b",
+      "key": "documents/direction.md",
+      "created_via": "manual",
+      "created_at": "2026-11-07T10:52:26.780Z",
+      "updated_at": "2026-11-07T10:52:26.780Z",
+      "token": "5c9a3305-8822-4990-b006-c6f3d9e15966",
+      "size": 42,
+      "sha256": "2540ea81a19616720ad812f77d9e073911902cfa9c9f4698d97f0ffba1af7bb3"
+    },
+    {
+      "id": "c6c38b67-4151-4946-9bb7-b19d91098d4a",
+      "key": "documents/preferences.md",
+      "created_via": "manual",
+      "created_at": "2026-11-07T10:52:26.857Z",
+      "updated_at": "2026-11-07T10:52:26.857Z",
+      "token": "5f04e9c7-8964-431d-8579-1eb1c50e3ff9",
+      "size": 49,
+      "sha256": "686bd4706fa636ea045ae887fe1ffcd337c1b9d136baa2993dd6fd475a48e2c6"
+    },
+    {
+      "id": "dbbf64ab-f2c1-40a5-b6d8-9a348a90a1b4",
+      "key": "jobs/1/job-note.md",
+      "created_via": "manual",
+      "created_at": "2026-11-07T10:52:26.948Z",
+      "updated_at": "2026-11-07T10:52:26.948Z",
+      "token": "71cb46c1-bb76-481e-b0b6-a6c0324b1f0b",
+      "size": 50,
+      "sha256": "4b454212f9bd4741459677ca9d7366e4cf826cfbdceeb1ed3ebc6ed9abd08a55"
+    }
+  ],
+  "designations": {
+    "master_cv": "05e64952-94b5-4ee2-ace3-247fe9c55ad2",
+    "resume_template": "e029dfa0-d830-4404-af73-812b088c73e4",
+    "cover_letter_template": "cefdcbc3-d407-4298-84b7-82bd1c8e5e0d",
+    "career_direction": "f53a6f41-7613-4fc4-ad8d-f059378d001b",
+    "assistant_preferences": "c6c38b67-4151-4946-9bb7-b19d91098d4a"
+  }
+}

@@ -154,7 +154,7 @@ test(
 			const pairs = await import('../src/lib/server/files/pairs.js');
 			const incoming = await pairs.importBackupBundle(
 					createReadStream(
-						new URL('./fixtures/release-0.1.0/backups/combined.zip', import.meta.url)
+						new URL('./fixtures/release-0.1.0-current/backups/combined.zip', import.meta.url)
 					)
 				),
 				preview = await pairs.prepareBackupPairRestore({ file_backup_id: incoming.file_backup_id });

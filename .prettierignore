@@ -8,6 +8,9 @@ bun.lockb
 # Miscellaneous
 /static/
 
+# Ignored, machine-local assistant settings.
+**/.claude/settings.local.json
+
 # Released storage fixture bytes and metadata must remain unchanged.
 tests/fixtures/release-*/files/
 tests/fixtures/release-*/backups/
