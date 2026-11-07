@@ -221,13 +221,14 @@ try {
 	assert.deepEqual(externalRequests, [], 'HTML preview must not fetch external resources');
 	await page.goto(`${base}/documents`, { waitUntil: 'networkidle0' });
 	await page.screenshot({ path: join(scratch, 'desktop.png'), fullPage: true });
+	step = 'Profile document selection';
 	await page.goto(`${base}/profile`, { waitUntil: 'networkidle0' });
 	const selectMaster = async () => {
 		await page.click('a[href="/profile?select=master_cv"]');
 		await page.waitForSelector(`input[type=radio][value="${cv.id}"]`);
 		await settled();
 		await page.locator(`input[type=radio][value="${cv.id}"]`).click();
-		await page.locator('button::-p-text(Use selected file)').click();
+		await page.locator('button[type="submit"][form="profile-select"]').click();
 		await page.waitForSelector('[role=dialog]', { hidden: true });
 		await settled();
 	};
@@ -247,7 +248,9 @@ try {
 	assert.equal((await getDocument({ id: cv.id })).designation, null);
 	await selectMaster();
 
-	await page.click('a[href="/documents/new?designation=cover_letter_template"]');
+	step = 'Profile document creation';
+	await page.click('button[aria-label="More ways to add Cover letter template"]');
+	await page.locator('[role="menuitem"]::-p-text(Create new document)').click();
 	await page.waitForSelector('textarea[name=content]');
 	await page.type('textarea[name=content]', '<p>Dear hiring team</p>');
 	await settled();
@@ -316,10 +319,12 @@ try {
 		await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
 		'Mobile document page must not overflow'
 	);
+	step = 'mobile Profile picker';
 	await page.goto(`${base}/profile`, { waitUntil: 'networkidle0' });
 	await settled();
 	await page.screenshot({ path: join(scratch, 'profile-mobile.png'), fullPage: true });
-	await page.click('a[href="/profile?select=master_cv"]');
+	await page.click('button[aria-label="More actions for Master CV"]');
+	await page.locator('[role=menuitem]::-p-text(Choose another document)').click();
 	await page.waitForSelector('[role=dialog]');
 	await new Promise((r) => setTimeout(r, 400));
 	assert.ok(
@@ -334,7 +339,9 @@ try {
 	await page.waitForSelector('[role=dialog]', { hidden: true });
 	await settled();
 	assert.ok(
-		await page.evaluate(() => document.activeElement.textContent.includes('Select document')),
+		await page.evaluate(() =>
+			document.activeElement.matches('button[aria-label="More actions for Master CV"]')
+		),
 		'Picker cancellation returns focus to its trigger'
 	);
 	await page.goto(`${base}/settings`, { waitUntil: 'networkidle0' });
@@ -353,6 +360,7 @@ try {
 	// Network uses the same pages, controls and dialogs, with disposable records.
 	await page.setViewport({ width: 1365, height: 900 });
 	await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }]);
+	step = 'people and relationships';
 	await page.goto(`${base}/networks/new`, { waitUntil: 'networkidle0' });
 	await page.locator('button::-p-text(Save person)').click();
 	await page.waitForSelector('#name[aria-invalid="true"]');
@@ -399,7 +407,7 @@ try {
 	await settled();
 	await page.click('[role=dialog] input[type=radio]');
 	await page.type('#link_notes', 'Hiring manager');
-	await page.locator('[role=dialog] button::-p-text(Link job)').click();
+	await page.locator('button[type="submit"][form="network-job-link"]').click();
 	await page.waitForSelector('[role=dialog]', { hidden: true });
 	await settled();
 	assert.equal(networks.listNetworkJobs({ network_id: personId }).total, 1);
@@ -464,7 +472,7 @@ try {
 		0,
 		'Context creation waits for explicit linking'
 	);
-	await page.locator('[role=dialog] button::-p-text(Link person)').click();
+	await page.locator('button[type="submit"][form="job-person-link"]').click();
 	await page.waitForSelector('[role=dialog]', { hidden: true });
 	await settled();
 	assert.equal(networks.listNetworks({ job_id: job.id }).total, 1);
@@ -613,6 +621,8 @@ try {
 	step = 'continuous job workflow';
 	await page.setViewport({ width: 1280, height: 900 });
 	await page.goto(base, { waitUntil: 'networkidle0' });
+	await page.locator('.desktop-navigation a[href="/jobs"]').click();
+	await page.waitForFunction(() => location.pathname === '/jobs');
 	await page.locator('main a::-p-text(Add job)').click();
 	await page.waitForSelector('#job_title');
 	await settled();
@@ -639,15 +649,23 @@ try {
 	await settled();
 	const workflowId = Number(new URL(page.url()).pathname.split('/').at(-1));
 	const createdJob = getJob(workflowId);
-	assert.equal(new URL(page.url()).searchParams.get('return_to'), '/');
+	assert.equal(new URL(page.url()).searchParams.get('return_to'), '/jobs');
 	assert.equal(createdJob.tags[0].name, 'release_qa');
 	assert.equal(createdJob.tags[0].color, '#2468ac');
 	await page.goto(`${base}/jobs`, { waitUntil: 'networkidle0' });
 	await page.locator('#query').fill('Release workflow');
 	await page.select('#sort', 'created');
+	await page.waitForFunction(() => new URL(location.href).searchParams.get('sort') === 'created');
+	await settled();
+	await page.locator('button.filter-toggle').click();
+	await page.waitForSelector('.filter-panel:not(.is-collapsed)');
 	await page.click(`[data-choice="${createdJob.tags[0].id}"] input`);
 	await page.locator('button::-p-text(Apply filters)').click();
-	await page.waitForFunction(() => location.search.includes('query=Release'));
+	await page.waitForFunction(
+		(id) => new URL(location.href).searchParams.getAll('tag_ids').includes(String(id)),
+		{},
+		createdJob.tags[0].id
+	);
 	await settled();
 	const filters = new URL(page.url()).search;
 	assert.equal(new URL(page.url()).searchParams.get('sort'), 'created');
@@ -715,13 +733,9 @@ try {
 	await page.screenshot({ path: join(scratch, 'release-workflow.png'), fullPage: true });
 	await page.goto(base, { waitUntil: 'networkidle0' });
 	assert.ok(await page.$(`.pipeline-column a[href^="/jobs/${workflowId}?"]`));
-	assert.ok(
-		!(await page.$eval('#notifications-heading', (e) => e.closest('section').textContent)).includes(
-			reminder.note
-		)
-	);
+	assert.ok(!(await page.$eval('main', (e) => e.textContent)).includes(reminder.note));
 	verification.continuous_workflow =
-		'passed: Dashboard, create job with inline tag, search/tag/sort, stage plus reminder, independent scheduled history/edit, dismiss reminder and Dashboard';
+		'passed: Dashboard to Jobs, create job with inline tag, search/tag/sort, stage plus reminder, independent scheduled history/edit, dismiss reminder and Dashboard';
 	// Verify browser and a reconnected stdio client see the same stored job/build.
 	step = 'MCP reads, write, reconnect and help';
 	client = await connectMcp();

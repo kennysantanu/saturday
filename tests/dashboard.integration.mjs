@@ -30,6 +30,9 @@ test('Dashboard pipeline HTTP and browser paging, detail returns, closed jobs an
 	const port = socket.address().port;
 	await new Promise((r) => socket.close(r));
 	const base = `http://127.0.0.1:${port}`;
+	// Synchronous fixture writes can outlast the server's idle timeout before Node
+	// processes socket-close events. Do not pool these setup-only HTTP connections.
+	const request = (path = '') => fetch(base + path, { headers: { connection: 'close' } });
 	const child = spawn(process.execPath, ['scripts/start.mjs'], {
 		cwd: resolve('.'),
 		env: { ...process.env, PORT: String(port) },
@@ -43,7 +46,7 @@ test('Dashboard pipeline HTTP and browser paging, detail returns, closed jobs an
 		let ready = false;
 		for (let i = 0; i < 150; i++) {
 			try {
-				if ((await fetch(base)).ok) {
+				if ((await request()).ok) {
 					ready = true;
 					break;
 				}
@@ -51,7 +54,7 @@ test('Dashboard pipeline HTTP and browser paging, detail returns, closed jobs an
 			await new Promise((r) => setTimeout(r, 100));
 		}
 		assert(ready, logs);
-		assert((await (await fetch(base)).text()).includes('Welcome to Saturday'));
+		assert((await (await request()).text()).includes('Welcome to Saturday'));
 		const stages = listWorkflowStages();
 		const id = (name) => stages.find((s) => s.name === name).id;
 		const newId = id('New'),
@@ -78,7 +81,7 @@ test('Dashboard pipeline HTTP and browser paging, detail returns, closed jobs an
 			newId,
 			'New opportunities with a deliberately long stage name for narrow screens'
 		);
-		const html = await (await fetch(base)).text();
+		const html = await (await request()).text();
 		assert(html.includes('Job pipeline'));
 		assert(!html.includes('Recently updated'));
 		assert(!html.includes('Jobs you’re still pursuing'));
@@ -89,7 +92,7 @@ test('Dashboard pipeline HTTP and browser paging, detail returns, closed jobs an
 		assert(html.includes(`/jobs?view=all&amp;current_stage=${newId}`));
 		assert(html.includes(`/jobs?view=all&amp;milestone_stage=${id('Interview')}`));
 		assert(
-			(await (await fetch(base + `/jobs?view=all&current_stage=${acceptedId}`)).text()).includes(
+			(await (await request(`/jobs?view=all&current_stage=${acceptedId}`)).text()).includes(
 				'Pipeline role 106'
 			)
 		);
