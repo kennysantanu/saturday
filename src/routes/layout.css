@@ -2295,3 +2295,253 @@ form[aria-busy='true'] [data-slot='button'][type='submit']::after {
 		border-color: ButtonText;
 	}
 }
+
+/* ---- Document editor ---- */
+.editor-card {
+	border: 1px solid var(--border);
+	border-radius: var(--r-group);
+	background: var(--card);
+}
+.editor-card:focus-within {
+	border-color: var(--ring);
+	box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 30%, transparent);
+}
+/* The toolbar (and link row) stay pinned under the top bar while a long document scrolls. */
+.editor-sticky {
+	--editor-top: max(8px, env(safe-area-inset-top));
+	position: sticky;
+	top: var(--editor-top);
+	z-index: 25;
+	border-radius: var(--r-group) var(--r-group) 0 0;
+	background: var(--muted);
+	box-shadow: 0 8px 12px -10px rgb(0 0 0 / 25%);
+}
+.editor-bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px 12px;
+	padding: 6px 8px;
+	border-bottom: 1px solid var(--border);
+	border-radius: var(--r-group) var(--r-group) 0 0;
+	background: var(--muted);
+}
+.editor-bar-end {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 12px;
+}
+.editor-bar-actions {
+	display: none;
+	align-items: center;
+	gap: 8px;
+}
+.editor-status {
+	color: var(--muted-foreground);
+	font-size: 0.8125rem;
+}
+.editor-tools > * {
+	flex: none;
+}
+.draft-notice {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px 12px;
+}
+.editor-paste-note {
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--border);
+	background: var(--card);
+	font-size: 0.8125rem;
+	color: var(--muted-foreground);
+}
+.editor-surface .document-prose > * {
+	scroll-margin-top: 9rem;
+}
+.editor-tools {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 2px;
+}
+.editor-sep {
+	width: 1px;
+	height: 20px;
+	margin-inline: 4px;
+	background: var(--border);
+}
+.editor-link-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	padding: 8px;
+	border-bottom: 1px solid var(--border);
+	background: var(--card);
+}
+.editor-link-row > [data-slot='input'] {
+	flex: 1 1 14rem;
+	min-width: 0;
+}
+.editor-surface {
+	position: relative;
+	padding: 16px 20px;
+}
+.editor-placeholder {
+	position: absolute;
+	inset: 16px 20px auto;
+	color: var(--muted-foreground);
+	pointer-events: none;
+}
+.segmented {
+	display: inline-flex;
+	padding: 3px;
+	border-radius: var(--r-control);
+	background: var(--secondary);
+}
+.segmented > button {
+	min-height: 30px;
+	padding: 0 12px;
+	border-radius: calc(var(--r-control) - 3px);
+	color: var(--muted-foreground);
+	font-size: 0.8125rem;
+	font-weight: 550;
+}
+.segmented > button[aria-pressed='true'] {
+	background: var(--card);
+	color: var(--foreground);
+	box-shadow: 0 1px 3px rgb(0 0 0 / 14%);
+}
+.segmented > button:disabled {
+	opacity: 0.5;
+}
+.input-affix {
+	display: flex;
+	align-items: stretch;
+	border: 1px solid var(--input);
+	border-radius: var(--r-control);
+	background: var(--card);
+}
+.input-affix:focus-within {
+	border-color: var(--ring);
+	box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 30%, transparent);
+}
+.input-affix > [data-slot='input'] {
+	flex: 1;
+	min-width: 0;
+	border: 0;
+	box-shadow: none;
+	background: transparent;
+}
+.input-affix > [data-slot='input']:focus-visible {
+	box-shadow: none;
+	outline: none;
+}
+.input-affix > .affix {
+	display: grid;
+	place-items: center;
+	padding-inline: 14px;
+	border-left: 1px solid var(--border);
+	color: var(--muted-foreground);
+	font-size: 0.875rem;
+}
+/* Save and Cancel stay in reach while a long document is being edited. */
+.editor-actionbar {
+	position: sticky;
+	bottom: calc(var(--keyboard-inset, 0px) + 16px);
+	z-index: 20;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 10px 12px 10px 16px;
+	border: 1px solid var(--border);
+	border-radius: var(--r-card);
+	background: var(--card);
+	box-shadow: 0 6px 24px rgb(0 0 0 / 14%);
+}
+@media (width < 48rem) {
+	.editor-actionbar {
+		bottom: calc(
+			var(--keyboard-inset, 0px) + var(--tabbar-h) + max(12px, env(safe-area-inset-bottom)) + 12px
+		);
+	}
+	/* While writing, the tab bar steps aside so the keyboard leaves room for the text. */
+	body:has(.editor-card:focus-within) .tab-bar {
+		display: none;
+	}
+	body:has(.editor-card:focus-within) .editor-actionbar {
+		bottom: calc(var(--keyboard-inset, 0px) + max(12px, env(safe-area-inset-bottom)));
+	}
+	/* One scrolling row of tools beside the mode switch. */
+	.editor-bar {
+		flex-wrap: nowrap;
+	}
+	.editor-tools {
+		flex: 1;
+		min-width: 0;
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		scrollbar-width: none;
+		mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+	}
+	.editor-tools::-webkit-scrollbar {
+		display: none;
+	}
+	.editor-bar-end {
+		flex: none;
+		flex-wrap: nowrap;
+	}
+}
+@media (width >= 48rem) {
+	.editor-sticky {
+		--editor-top: calc(5.5rem + 4px);
+	}
+	.editor-actionbar {
+		display: none;
+	}
+	.editor-bar-actions {
+		display: flex;
+	}
+}
+/* Coarse pointers get 44px targets. */
+@media (pointer: coarse) {
+	.editor-tools [data-slot='button'] {
+		width: 44px;
+		height: 44px;
+	}
+	.editor-tools .native-select {
+		min-height: 44px;
+	}
+	.segmented > button {
+		min-height: 38px;
+	}
+}
+/* On very short screens a pinned toolbar would cover the text. */
+@media (height < 31rem) {
+	.editor-sticky,
+	.editor-actionbar {
+		position: static;
+	}
+}
+.page-title-compact {
+	font-size: clamp(1.5rem, 2.6vw, 2rem);
+}
+@media (forced-colors: active) {
+	.editor-card,
+	.editor-bar,
+	.editor-actionbar,
+	.input-affix {
+		border-color: ButtonText;
+	}
+}
+
+/* Keep the caret clear of the pinned toolbar and action bar when the browser scrolls it into view. */
+html:has(.editor-sticky) {
+	scroll-padding-top: 9rem;
+	scroll-padding-bottom: 8rem;
+}
