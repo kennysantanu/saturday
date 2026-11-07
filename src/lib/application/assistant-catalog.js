@@ -15,6 +15,7 @@ import {
 	networkUpdateSearchSchema,
 	jobSearchShape,
 	jobMcpInputShape,
+	jobCreationOptionsSchema,
 	assessmentSchema,
 	ServiceError,
 	recordDeletionShape,
@@ -65,8 +66,11 @@ export function createAssistantCatalog(app, capabilities) {
 			name: 'create_job',
 			operation: 'createJob',
 			description:
-				'Create a job in Saturday. This writes a new record. Provide the exact job title and company; optional fields are stored as plain text.',
-			inputSchema: z.object(jobMcpInputShape({ assessment: true })),
+				'Create a job with the exact title and company. Checks active and closed jobs for a matching posting URL or title/company with matching or missing location. A possible_duplicate error returns existing matches without writing. Inspect them and use allow_duplicate:true only when the user explicitly wants a separate record. After an uncertain response, search before retrying. Optional fields are plain text.',
+			inputSchema: z.object({
+				...jobMcpInputShape({ assessment: true }),
+				...jobCreationOptionsSchema.shape
+			}),
 			execute: async (input) => {
 				const job = await app.createJob(input);
 				return {

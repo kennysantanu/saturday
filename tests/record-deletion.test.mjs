@@ -34,7 +34,11 @@ test.beforeEach(async () => {
 });
 test.afterEach(async () => rm(root, { recursive: true, force: true }));
 const job = () => {
-	const value = createJob({ job_title: 'Delete target', company_name: 'Example' });
+	const value = createJob({
+		job_title: 'Delete target',
+		company_name: 'Example',
+		allow_duplicate: true
+	});
 	return getJob(value.id);
 };
 const input = (value) => ({ job_id: value.id, dataset_id: value.dataset_id, confirm: true });

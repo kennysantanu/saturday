@@ -1,4 +1,5 @@
 // Local SQLite implementation; compose through server/application.js for web and assistant use.
+import { possibleDuplicateJobs, PossibleDuplicateJobError } from '../../domain/job-duplicates.js';
 import { tagSummarySql, replaceTagAssignments, addTagFilter } from './tags.js';
 import { activityReminder, nextReminderSql, reminderFeed, localScheduleNow } from './reminders.js';
 import {
@@ -20,6 +21,7 @@ import {
 	parseAssessment,
 	parseEventDate,
 	parseJobInput,
+	jobCreationOptionsSchema,
 	parseUpdateInput,
 	localCalendarDate,
 	ServiceError,
@@ -96,10 +98,22 @@ function historyEntry(db, { job_id, stage_id, event_date, note }, createdVia) {
 
 export function createJob(input, createdVia = 'manual') {
 	const values = parseJobInput(input);
+	const { allow_duplicate } = parseSchema(jobCreationOptionsSchema, input);
 	if (!['manual', 'assistant'].includes(createdVia))
 		throw new ServiceError('Unknown record source.');
 	return withDatabase((db) =>
 		inTransaction(db, () => {
+			if (!allow_duplicate) {
+				const duplicates = possibleDuplicateJobs(
+					values,
+					db
+						.prepare(
+							'SELECT j.id,j.job_title,j.company_name,j.location,j.posting_url,s.name AS stage FROM jobs j JOIN workflow_stages s ON s.id=j.current_stage_id'
+						)
+						.iterate()
+				);
+				if (duplicates.total) throw new PossibleDuplicateJobError(duplicates);
+			}
 			const now = timestamp();
 			const assessment =
 				createdVia === 'assistant'

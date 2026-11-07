@@ -20,26 +20,34 @@ Jobs and people have separate ID sequences; clarify ambiguous references before 
 
 ## Jobs and identity tools
 
-| Tool                   | Behavior                                                                                                                                                                              |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_saturday_info`    | Installation/dataset/build identity and counts, including empty workspaces                                                                                                            |
-| `list_workflow_stages` | Read stable stage IDs, names, order, closure/archive flags and usage; no configuration writes                                                                                         |
-| `create_job`           | Required `job_title` and `company_name`; starts at the first available open stage with an initial milestone                                                                           |
-| `list_jobs`            | Search, filters, sorting, matching counts and pagination                                                                                                                              |
-| `get_job`              | `job_id`; returns the job, current stage, dated history and `dataset_id`                                                                                                              |
-| `edit_job`             | Partial detail changes; cannot override placement, IDs, origin or assessment                                                                                                          |
-| `change_job_stage`     | Required `job_id`, `stage_id`, `event_date`; optional `note`; changes placement and records a milestone atomically                                                                    |
-| `add_job_update`       | History only: `job_id`, `event_date`, optional `stage_id` and `note`; omitting/null stage requires note text                                                                          |
-| `edit_job_update`      | Scoped `job_id`, `update_id`, date/stage/note corrections; never changes placement                                                                                                    |
-| `delete_job_update`    | Scoped `job_id`, `update_id`, `confirm:true`; irreversible, requires user authorization and reading the entry first                                                                   |
-| `delete_job`           | `job_id`, `dataset_id`, `confirm: true`; permanently deletes the job, history, reminders, relationships and all job documents; returns `ok`, `job_id`, `deleted`, `documents_deleted` |
-| `set_job_score`        | Required finite numeric or null score, optional comment; assistant-only assessment                                                                                                    |
+| Tool                   | Behavior                                                                                                                                                                                           |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_saturday_info`    | Installation/dataset/build identity and counts, including empty workspaces                                                                                                                         |
+| `list_workflow_stages` | Read stable stage IDs, names, order, closure/archive flags and usage; no configuration writes                                                                                                      |
+| `create_job`           | Required `job_title` and `company_name`; duplicate check before creation; optional boolean `allow_duplicate` defaults to false; starts at the first available open stage with an initial milestone |
+| `list_jobs`            | Search, filters, sorting, matching counts and pagination                                                                                                                                           |
+| `get_job`              | `job_id`; returns the job, current stage, dated history and `dataset_id`                                                                                                                           |
+| `edit_job`             | Partial detail changes; cannot override placement, IDs, origin or assessment                                                                                                                       |
+| `change_job_stage`     | Required `job_id`, `stage_id`, `event_date`; optional `note`; changes placement and records a milestone atomically                                                                                 |
+| `add_job_update`       | History only: `job_id`, `event_date`, optional `stage_id` and `note`; omitting/null stage requires note text                                                                                       |
+| `edit_job_update`      | Scoped `job_id`, `update_id`, date/stage/note corrections; never changes placement                                                                                                                 |
+| `delete_job_update`    | Scoped `job_id`, `update_id`, `confirm:true`; irreversible, requires user authorization and reading the entry first                                                                                |
+| `delete_job`           | `job_id`, `dataset_id`, `confirm: true`; permanently deletes the job, history, reminders, relationships and all job documents; returns `ok`, `job_id`, `deleted`, `documents_deleted`              |
+| `set_job_score`        | Required finite numeric or null score, optional comment; assistant-only assessment                                                                                                                 |
 
 Discover stage IDs before writes; do not infer behavior from names or assume default IDs. A stage's `is_closed` decides whether its current jobs are active. Archived stages are invalid movement destinations but can be used for historical milestones. No reserved Accepted/Rejected/Dismissed actions or fixed event enums exist. UI **Change stage** maps to `change_job_stage`; **Add history** maps to `add_job_update`. Dashboard is a read-only view of current placement; milestone totals count distinct jobs with recorded history, including scheduled and archived milestones, rather than current-stage occupancy. Workflow configuration remains in Settings.
 
 Change stage requires a real non-future calendar date and takes effect immediately. Same-stage requests do nothing. Last committed move wins without revision tokens. Both actual moves retain history. After an uncertain response, read placement/history before manually retrying. Historical additions can use confirmed future dates; scheduled milestones count in history and never move placement. Removing/retargeting sole evidence of current placement is blocked: change stage first. General notes require text, and history notes allow 10,000 characters.
 
 Job title/company are required, trimmed and at most 200 characters. Optional fields include `posting_url`, `job_description`, `notes`, `location`, `work_arrangement` (remote/hybrid/on-site), `employment_type` (full-time/part-time/contract/internship/temporary), `compensation`, `source`, `application_deadline` and boolean `is_starred`. Read results use `title`/`company`; input uses `job_title`/`company_name`. Blank/null optional values clear them; omitted fields remain on partial edits. `create_job` can include assessment; existing assessment changes use `set_job_score`. There is no fixed score scale; zero/decimals are valid. Normal editing ignores assessment/placement overrides.
+
+### Possible duplicate jobs
+
+`create_job` checks active and closed records in the same transaction as insertion. A matching posting URL, or matching title/company with matching or missing location, returns `isError: true` with JSON text `{code: "possible_duplicate", message, matches, total}`. Each match has `id`, `title`, `company`, `location`, `stage` and `reason` (`matching_posting_url` or `matching_title_company`). At most ten matches are returned, posting-link matches first; `total` counts every match. No job, initial history or tag assignments are created on this response.
+
+Text comparison ignores capitalization, leading/trailing spaces and repeated whitespace. Posting URLs normalize the hostname and ignore fragments; their path case and query parameters are retained because they can identify different openings. Different nonblank locations match only when the posting URL also matches.
+
+Read the existing jobs and offer to use their IDs. Retry with `allow_duplicate: true` only when the user explicitly wants another record. This request option is not stored; it never merges, edits or reopens an existing job. The override permits intentional duplicates, not exactly-once writes. Inspect records after an uncertain response before retrying. Ordinary job edits are unchanged.
 
 ### Searching jobs
 

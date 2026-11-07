@@ -10,8 +10,11 @@ import {
 import {
 	parseJobInput,
 	parseAssessment,
-	parseRecordId
+	parseRecordId,
+	jobCreationOptionsSchema,
+	parseSchema
 } from '../../../src/lib/domain/validation.js';
+import { PossibleDuplicateJobError } from '../../../src/lib/domain/job-duplicates.js';
 import { editableJobFields } from '../../../src/lib/job-fields.js';
 
 const capabilities = Object.freeze({ records: true, documents: true });
@@ -34,14 +37,19 @@ function fixtureOperations(env) {
 			method: 'POST',
 			body: JSON.stringify({ operation, input })
 		});
-		if (!response.ok) throw new ServiceError('Storage fixture failed.', 'fixture_error');
-		return response.json();
+		const value = await response.json();
+		if (!response.ok) {
+			if (value.code === 'possible_duplicate') throw new PossibleDuplicateJobError(value);
+			throw new ServiceError('Storage fixture failed.', 'fixture_error');
+		}
+		return value;
 	}
 	return {
 		getJob: (_context, id) => storage('getJob', { id: parseRecordId(id, 'job_id') }),
 		createJob: (context, input) =>
 			storage('createJob', {
 				...parseJobInput(input),
+				...parseSchema(jobCreationOptionsSchema, input),
 				...parseAssessment({ score: null, score_comment: null, ...input }),
 				actor: context.actor
 			}),
@@ -114,7 +122,10 @@ export default {
 								? 'validation_error'
 								: (error.code ?? 'operation_failed'),
 						message: error.message,
-						...(error instanceof ValidationError ? { fields: error.fieldErrors } : {})
+						...(error instanceof ValidationError ? { fields: error.fieldErrors } : {}),
+						...(error instanceof PossibleDuplicateJobError
+							? { matches: error.matches, total: error.total }
+							: {})
 					}
 				},
 				{ status: 400 }

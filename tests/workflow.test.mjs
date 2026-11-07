@@ -42,7 +42,13 @@ afterEach(() => {
 	}
 });
 const stage = (name) => listWorkflowStages().find((stage) => stage.name === name);
-const job = () => createJob({ job_title: 'Engineer', company_name: 'Example', location: 'Remote' });
+const job = () =>
+	createJob({
+		job_title: 'Engineer',
+		company_name: 'Example',
+		location: 'Remote',
+		allow_duplicate: true
+	});
 const date = '2020-01-01';
 const move = (id, name) => moveJobStage(id, { stage_id: stage(name).id, event_date: date });
 test('fresh workflow seeds once; creation records the starting milestone and forbids arbitrary placement edits', () => {

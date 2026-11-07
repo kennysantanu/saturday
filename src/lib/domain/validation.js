@@ -105,6 +105,9 @@ function jobFieldSchema(field, wire = false) {
 		}, 'Enter a valid link that starts with http:// or https://.');
 	return text;
 }
+// Creation-only request options are never persisted as job fields.
+export const jobCreationOptionsSchema = z.object({ allow_duplicate: z.boolean().default(false) });
+
 export const jobInputShape = Object.fromEntries(
 	editableJobFields.map((field) => [field.name, jobFieldSchema(field)])
 );

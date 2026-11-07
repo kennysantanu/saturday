@@ -1,8 +1,14 @@
-import { tagPickerData, tagFormValues, tagFormFailure } from '$lib/server/tag-forms.js';
+import {
+	tagPickerData,
+	tagFormValues,
+	tagFormFailure,
+	tagFailureSelection
+} from '$lib/server/tag-forms.js';
 import { jobReturn, jobDetailUrl } from '$lib/job-navigation.js';
-import { redirect } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import { createJob, getNetwork } from '$lib/server/application.js';
 import { ServiceError, ValidationError } from '$lib/server/validation.js';
+import { PossibleDuplicateJobError } from '$lib/domain/job-duplicates.js';
 // "Add job" from a person's Link to job picker carries the person; anything invalid is ignored.
 async function findPerson(id) {
 	if (!id) return null;
@@ -24,12 +30,31 @@ export async function load({ url }) {
 }
 export const actions = {
 	default: async ({ request, url }) => {
-		const values = tagFormValues(await request.formData());
+		const submitted = await request.formData();
+		const values = tagFormValues(submitted);
+		delete values.allow_duplicate;
 		let job;
 		try {
-			job = await createJob(values);
+			job = await createJob({
+				...values,
+				allow_duplicate: submitted.get('allow_duplicate') === 'true'
+			});
 		} catch (error) {
-			return tagFormFailure(error, 'job', values, 'Saturday could not save this job. Try again.');
+			if (error instanceof PossibleDuplicateJobError)
+				return fail(409, {
+					errors: {},
+					values,
+					duplicateJobs: error.matches,
+					duplicateTotal: error.total,
+					tagSelection: await tagFailureSelection('job', values)
+				});
+			const failure = await tagFormFailure(
+				error,
+				'job',
+				values,
+				'Saturday could not save this job. Try again.'
+			);
+			return fail(failure.status, { ...failure.data, duplicateJobs: [], duplicateTotal: 0 });
 		}
 		const person = await findPerson(url.searchParams.get('person_id'));
 		if (person) redirect(303, `/networks/${person.id}?link_job=1&job=${job.id}`);

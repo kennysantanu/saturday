@@ -37,7 +37,7 @@ afterEach(() => {
 });
 const invalid = (operation) => assert.throws(operation, ValidationError);
 const notFound = (operation) => assert.throws(operation, (error) => error.code === 'not_found');
-const job = () => createJob({ job_title: 'Engineer', company_name: 'Acme' });
+const job = () => createJob({ job_title: 'Engineer', company_name: 'Acme', allow_duplicate: true });
 function contents() {
 	return withDatabase((db) =>
 		Object.fromEntries(

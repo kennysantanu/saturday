@@ -72,6 +72,8 @@ For candidate testing on disposable data, see the [agent verification checklist]
 
 Discover stages with `list_workflow_stages` before changing placement. Use `change_job_stage` to change the current stage and record a milestone; `add_job_update` records history only. Never infer current placement from the newest history entry. Read current placement after an uncertain response before retrying a write.
 
+Before creating a job, search existing records, including closed jobs. `create_job` also checks posting links and matching title/company with matching or missing locations. A `possible_duplicate` error returns up to ten existing jobs and the total match count without saving anything. Inspect the matches and use the existing job's ID when it is the same opening. Set `allow_duplicate: true` only when the user explicitly wants a separate record; an instruction to add a job alone does not authorize bypassing a duplicate warning. This flag creates a new job and never merges or overwrites the matches. After an uncertain create response, inspect existing records before retrying, including when an override was used.
+
 Ask your assistant to find a job, record progress, manage reminders, link a person, or tailor a document from your Profile selections. For example:
 
 - “List my active jobs in Saturday.”

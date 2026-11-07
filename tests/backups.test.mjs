@@ -261,7 +261,7 @@ test('concurrent numeric allocations have distinct IDs and one dataset identity'
 	const code = `import {createJob,addJobUpdate} from './src/lib/server/local/jobs.js';
  import {createNetwork,addNetworkUpdate} from './src/lib/server/local/people.js';
  import {withDatabase} from './src/lib/server/database.js';
- const job=createJob({job_title:'Concurrent',company_name:'Writer'});
+ const job=createJob({job_title:'Concurrent',company_name:'Writer',allow_duplicate:true});
  const update=addJobUpdate({job_id:job.id,event_date:'2000-01-01',note:'Concurrent'});
  const person=createNetwork({name:'Concurrent'});
  const interaction=addNetworkUpdate({network_id:person.id,interaction_date:'2000-01-01',note:'Concurrent'});
