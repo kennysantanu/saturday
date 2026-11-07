@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import {
 	checkReleasePolicy,
 	releaseSourceFiles,
@@ -133,11 +134,74 @@ test('Git CRLF checkouts and generated registrations do not require an app versi
 	const f = fixture();
 	try {
 		f.edit('src/lib/server/local/jobs.js', (text) => text.replaceAll('\n', '\r\n'));
+		f.edit('tests/fixtures/release-0.1.0-current/expected.json', (text) =>
+			text.replaceAll('\n', '\r\n')
+		);
 		writeFileSync(
 			join(f.root, 'src/lib/server/extensions.generated.js'),
 			'// Local build output\n'
 		);
 		assert.equal(checkReleasePolicy(f.root).frozen, true);
+	} finally {
+		f.close();
+	}
+});
+
+test('an actual core.autocrlf=true Git checkout preserves all frozen artifact bytes and passes release checks', () => {
+	const f = fixture();
+	const git = (...args) =>
+		execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+	try {
+		git('-C', f.root, 'init', '--quiet');
+		git('-C', f.root, '-c', 'core.autocrlf=false', 'add', '.');
+		git(
+			'-C',
+			f.root,
+			'-c',
+			'user.name=Saturday fixture',
+			'-c',
+			'user.email=fixture@example.invalid',
+			'-c',
+			'commit.gpgsign=false',
+			'commit',
+			'--quiet',
+			'-m',
+			'Fictional line-ending checkout'
+		);
+		const checkout = join(f.root, 'crlf-checkout');
+		git('-c', 'core.autocrlf=true', 'clone', '--quiet', '--no-local', f.root, checkout);
+		assert.ok(
+			readFileSync(join(checkout, 'src/lib/server/local/jobs.js'), 'utf8').includes('\r\n')
+		);
+		assert.ok(readFileSync(join(checkout, '.npmrc'), 'utf8').includes('\r\n'));
+		const expectedPath = 'tests/fixtures/release-0.1.0-current/expected.json';
+		assert.deepEqual(
+			readFileSync(join(checkout, expectedPath)),
+			readFileSync(join(f.root, expectedPath))
+		);
+		const expected = JSON.parse(readFileSync(join(f.root, expectedPath)));
+		for (const path of Object.keys(expected.hashes)) {
+			const artifact = join(dirname(expectedPath), path);
+			assert.deepEqual(
+				readFileSync(join(checkout, artifact)),
+				readFileSync(join(f.root, artifact)),
+				artifact
+			);
+		}
+		assert.equal(checkReleasePolicy(checkout, { requireFrozen: true }).frozen, true);
+		assert.match(
+			execFileSync(process.execPath, ['scripts/check-release.mjs'], {
+				cwd: checkout,
+				encoding: 'utf8'
+			}),
+			/app 0\.1\.0 \(frozen\)/
+		);
+		const document = join(
+			checkout,
+			'tests/fixtures/release-0.1.0-current/files/documents/fictional-cv.md'
+		);
+		writeFileSync(document, readFileSync(document, 'utf8').replaceAll('\n', '\r\n'));
+		assert.throws(() => checkReleasePolicy(checkout), /Released fixture artifact changed/);
 	} finally {
 		f.close();
 	}
