@@ -6,8 +6,9 @@
 	/**
 	 * One choice in a list of radio options, drawn as a solid selectable row.
 	 *
-	 * Pass `initial` for the record-picker card used by Link person and Link to job: an initials
-	 * tile, `label` with its record `number`, a `description` line and optional `badges`. The radio
+	 * Pass `initial` (text) or `icon` (a snippet, such as a file icon) for the record-picker card used
+	 * by Link person, Link to job and the Profile document picker: a mark tile, `label` with its
+	 * record `number`, a `description` line and optional `badges`. The radio
 	 * is then visually hidden but stays the focusable, accessible control, and selection shows as a
 	 * tint and a check mark.
 	 */
@@ -15,6 +16,7 @@
 		label,
 		description,
 		initial,
+		icon,
 		number,
 		badges,
 		...restProps
@@ -22,15 +24,18 @@
 		label: string;
 		description?: string;
 		initial?: string;
+		icon?: Snippet;
 		number?: number;
 		badges?: Snippet;
 	} = $props();
 </script>
 
-{#if initial !== undefined}
+{#if initial !== undefined || icon}
 	<label class="picker-option">
 		<input type="radio" {...restProps} />
-		<span class="row-mark picker-mark" aria-hidden="true">{initial}</span>
+		<span class="row-mark picker-mark" aria-hidden="true"
+			>{#if icon}{@render icon()}{:else}{initial}{/if}</span
+		>
 		<span class="picker-text">
 			<span class="picker-title"
 				>{label}

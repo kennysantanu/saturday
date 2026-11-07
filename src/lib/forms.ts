@@ -16,6 +16,16 @@ export function focusFirstError() {
 	target?.focus();
 }
 
+/**
+ * Dialog `onOpenAutoFocus` for dialogs that start with a search field: on a touch screen focus the
+ * dialog itself so the on-screen keyboard does not open over the results.
+ */
+export function skipKeyboardFocus(event: Event) {
+	if (!window.matchMedia('(pointer: coarse)').matches) return;
+	event.preventDefault();
+	document.querySelector<HTMLElement>('[data-slot="dialog-content"]')?.focus();
+}
+
 /** Marks the form busy while it is being sent, so its submit button shows progress. */
 export function withPending(
 	handler: SubmitFunction = () => undefined,

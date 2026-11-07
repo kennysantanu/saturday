@@ -11,8 +11,16 @@
 		label,
 		editHref,
 		onEdit,
-		menu = []
-	}: { label: string; editHref?: string; onEdit?: () => void; menu?: MenuItem[] } = $props();
+		menu = [],
+		menuRef = $bindable(null)
+	}: {
+		label: string;
+		editHref?: string;
+		onEdit?: () => void;
+		menu?: MenuItem[];
+		/** The menu's trigger button, for returning focus after a dialog. */
+		menuRef?: HTMLButtonElement | null;
+	} = $props();
 </script>
 
 <div class="flex items-center gap-1">
@@ -21,5 +29,9 @@
 			><Pencil data-icon="inline-start" />Edit</Button
 		>
 	{/if}
-	{#if menu.length}<ActionMenu label={`More actions for ${label}`} items={menu} />{/if}
+	{#if menu.length}<ActionMenu
+			bind:ref={menuRef}
+			label={`More actions for ${label}`}
+			items={menu}
+		/>{/if}
 </div>

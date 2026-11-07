@@ -21,6 +21,7 @@ export const SAVED_MESSAGES: Record<string, string> = {
 	document: 'Document saved.',
 	extension: 'Extension changes saved.',
 	profile: 'Profile selection saved.',
+	'profile-cleared': 'Profile selection cleared. The document is kept.',
 	'document-copy': 'Document copied.',
 	'document-deleted': 'Document deleted.',
 	'document-pdf': 'PDF generated and saved.',

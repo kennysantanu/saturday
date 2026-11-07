@@ -164,7 +164,9 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 				document.querySelector('.editor-bar-actions [role="status"]')?.textContent.trim() ===
 				'Unsaved changes'
 		);
-		assert.match(await page.$eval('.markdown-editor', (e) => e.textContent), /typed/);
+		await page.waitForFunction(() =>
+			document.querySelector('.markdown-editor')?.textContent.includes('typed')
+		);
 		// Strikethrough is part of the visual editor: it stays visual and is stored as ~~text~~.
 		const strikeBox = await page.$eval('.document-prose h1, .document-prose li', (e) => {
 			const r = e.getBoundingClientRect();
@@ -185,7 +187,9 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		]);
 		await page.keyboard.up('Control');
 		assert.equal(new URL(page.url()).pathname, `/documents/${id}`);
-		assert.match(await page.$eval('.markdown-editor', (e) => e.textContent), /typed/);
+		await page.waitForFunction(() =>
+			document.querySelector('.markdown-editor')?.textContent.includes('typed')
+		);
 		assert(
 			await page.$('.markdown-editor .document-prose s, .markdown-editor .document-prose del')
 		);

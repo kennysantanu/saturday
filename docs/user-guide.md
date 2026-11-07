@@ -121,7 +121,7 @@ Successful deletion returns to your originating list or job and shows a confirma
 
 A document's page shows its type, size and last update, with Download, Edit and a menu for Rename, Duplicate and Delete (HTML documents also offer Generate PDF). Markdown has a visual editor and a source mode, chosen with the **Visual | Markdown** switch above the text: use the style menu for Paragraph and Headings 1–3, and the buttons for bold, italic, strikethrough, lists, quotes and links. Unsupported formatting stays in source mode to preserve it. The toolbar stays at the top of the screen as you scroll a long document. On a computer, **Save** and **Cancel** sit at the right of the toolbar; on a phone they stay at the bottom, above the keyboard. A note shows when there are unsaved changes, and Ctrl or ⌘ + S also saves. Saturday keeps a draft of unsaved edits in this browser and offers to restore it if the page is reloaded or closed. Pasting from Word or Google Docs keeps basic formatting only; tables and images are simplified. A new document starts with its name “Untitled” selected so you can type over it. HTML and TXT use source editors. Editing is limited to valid UTF-8 text up to 1 MiB. PDFs support browser preview/download; other binary formats download only. Nothing is saved until you save. If another editor or assistant changes the file, reload and reconcile, or save your draft as a separate copy.
 
-Open **Profile** from the Documents header to assign reusable context:
+Open **Profile** from the Documents header to choose the documents your assistant reads. The page shows how many of the five are set up, grouped as **About you** (Master CV, Career direction, Assistant preferences) and **Templates** (Resume template, Cover letter template):
 
 | Designation           | Required format |
 | --------------------- | --------------- |
@@ -131,7 +131,7 @@ Open **Profile** from the Documents header to assign reusable context:
 | Career direction      | Markdown        |
 | Assistant preferences | Markdown        |
 
-For each designation, select an existing document, upload one, or create one using the editor. Selected files must be readable UTF-8 within the 1 MiB limit. They remain ordinary Documents entries with designation labels. Clearing or replacing a selection keeps the old file. PDF/Word conversion is not included.
+For an empty slot choose **Select document** to pick an existing file (search by filename; the list shows only files the slot can use), or open its menu to **Upload a file** or **Create new document**. For a slot that is set, **Edit** changes the file, and the menu offers **Choose another document**, **Upload a replacement**, **Create new document** and **Clear selection**. The picker also has **Upload** and **Create new**, and the file you upload or save is selected automatically. Selected files must be readable UTF-8 within the 1 MiB limit. They remain ordinary Documents entries with designation labels. Clearing or replacing a selection keeps the old file. If one selected file can no longer be read, only that slot shows an error; select another document or clear it. PDF/Word conversion is not included.
 
 On a job, choose **Manage documents** to upload/create attachments or **Copy to this job** for an independent copy of a reusable document. Editing a job copy never edits its source. The main Documents page does not browse job folders.
 

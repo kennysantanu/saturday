@@ -24,10 +24,8 @@
 	 *
 	 * With `instant`, changing a control marked `data-instant` (a select or toggle) applies the form
 	 * straight away, replacing the history entry and keeping focus and scroll. Text search and other
-	 * fields still wait for Enter or Apply. With `navigate`, Apply and Enter load the new results
-	 * client-side, keeping focus, scroll and any open dialog, instead of a full page load. The form
-	 * stays a native GET form, so it works without JavaScript. Omit `action` to submit to the
-	 * current page.
+	 * fields still wait for Enter or Apply. The form stays a native GET form, so it works
+	 * without JavaScript. Omit `action` to submit to the current page.
 	 */
 	let {
 		label,
@@ -37,7 +35,6 @@
 		clearLabel = filterLabels.clear,
 		showClear = true,
 		instant = false,
-		navigate = false,
 		unapplied,
 		chips = [],
 		advancedLabel = 'Filters',
@@ -54,7 +51,6 @@
 		clearLabel?: string;
 		showClear?: boolean;
 		instant?: boolean;
-		navigate?: boolean;
 		unapplied?: boolean;
 		chips?: { key: string; label: string; href: string; color?: string }[];
 		advancedLabel?: string;
@@ -114,15 +110,6 @@
 		return params;
 	}
 
-	function submitClientSide(event: SubmitEvent) {
-		if (!navigate) return;
-		event.preventDefault();
-		const form = event.currentTarget as HTMLFormElement;
-		const params = queryOf(form);
-		const path = form.getAttribute('action') || page.url.pathname;
-		void goto(`${path}${params.size ? `?${params}` : ''}`, { keepFocus: true, noScroll: true });
-	}
-
 	function applyInstantly(event: Event) {
 		if (!instant) return;
 		if (!(event.target as HTMLElement).closest('[data-instant]')) return;
@@ -171,7 +158,6 @@
 	aria-label={label}
 	onchange={applyInstantly}
 	oninput={markDirty}
-	onsubmit={submitClientSide}
 >
 	{@render before?.()}
 	<Card.Root class="filter-card gap-0 overflow-visible py-0">

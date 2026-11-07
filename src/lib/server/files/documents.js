@@ -142,7 +142,7 @@ export async function listDocuments({
 	});
 }
 export async function getDocument(
-	{ id, designation, scope = 'documents', include_content = false },
+	{ id, designation, scope = 'documents', include_content = false, metadata_only = false },
 	{ includeAvailableContent = false } = {}
 ) {
 	return withFileLock(async (m) => {
@@ -163,6 +163,8 @@ export async function getDocument(
 		if (include_content) {
 			result.content = await readText(d);
 			result.can_preview = true;
+		} else if (metadata_only) {
+			// Listings need the name, size and dates only; skip reading the file.
 		} else if (result.can_read_text) {
 			try {
 				const content = await readText(d);
