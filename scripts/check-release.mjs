@@ -9,12 +9,16 @@ import { compareVersions } from '../src/lib/distribution.js';
 const defaultRoot = fileURLToPath(new URL('../', import.meta.url));
 const json = (path) => JSON.parse(readFileSync(path, 'utf8'));
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+// Metadata may already have been checked out with CRLF before fixture attributes
+// were added. Normalize only its line endings; payload hashes stay byte-exact.
+const fixtureMetadataDigest = (path) => digest(readFileSync(path, 'utf8').replaceAll('\r\n', '\n'));
 const lockName = 'release-baselines.json';
 const rootFiles = [
 	'package.json',
 	'package-lock.json',
 	'README.md',
 	'.npmrc',
+	'.gitattributes',
 	'install.sh',
 	'install.bat',
 	'vite.config.ts',
@@ -61,7 +65,11 @@ export function releaseSourceHash(root = defaultRoot) {
 		let bytes = readFileSync(join(root, path));
 		if (path === 'package.json' || path === 'package-lock.json')
 			bytes = Buffer.from(JSON.stringify(JSON.parse(bytes.toString('utf8'))));
-		else if (/\.(?:[cm]?js|ts|svelte|json|css|html|md|svg|sh|bat|txt|yml|yaml|sql)$/.test(path))
+		else if (
+			path === '.npmrc' ||
+			path === '.gitattributes' ||
+			/\.(?:[cm]?js|ts|svelte|json|css|html|md|svg|sh|bat|txt|yml|yaml|sql)$/.test(path)
+		)
 			bytes = Buffer.from(bytes.toString('utf8').replaceAll('\r\n', '\n'));
 		hash.update(path + '\0' + bytes.length + '\0');
 		hash.update(bytes);
@@ -106,7 +114,7 @@ export function checkReleasePolicy(root = defaultRoot, { requireFrozen = false }
 			throw new Error('Release baselines must be appended in increasing version order.');
 		if (!/^[a-f0-9]{64}$/.test(release.source_sha256))
 			throw new Error('Invalid frozen source hash.');
-		if (digest(readFileSync(join(root, release.fixture.path))) !== release.fixture.sha256)
+		if (fixtureMetadataDigest(join(root, release.fixture.path)) !== release.fixture.sha256)
 			throw new Error('A released storage fixture was changed. Restore its original bytes.');
 		const fixture = json(join(root, release.fixture.path));
 		for (const [path, expected] of Object.entries(fixture.hashes))
@@ -150,7 +158,7 @@ export function freezeRelease(root = defaultRoot, fixturePath) {
 		database_schema_sha256: current.database_schema_sha256,
 		fixture: {
 			path: fixturePath.split(sep).join('/'),
-			sha256: digest(readFileSync(join(root, fixturePath)))
+			sha256: fixtureMetadataDigest(join(root, fixturePath))
 		}
 	});
 	writeFileSync(join(root, lockName), JSON.stringify(baselines, null, '\t') + '\n');

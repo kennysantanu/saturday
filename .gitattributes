@@ -1,0 +1,3 @@
+# Frozen storage fixtures contain recorded byte hashes, including text payloads.
+# Preserve their committed bytes even in core.autocrlf=true Windows checkouts.
+tests/fixtures/release-*/** -text

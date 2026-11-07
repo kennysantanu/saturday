@@ -4,7 +4,7 @@
 	"releases": [
 		{
 			"version": "0.1.0",
-			"source_sha256": "5b5a2dc598bf5ddc66b9386c60f15d889d6d7c0c8d457dfcf0de0571a64da6a0",
+			"source_sha256": "efe8f2cac1186c7340ca82c298cdafd08954e05f1c31643ab6010b18dcc7086f",
 			"storage": {
 				"database": {
 					"format": "saturday.database",

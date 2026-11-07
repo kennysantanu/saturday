@@ -21,7 +21,7 @@ Released storage baselines are immutable. Append migrations for supported data c
 
 ### Version changes after 0.1.0
 
-`release-baselines.json` freezes shipped source, storage declarations, numbered migration checksums and a populated compatibility fixture. `npm run check:release` runs during checks and production builds; release metadata generation also requires a frozen version. Changes to app code, dependencies, installers, build code, icons, bundled guides or extension examples require a newer app version. Tests alone do not. Hashes tolerate Git CRLF conversion and ignore generated extension registrations.
+`release-baselines.json` freezes shipped source, storage declarations, numbered migration checksums and a populated compatibility fixture. `npm run check:release` runs during checks and production builds; release metadata generation also requires a frozen version. Changes to app code, dependencies, installers, build code, icons, bundled guides or extension examples require a newer app version. Tests alone do not. Source hashes and the frozen fixture JSON metadata check tolerate Git CRLF conversion and ignore generated extension registrations. `.gitattributes` disables text conversion for released fixtures so document payloads, manifests, SQLite databases and ZIPs retain their recorded bytes. Payload checks remain byte-exact; never normalize stored documents or backups to repair a checksum failure.
 
 | Change             | Required version change                                                                                                        |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |

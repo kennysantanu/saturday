@@ -140,7 +140,7 @@ async function freePort() {
 	return port;
 }
 
-test('fresh managed installation uses its descriptor for runtime preparation and starts the UI', async () => {
+test('fresh managed installation from a CRLF Git checkout uses its descriptor and starts the UI', async () => {
 	const temporary = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'saturday-fresh-install-')));
 	const root = join(temporary, 'Saturday ü');
 	const source = join(temporary, 'source');
@@ -151,7 +151,22 @@ test('fresh managed installation uses its descriptor for runtime preparation and
 	let setups = 0;
 	try {
 		process.env.PORT = String(await freePort());
-		await copySource(resolve('.'), source);
+		// Reproduce an assistant's Windows-style checkout from committed, secret-free source.
+		await run('git', [
+			'-c',
+			'core.autocrlf=true',
+			'clone',
+			'--quiet',
+			'--no-local',
+			'--depth=1',
+			resolve('.'),
+			source
+		]);
+		assert.ok((await fs.readFile(join(source, 'scripts/setup.mjs'), 'utf8')).includes('\r\n'));
+		assert.deepEqual(
+			await fs.readFile(join(source, 'tests/fixtures/release-0.1.0-current/expected.json')),
+			await fs.readFile(resolve('tests/fixtures/release-0.1.0-current/expected.json'))
+		);
 		await fs.mkdir(root);
 		await fs.mkdir(desktop);
 		assert.deepEqual(await fs.readdir(root), []);
