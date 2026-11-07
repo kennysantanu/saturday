@@ -1,3 +1,4 @@
+import { possibleDuplicateJobs } from '../../../src/lib/domain/job-duplicates.js';
 import { jobFromStorage } from '../../../src/lib/job-fields.js';
 
 // External storage stand-in for runtime checks. No SQL, real network, files, credentials or durability.
@@ -42,7 +43,15 @@ export function createStorageFixture() {
 			let value;
 			if (operation === 'getJob') value = jobs.has(input.id) ? present(jobs.get(input.id)) : null;
 			else if (operation === 'createJob') {
-				const { actor, ...fields } = input;
+				const { actor, allow_duplicate, ...fields } = input;
+				if (!allow_duplicate) {
+					const duplicates = possibleDuplicateJobs(
+						fields,
+						Array.from(jobs.values(), (row) => ({ ...row, stage: 'New' }))
+					);
+					if (duplicates.total)
+						return Response.json({ code: 'possible_duplicate', ...duplicates }, { status: 409 });
+				}
 				const row = {
 					...fields,
 					id: nextId++,

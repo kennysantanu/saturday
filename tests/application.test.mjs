@@ -85,7 +85,11 @@ test('actor labels and caller input cannot grant assessment, deletion or workflo
 	const input = { job_title: 'Engineer', company_name: 'Example' };
 	const job = await web.createJob(input, 'assistant');
 	assert.equal(job.createdVia, 'manual');
-	assert.equal((await web.createJob({ ...input, score: 9, score_comment: 'Forged' })).score, null);
+	assert.equal(
+		(await web.createJob({ ...input, allow_duplicate: true, score: 9, score_comment: 'Forged' }))
+			.score,
+		null
+	);
 	await assert.rejects(web.setJobScore(job.id, { score: 9 }), { code: 'forbidden' });
 	const unprivileged = createApplication(
 		localOperations,
@@ -110,7 +114,10 @@ test('actor labels and caller input cannot grant assessment, deletion or workflo
 		score_comment: 'Relevant experience'
 	});
 	assert.equal(scored.score, 9);
-	assert.equal((await assistant.createJob(input)).createdVia, 'assistant');
+	assert.equal(
+		(await assistant.createJob({ ...input, allow_duplicate: true })).createdVia,
+		'assistant'
+	);
 	assert.equal((await web.getJob(job.id)).scoreComment, 'Relevant experience');
 });
 

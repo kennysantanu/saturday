@@ -45,7 +45,8 @@ afterEach(() => {
 	}
 });
 const call = (name, input) => commands.get(name).execute(input);
-const makeJob = () => web.createJob({ job_title: 'Engineer', company_name: 'Example' });
+const makeJob = () =>
+	web.createJob({ job_title: 'Engineer', company_name: 'Example', allow_duplicate: true });
 
 test('local adapter satisfies the same creation/read/partial-update contract as the Cloudflare fixture', async () => {
 	await verifyJobCrud(web);

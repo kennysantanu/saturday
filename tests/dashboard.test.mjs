@@ -40,7 +40,8 @@ afterEach(() => {
 });
 const stages = () => listWorkflowStages();
 const stage = (name) => stages().find((s) => s.name === name);
-const job = (title = 'Engineer') => createJob({ job_title: title, company_name: 'Example' });
+const job = (title = 'Engineer') =>
+	createJob({ job_title: title, company_name: 'Example', allow_duplicate: true });
 const move = (id, name) => moveJobStage(id, { stage_id: stage(name).id, event_date: '2020-01-01' });
 
 test('pipeline independently pages more than 100 jobs, retains full counts and uses deterministic recent order', () => {

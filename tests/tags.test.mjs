@@ -34,7 +34,8 @@ afterEach(() => {
 		if (v === undefined) delete process.env[k];
 		else process.env[k] = v;
 });
-const job = () => createJob({ job_title: 'Engineer', company_name: 'Example' });
+const job = () =>
+	createJob({ job_title: 'Engineer', company_name: 'Example', allow_duplicate: true });
 const person = () => createNetwork({ name: 'Alex' });
 const make = (collection, name = 'Career faIR', color = '#ABCDEF') =>
 	tags.createTag({ collection, name, color });

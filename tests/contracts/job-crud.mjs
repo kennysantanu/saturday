@@ -19,6 +19,22 @@ export async function verifyJobCrud(application) {
 	assert.equal(job.score, null);
 	assert.equal(job.createdVia, 'manual');
 	assert.equal(job.isStarred, true);
+	await assert.rejects(
+		application.createJob({
+			job_title: ' engineer ',
+			company_name: ' EXAMPLE ',
+			location: ' paris '
+		}),
+		{ code: 'possible_duplicate' }
+	);
+	const separate = await application.createJob({
+		job_title: 'Engineer',
+		company_name: 'Example',
+		location: 'Paris',
+		allow_duplicate: true
+	});
+	assert.notEqual(separate.id, job.id);
+	assert.equal(separate.allow_duplicate, undefined);
 	const edited = await application.editJob(job.id, { job_title: 'Senior Engineer' });
 	assert.equal(edited.title, 'Senior Engineer');
 	assert.equal(edited.notes, 'Keep this');

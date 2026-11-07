@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PossibleDuplicateJobError } from '../domain/job-duplicates.js';
 import { createDocumentationHelp } from '../documentation/help.js';
 import { createAssistantCatalog } from '../application/assistant-catalog.js';
 import { McpServer } from '@modelcontextprotocol/server';
@@ -30,6 +31,21 @@ const server = new McpServer(
 );
 const help = createDocumentationHelp(undefined, buildInfo);
 function toolError(error) {
+	if (error instanceof PossibleDuplicateJobError)
+		return {
+			content: [
+				{
+					type: 'text',
+					text: JSON.stringify({
+						code: error.code,
+						message: error.message,
+						matches: error.matches,
+						total: error.total
+					})
+				}
+			],
+			isError: true
+		};
 	const message =
 		error instanceof ValidationError
 			? Object.values(error.fieldErrors).join(' ')

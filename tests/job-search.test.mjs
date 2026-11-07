@@ -44,7 +44,10 @@ afterEach(() => {
 });
 const job = (fields = {}, origin = 'manual') => {
 	const { reminder_date, ...details } = fields;
-	const record = createJob({ job_title: 'Engineer', company_name: 'Acme', ...details }, origin);
+	const record = createJob(
+		{ job_title: 'Engineer', company_name: 'Acme', ...details, allow_duplicate: true },
+		origin
+	);
 	if (reminder_date)
 		createReminder({ job_id: record.id, scheduled_at: reminder_date + 'T23:59' }, origin);
 	return record;

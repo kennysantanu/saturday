@@ -40,7 +40,8 @@ afterEach(() => {
 		if (value === undefined) delete process.env[key];
 		else process.env[key] = value;
 });
-const job = () => createJob({ job_title: 'Engineer', company_name: 'Example' });
+const job = () =>
+	createJob({ job_title: 'Engineer', company_name: 'Example', allow_duplicate: true });
 const person = () => people.createNetwork({ name: 'Alex' });
 const at = '2099-08-01T00:00';
 const list = (owner, view = 'all') => reminders.listReminders({ ...owner, view }).reminders;

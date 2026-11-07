@@ -76,7 +76,7 @@ test('Foreign schema is rejected unchanged even when its version is 1', () => {
 test('Initial baseline allocates records, retains dataset identity and never reuses deleted update IDs', () => {
 	const job = createJob(details);
 	assert.equal(job.id, 1);
-	assert.equal(createJob(details).id, 2);
+	assert.equal(createJob({ ...details, allow_duplicate: true }).id, 2);
 	const first = addJobUpdate({ job_id: job.id, event_date: '2026-01-02', note: 'First' });
 	correctJobUpdate(first.id, { job_id: job.id, remove: true });
 	const next = addJobUpdate({ job_id: '1', event_date: '2026-01-01', note: 'Second' });
@@ -198,7 +198,7 @@ test('dates, enums, booleans and assessment are validated before writing', () =>
 });
 test('reminders sort earliest, retain closed jobs and dismiss without history', () => {
 	const early = createJob(details),
-		later = createJob(details);
+		later = createJob({ ...details, allow_duplicate: true });
 	const r = createReminder({ job_id: early.id, scheduled_at: '2026-10-01T00:00' });
 	createReminder({ job_id: later.id, scheduled_at: '2026-12-01T00:00' });
 	assert.deepEqual(
