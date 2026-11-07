@@ -205,6 +205,8 @@ Optional `runtime: {version, hashes: {"darwin-arm64": "<sha256>", ...}}` pins of
 
 Follow the [design guide](design-guide.md#building-a-new-page-or-feature) and reuse shared components. `tests/ui-conventions.test.mjs` enforces these patterns. Update the user guide for UI behavior, the MCP reference for tool contracts, and the installation guide for setup/maintenance commands. Keep assistant connection instructions in the assistant guide and advanced recovery in the agent guide. Keep current behavior separate from unverified support claims; avoid repeating instructions across guides.
 
+The application icons shown by desktop shortcuts live in `static/icons/` (`saturday.ico` for Windows, `saturday.icns` for macOS, `saturday.png` for Linux). They are generated from `src/lib/assets/favicon.svg` by `node scripts/build-icons.mjs` (small sizes use a simplified mark, and the `.icns` sits inside Apple's margin with a soft shadow); rerun it and commit the output when the mark changes. Shortcuts are named **Saturday** with the tooltip “Saturday Career Dashboard”, using “Saturday (2)” when another item has the name.
+
 Documentation images belong in `docs/images/`, with relative links, descriptive alt text, and reasonably sized PNGs. Run Prettier on changed documentation. Extension API changes must also update the [extension guide](extension-guide.md); generated extension registries are ignored outputs and must not be edited manually.
 
 ## Development branches

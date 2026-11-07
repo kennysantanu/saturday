@@ -146,7 +146,7 @@ try {
 				action === 'lan'
 					? 'Restart Saturday to apply a pending change. Opening a running instance does not restart it.'
 					: action !== 'status'
-						? 'Use Open Saturday to start the server.'
+						? 'Use the Saturday shortcut to start the server.'
 						: undefined
 		})
 	);

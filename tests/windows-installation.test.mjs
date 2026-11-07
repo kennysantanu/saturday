@@ -144,18 +144,43 @@ test('Windows shortcut results persist without stdout, preserve Unicode and reje
 		});
 	});
 	syncBuiltinESMExports();
-	const expected = win32.join(desktop, 'Open Saturday 12345678.lnk');
+	const expected = win32.join(desktop, 'Saturday.lnk');
 	assert.equal(await createDesktopShortcut(), expected);
 	assert.equal(JSON.parse(fs.readFileSync(descriptor)).desktop_shortcut, expected);
 	assert.equal(shortcuts.has(expected), true);
+	// The visible name is Saturday; the longer name is the tooltip, and the icon is the bundled .ico.
+	const link = links.get(expected);
+	assert.equal(link.Description, 'Saturday Career Dashboard');
+	assert.equal(
+		link.IconLocation,
+		`${win32.join(config.code_root, 'static', 'icons', 'saturday.ico')},0`
+	);
+	assert.match(link.TargetPath, /wscript\.exe$/i);
 	assert.deepEqual(await loginStartupStatus(), { available: true, enabled: false });
 	assert.equal(await createDesktopShortcut(), expected); // An owned existing shortcut can be recreated.
-	links.get(expected).Description = 'Someone else owns this shortcut';
+	// An unrelated item named Saturday is preserved and the next name is used instead.
+	const mine = links.get(expected);
+	links.set(expected, { Arguments: 'something else', TargetPath: 'C:\\Other\\other.exe' });
+	const second = win32.join(desktop, 'Saturday (2).lnk');
+	assert.equal(await createDesktopShortcut(), second);
+	assert.equal(links.get(expected).TargetPath, 'C:\\Other\\other.exe');
+	// Once every name is taken by other items, nothing is touched.
+	links.set(second, { Arguments: 'x', TargetPath: 'y' });
+	links.set(win32.join(desktop, 'Saturday 12345678.lnk'), { Arguments: 'x', TargetPath: 'y' });
 	await assert.rejects(createDesktopShortcut(), /unrelated shortcut/);
-	assert.equal(links.get(expected).Description, 'Someone else owns this shortcut');
-	links.get(expected).Description = 'Saturday installation ' + config.installation_id;
+	assert.equal(links.get(second).TargetPath, 'y');
+	// Removal and replacement of an earlier version's shortcut (named with the installation id).
+	links.delete(second);
+	links.delete(win32.join(desktop, 'Saturday 12345678.lnk'));
+	links.set(expected, mine);
+	const earlier = win32.join(desktop, 'Open Saturday 12345678.lnk');
+	links.set(earlier, { ...mine, Description: 'Saturday installation ' + config.installation_id });
+	assert.equal(await createDesktopShortcut(), expected);
+	assert.equal(links.has(earlier), false, 'the earlier shortcut is replaced');
+	links.set(earlier, { ...mine });
 	assert.equal(await removeDesktopShortcut(), 'disabled');
 	assert.equal(links.has(expected), false);
+	assert.equal(links.has(earlier), false);
 	for (mode of ['missing', 'empty']) {
 		await assert.rejects(createDesktopShortcut(), mode === 'missing' ? /ENOENT/ : /no result/);
 		assert.equal(JSON.parse(fs.readFileSync(descriptor)).desktop_shortcut, expected);

@@ -39,7 +39,7 @@ rem Windows Command Prompt
 install.bat --source .
 ```
 
-The installer prepares a private runtime, builds Saturday, and opens Dashboard. Use **Open Saturday** on the desktop afterward, or the reopen command printed by the installer. AI is optional.
+The installer prepares a private runtime, builds Saturday, and opens Dashboard. Use the **Saturday** shortcut on the desktop afterward, or the reopen command printed by the installer. AI is optional.
 
 See the [installation guide](docs/installation-guide.md) for requirements, source development, PDF setup, data locations, server controls, updates, repair, and uninstall. Platform support is [provisional](docs/contributing.md#provisional-support-matrix).
 

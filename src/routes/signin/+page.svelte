@@ -51,8 +51,9 @@
 					<code>docs/installation-guide.md</code> for installation locations and damaged-settings recovery.
 				</p>
 				<p>
-					The command stops Saturday and preserves your records and documents. Reopen
-					<strong>Open Saturday</strong> afterward, then optionally set a new password in Settings.
+					The command stops Saturday and preserves your records and documents. Reopen the <strong
+						>Saturday</strong
+					> shortcut afterward, then optionally set a new password in Settings.
 				</p>
 			</div>
 		</details>
