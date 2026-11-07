@@ -8,6 +8,7 @@
 		description,
 		eyebrow,
 		back,
+		titleClass,
 		leading,
 		meta,
 		actions
@@ -18,6 +19,8 @@
 		eyebrow?: string;
 		/** Link to the page this one belongs to, shown above the title as "Back to …". */
 		back?: { href: string; label: string };
+		/** Extra classes for the title, such as `page-title-compact` for long filenames. */
+		titleClass?: string;
 		/** Optional compact visual beside the title, such as a job's assistant score. */
 		leading?: Snippet;
 		/** Status or attribution shown with the title, such as a badge row. */
@@ -35,7 +38,7 @@
 			<div class="page-title-row">
 				{#if leading}{@render leading()}{/if}
 				<div class="page-title-copy min-w-0 space-y-1">
-					<h1 class="page-title">
+					<h1 class={`page-title ${titleClass ?? ''}`}>
 						{title}{#if recordNumber}
 							<span
 								class="ml-2 text-base font-normal whitespace-nowrap text-muted-foreground"

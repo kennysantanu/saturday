@@ -55,7 +55,7 @@ export const documentSorts = Object.freeze([
 ]);
 // Be conservative: unsupported constructs stay in source mode, never silently disappear.
 export function visualMarkdownSupported(text) {
-	return !/(<\/?[a-z!]|!\[|\||\[[ x]\]|^\s*\[.*\]:|\$\$|^\s*:::|~~|^\s*[^\n]+\n\s*[-=]{2,}\s*$)/im.test(
+	return !/(<\/?[a-z!]|!\[|\||\[[ x]\]|^\s*\[.*\]:|\$\$|^\s*:::|^\s*[^\n]+\n\s*[-=]{2,}\s*$)/im.test(
 		text
 	);
 }
