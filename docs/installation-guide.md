@@ -35,7 +35,7 @@ install.bat --source .
 
 The installer prepares its private runtime, installs dependencies, builds web/MCP, initializes or validates storage, prepares optional PDF export, and opens Dashboard after readiness. It reports the actual URL, data/descriptor paths, and desktop shortcut or exact reopen command.
 
-Use **Open Saturday** on the desktop afterward. Linux may require **Allow Launching** on the generated desktop file. If shortcut creation is blocked, use the printed fallback; installation does not bypass OS protections. Closing the browser or launch terminal leaves the background UI running.
+Use the **Saturday** shortcut on the desktop afterward. It shows the Saturday icon and, on Windows, the tooltip “Saturday Career Dashboard”. If another item is already named Saturday it is left alone and the shortcut is named “Saturday (2)”; shortcuts from earlier versions (named “Open Saturday …”) are replaced. The Linux start-at-login entry is named Saturday with the same icon; an entry written by an earlier version is recognized and renamed the next time the installation updates. The macOS icon has the standard margin and shadow. Windows caches icons, so an old icon can linger until you sign out and in. Linux may require **Allow Launching** on the generated desktop file. If shortcut creation is blocked, use the printed fallback; installation does not bypass OS protections. Closing the browser or launch terminal leaves the background UI running.
 
 Fresh storage seeds the eight default workflow stages and internal metadata only; jobs, people, tags and documents start empty. Keep the same descriptor/data paths when reopening or repeating setup.
 
@@ -117,13 +117,13 @@ The supervisor owns only the UI. Stopping or restarting it does not stop client-
 
 ## LAN access and startup
 
-Normal use is **Open Saturday desktop shortcut → Settings → LAN access → Allow LAN access → warning → Restart now/Later → Phone address**. See [LAN access](user-guide.md#lan-access) for the phone workflow and connection help. Both LAN access and password login default off; either can be enabled independently.
+Normal use is **Saturday desktop shortcut → Settings → LAN access → Allow LAN access → warning → Restart now/Later → Phone address**. See [LAN access](user-guide.md#lan-access) for the phone workflow and connection help. Both LAN access and password login default off; either can be enabled independently.
 
 The owned supervisor reads the saved preference for every web-process start, including restart, desktop shortcut, and Start at login. Local-only mode binds `127.0.0.1`; LAN mode binds `0.0.0.0` for IPv4. The local browser/readiness URL remains loopback. Port reservation checks the intended bind address and falls back to a free port without killing unrelated processes. Opening a running instance reuses its current mode even if a different preference is pending. The supervisor’s control listener always stays on loopback.
 
 The production entry `scripts/web.mjs` serves the built adapter handler with literal local/interface hosts, the actual request origin, and actual socket identity. It overrides its internal protocol header and ignores forwarded identity/origin headers; SvelteKit CSRF checks remain enabled. Remote browsers cannot invoke host controls, including with forged loopback/proxy headers or password protection off. Phone addresses refresh from current IPv4 interfaces and show the actual port, including VPN/virtual candidate labels. HTTPS/proxy deployment and public hosting are outside this feature.
 
-The developer server and `npm run preview` stay on loopback. To apply a LAN setting from a development checkout, stop the dev/preview server and open the production build through Open Saturday or `npm run open`. The UI explains this when an owned restart is unavailable. A failed reconnect can mean a changed port or a failed restart; use the desktop shortcut to open the actual address and inspect Settings/Diagnostics.
+The developer server and `npm run preview` stay on loopback. To apply a LAN setting from a development checkout, stop the dev/preview server and open the production build through the Saturday shortcut or `npm run open`. The UI explains this when an owned restart is unavailable. A failed reconnect can mean a changed port or a failed restart; use the desktop shortcut to open the actual address and inspect Settings/Diagnostics.
 
 For explicitly authorized host-terminal maintenance, `access.mjs` supports:
 
@@ -153,7 +153,7 @@ node scripts/access.mjs disable --confirm --json
 node scripts/access.mjs recover --confirm --json
 ```
 
-Mutating authentication commands stop an owned UI and verify it has exited, then hold the lifecycle maintenance guard while saving. A competing operation/shutdown failure refuses the change. An independently launched development/preview UI must be stopped first; current local MCP may remain connected. Processes without an identified runtime role must stop before access maintenance. The command leaves the UI stopped; use **Open Saturday** afterward. `recover --confirm` explicitly clears password protection, repairs the access settings file, and saves LAN off while retaining career data. It refuses linked settings files. No browser endpoint can reset a forgotten password.
+Mutating authentication commands stop an owned UI and verify it has exited, then hold the lifecycle maintenance guard while saving. A competing operation/shutdown failure refuses the change. An independently launched development/preview UI must be stopped first; current local MCP may remain connected. Processes without an identified runtime role must stop before access maintenance. The command leaves the UI stopped; use the **Saturday** shortcut afterward. `recover --confirm` explicitly clears password protection, repairs the access settings file, and saves LAN off while retaining career data. It refuses linked settings files. No browser endpoint can reset a forgotten password.
 
 `set-password --stdin` accepts JSON containing `password` and `confirm_password` through protected standard input. It follows the same stop/save rules. Never put passwords in command-line arguments, shell history, diagnostics, or assistant configuration. Results are JSON with account-enabled status and inactivity hours; no verifier, cookie, or plaintext password is returned.
 
@@ -173,7 +173,7 @@ Forgotten-password recovery is command-line-only. Run the command on the compute
    For a source checkout with Node available, run `node scripts/access.mjs disable --confirm --json` from the Saturday folder instead. The old password is not required. Do not send passwords to an AI agent or paste them into this command.
 
 3. Confirm the result reports `ok: true` and `password_enabled: false`. The command stops the owned UI, clears password protection, saves LAN off and leaves Saturday stopped. If it refuses because an independently launched development/preview server is still running, stop that server and retry. Wait for any installation operation to finish rather than removing its locks.
-4. Open the **Open Saturday** desktop shortcut again. It opens without a password. Optionally enable a new password through Settings. Career records, documents, and backups are preserved.
+4. Open the **Saturday** desktop shortcut again. It opens without a password. Optionally enable a new password through Settings. Career records, documents, and backups are preserved.
 
 If access settings are missing/corrupt, use the same invocation with `recover --confirm` instead of `disable --confirm`. Recovery also resets inactivity to its default and keeps LAN off. Preserve `installation.json`; do not delete credentials/settings files or edit initialization markers to bypass protection. A missing/invalid installation descriptor needs setup repair, not password recovery.
 
@@ -212,7 +212,7 @@ node scripts/install.mjs update --installation <descriptor> --check-id <reviewed
 node scripts/install.mjs status --installation <descriptor> --json
 ```
 
-Wait for persisted status `complete`. `--background` returns an operation receipt, not completion. `install.mjs status` reports installation operations; `status.mjs` checks UI readiness. With password login off, progress remains available through the external local controller while the UI is stopped, and readiness reloads the UI. With password login on, the separate browser progress gateway is disabled; the operation continues, and **Open Saturday** followed by sign-in shows its durable result. CLI status and local logs remain available. Keep operation logs/recovery paths if reopening fails.
+Wait for persisted status `complete`. `--background` returns an operation receipt, not completion. `install.mjs status` reports installation operations; `status.mjs` checks UI readiness. With password login off, progress remains available through the external local controller while the UI is stopped, and readiness reloads the UI. With password login on, the separate browser progress gateway is disabled; the operation continues, and the **Saturday** shortcut followed by sign-in shows its durable result. CLI status and local logs remain available. Keep operation logs/recovery paths if reopening fails.
 
 Source-channel updates compare exact `main` commits. Stable-release selection uses verified release metadata and version ordering; released installations never silently fall back to `main`. Dirty source checkouts block updates. Successful source updates retain the previous HEAD/build and switch to a pinned detached checkout. Managed updates retain previous code and independent database/file/extension recovery snapshots. Updates never silently reset data or downgrade over migrated storage.
 

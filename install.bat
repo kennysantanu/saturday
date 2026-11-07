@@ -63,7 +63,7 @@ goto success
 "%NODE%" "%~dp0scripts\install.mjs" --root "%SATURDAY_ROOT%" %*
 if errorlevel 1 goto failed
 :success
-echo Saturday installation finished. Reopen with the Open Saturday desktop shortcut.
+echo Saturday installation finished. Reopen with the Saturday desktop shortcut.
 exit /B 0
 :checksum
 echo Runtime checksum failed. Remove only "%ARCHIVE%" and retry.

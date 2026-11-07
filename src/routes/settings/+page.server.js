@@ -299,7 +299,7 @@ export const actions = {
 	lan: async (event) => {
 		if (!localBrowser(event) || !sameOrigin(event))
 			return fail(403, {
-				lanError: 'Change LAN access from Open Saturday on the server computer.'
+				lanError: 'Change LAN access from the Saturday shortcut on the server computer.'
 			});
 		try {
 			const values = await accessForm(event.request);

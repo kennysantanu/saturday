@@ -78,7 +78,7 @@
 			the next restart. Opening an already-running instance does not apply the change.</Notice
 		>{/if}
 	{#if !local}<p class="text-sm text-muted-foreground">
-			Change access settings and restart Saturday from Open Saturday on the server computer.
+			Change access settings and restart Saturday from the Saturday shortcut on the server computer.
 		</p>{/if}
 	{#if !local || setupRequired}
 		<!-- Read-only: changing access needs the host computer (see the page banner for setup). -->
@@ -131,7 +131,7 @@
 			<Button type="submit" variant="outline" disabled={!controlsAvailable}>Restart now</Button>
 		</form>
 		{#if local && !controlsAvailable}<p class="text-sm text-muted-foreground">
-				Close the development server, then use the Open Saturday desktop shortcut to apply the saved
+				Close the development server, then use the Saturday desktop shortcut to apply the saved
 				preference.
 			</p>{/if}
 	{/if}

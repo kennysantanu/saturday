@@ -201,7 +201,7 @@
 		serverState = operation.operation === 'stop' ? 'stopped' : 'restarting';
 		serverMessage =
 			operation.operation === 'stop'
-				? 'The UI server is stopped. Use the Open Saturday desktop shortcut to return. Your assistant connection remains independent.'
+				? 'The UI server is stopped. Use the Saturday desktop shortcut to return. Your assistant connection remains independent.'
 				: 'Restarting Saturday…';
 		if (operation.operation !== 'restart') return;
 		const deadline = Date.now() + 25000;
@@ -226,7 +226,7 @@
 		}
 		serverState = 'failed';
 		serverMessage =
-			'Saturday has not reconnected. Its address may have changed or restart may have failed. Use the Open Saturday desktop shortcut to reopen the actual server, then check Diagnostics.';
+			'Saturday has not reconnected. Its address may have changed or restart may have failed. Use the Saturday desktop shortcut to reopen the actual server, then check Diagnostics.';
 	}
 	$effect(() => {
 		if (form?.serverOperation) void reconnectServer(form.serverOperation);
@@ -397,8 +397,8 @@
 				</Notice>
 			{:else if !data.server.controlsAvailable}
 				<Notice title="Some controls are host-only">
-					Updates, restart and stop, login startup and uninstall are available from Open Saturday on
-					the server computer.
+					Updates, restart and stop, login startup and uninstall are available from the Saturday
+					shortcut on the server computer.
 				</Notice>
 			{/if}
 			<div class="settings-group" role="group" aria-labelledby="group-general">
@@ -1124,7 +1124,7 @@
 							</form>
 						</div>
 					{:else}<p class="text-sm text-muted-foreground">
-							Check for and install updates from Open Saturday on the server computer.
+							Check for and install updates from the Saturday shortcut on the server computer.
 						</p>{/if}
 					<form
 						id="update-saturday"
@@ -1167,13 +1167,13 @@
 									? 'Reconnect needed'
 									: 'Saturday stopped'}
 							>{serverMessage ||
-								'The server operation was accepted. Refresh after restart, or use Open Saturday to start it again.'}</Notice
+								'The server operation was accepted. Refresh after restart, or use the Saturday shortcut to start it again.'}</Notice
 						>
 					{:else}
 						<p class="text-sm text-muted-foreground">
 							{data.server.controlsAvailable
 								? 'The UI server stays running when you close the browser.'
-								: 'Use Open Saturday on the server computer to operate these controls.'}
+								: 'Use the Saturday shortcut on the server computer to operate these controls.'}
 						</p>
 						{#if data.server.error}<Notice title="Server status">{data.server.error}</Notice>{/if}
 						{#if data.server.controlsAvailable}
@@ -1219,7 +1219,7 @@
 							<ConfirmDialog
 								bind:open={stopDialog}
 								title="Stop Saturday’s UI server?"
-								description="The dashboard will become unavailable. Use Open Saturday or npm run open to start it again. Your assistant’s MCP connection will remain independent."
+								description="The dashboard will become unavailable. Use the Saturday shortcut or npm run open to start it again. Your assistant’s MCP connection will remain independent."
 								confirmLabel="Stop server"
 								destructive
 								formId="stop-server"
@@ -1268,7 +1268,7 @@
 							</p>
 						</div>
 						<p class="text-sm text-muted-foreground">
-							Change this from Open Saturday on the server computer.
+							Change this from the Saturday shortcut on the server computer.
 						</p>
 					{/if}
 				</SectionCard>
@@ -1288,7 +1288,7 @@
 						</div>
 					{:else}
 						<p class="text-sm text-muted-foreground">
-							Uninstall from Open Saturday on the server computer.
+							Uninstall from the Saturday shortcut on the server computer.
 						</p>
 					{/if}
 					<form

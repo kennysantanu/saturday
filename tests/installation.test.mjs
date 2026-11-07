@@ -331,7 +331,27 @@ test('platform launchers preserve literal paths and use one-shot login startup',
 		{ platform: 'win32', home: 'C:\\Users\\Example', env: {} }
 	);
 	assert.equal(win.args('open')[0], 'C:\\Users\\Example\\Saturday\\app\\scripts\\start.mjs');
-	assert.match(win.login, /^Saturday .*\.lnk$/);
+	assert.equal(win.login, 'Saturday.lnk');
+	assert.deepEqual(win.desktopNames, ['Saturday.lnk', 'Saturday (2).lnk', 'Saturday 12345678.lnk']);
+	assert.deepEqual(win.legacyDesktopNames, ['Open Saturday 12345678.lnk']);
+	assert.deepEqual(win.loginNames, ['Saturday.lnk', 'Saturday 12345678.lnk']);
+	assert.equal(win.icon, 'C:\\Users\\Example\\Saturday\\app\\static\\icons\\saturday.ico');
+	assert.equal(win.description, 'Saturday Career Dashboard');
+	assert.equal(mac.desktopNames[0], 'Saturday.app');
+	assert.match(mac.icon, /static\/icons\/saturday\.icns$/);
+	assert.equal(linux.desktopNames[0], 'Saturday.desktop');
+	assert.match(linux.desktopContent, /\nName=Saturday\nComment=Saturday Career Dashboard\n/);
+	assert.match(linux.desktopContent, /\nIcon=.*static\/icons\/saturday\.png\n/);
+	// The Linux login registration is named Saturday too; what earlier versions wrote is still
+	// recognized as ours so existing registrations migrate on the next update.
+	assert.match(linux.loginContent, /\nName=Saturday\nComment=Saturday Career Dashboard\n/);
+	assert.match(linux.loginContent, /\nIcon=.*static\/icons\/saturday\.png\n/);
+	assert.equal(
+		linux.legacyLoginContent,
+		`[Desktop Entry]\n# ${linux.marker}\nType=Application\nName=Open Saturday\nComment=Open your local career dashboard\nExec="/tmp/private runtime/bin/node" "/tmp/code with ü \\\\$cash/scripts/start.mjs" "--background" "--installation" "/tmp/user's data/installation.json"\nTerminal=false\nCategories=Office;\n`
+	);
+	assert.notEqual(linux.loginContent, linux.legacyLoginContent);
+	assert.equal(mac.legacyLoginContent, mac.loginContent);
 });
 
 test('GitHub snapshots are verified against exact Git blobs before setup', async () => {

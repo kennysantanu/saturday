@@ -58,7 +58,7 @@
 		Your local assistant connection works independently of the browser password.
 	</p>
 	{#if !access.local}<p class="text-sm text-muted-foreground">
-			Change sign-in settings from Open Saturday on the host computer.
+			Change sign-in settings from the Saturday shortcut on the host computer.
 		</p>{/if}
 	{#if !access.password_enabled}
 		{#if access.local && !setupRequired}

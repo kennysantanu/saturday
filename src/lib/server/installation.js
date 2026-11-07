@@ -310,6 +310,9 @@ export async function acquireDirectoryLock(lock, { attempts = 100 } = {}) {
 	}
 }
 
+/** What people see: the shortcut is named Saturday; the longer name is its tooltip and comment. */
+const SHORTCUT_NAME = 'Saturday';
+const SHORTCUT_DESCRIPTION = 'Saturday Career Dashboard';
 // Platform launchers use fixed operations and a descriptor, never caller-provided shell code.
 const shellQuote = (s) => "'" + String(s).replaceAll("'", "'\\''") + "'";
 const xml = (s) =>
@@ -361,27 +364,59 @@ export function launcherArtifacts(
 	const shell = `#!/bin/sh\n# ${marker}\nexec ${shellQuote(value.node_path)} ${args('open').map(shellQuote).join(' ')}\n`;
 	const loginArgs = [value.node_path, ...args('login')];
 	const plist = `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array>${loginArgs.map((a) => `<string>${xml(a)}</string>`).join('')}</array><key>RunAtLoad</key><true/><key>KeepAlive</key><false/><key>AbandonProcessGroup</key><true/><key>StandardOutPath</key><string>${xml(platformPath.join(value.logs, 'login.log'))}</string><key>StandardErrorPath</key><string>${xml(platformPath.join(value.logs, 'login.log'))}</string></dict></plist>\n`;
-	const desktopFile = (operation) =>
-		`[Desktop Entry]\n# ${marker}\nType=Application\nName=Open Saturday\nComment=Open your local career dashboard\nExec=${[value.node_path, ...args(operation)].map(desktopArg).join(' ').replaceAll('\\', '\\\\')}\nTerminal=false\nCategories=Office;\n`;
+	// Exec line shared by the desktop entry and the login registration.
+	const execLine = (operation) =>
+		`Exec=${[value.node_path, ...args(operation)].map(desktopArg).join(' ').replaceAll('\\', '\\\\')}`;
+	// What earlier versions wrote for the Linux login registration; still recognized as ours and
+	// rewritten with the new name the next time the installation updates.
+	const legacyLoginDesktopFile = `[Desktop Entry]\n# ${marker}\nType=Application\nName=Open Saturday\nComment=Open your local career dashboard\n${execLine('login')}\nTerminal=false\nCategories=Office;\n`;
+	const icon = platformPath.join(
+		value.code_root,
+		'static',
+		'icons',
+		platform === 'darwin' ? 'saturday.icns' : platform === 'win32' ? 'saturday.ico' : 'saturday.png'
+	);
+	const entry = (operation) =>
+		`[Desktop Entry]\n# ${marker}\nType=Application\nName=${SHORTCUT_NAME}\nComment=${SHORTCUT_DESCRIPTION}\n${execLine(operation)}\nIcon=${icon}\nTerminal=false\nCategories=Office;\n`;
+	const extension = platform === 'darwin' ? '.app' : platform === 'win32' ? '.lnk' : '.desktop';
+	// The first free (or already ours) name wins: "Saturday", then "Saturday (2)", then with an id.
+	const desktopNames = [
+		`${SHORTCUT_NAME}${extension}`,
+		`${SHORTCUT_NAME} (2)${extension}`,
+		`${SHORTCUT_NAME} ${short}${extension}`
+	];
+	// Names earlier versions created, replaced when the shortcut is next created or removed.
+	const legacyDesktopNames =
+		platform === 'darwin'
+			? [`Open Saturday ${short}.app`]
+			: platform === 'win32'
+				? [`Open Saturday ${short}.lnk`]
+				: [`saturday-${id}.desktop`];
+	const loginNames = [`${SHORTCUT_NAME}.lnk`, `${SHORTCUT_NAME} ${short}.lnk`];
 	return {
 		marker,
 		label,
 		args,
 		shell,
+		icon,
+		description: SHORTCUT_DESCRIPTION,
+		desktopRoot,
+		desktopNames,
+		legacyDesktopNames,
+		loginNames,
+		legacyLoginNames: [`Saturday ${id}.lnk`],
+		// The preferred name; Windows shortcuts are named, not placed, because the helper resolves the folder.
 		desktop:
-			platform === 'darwin'
-				? platformPath.join(desktopRoot, `Open Saturday ${short}.app`)
-				: platform === 'win32'
-					? `Open Saturday ${short}.lnk`
-					: platformPath.join(desktopRoot, `saturday-${id}.desktop`),
+			platform === 'win32' ? desktopNames[0] : platformPath.join(desktopRoot, desktopNames[0]),
 		login:
 			platform === 'darwin'
 				? platformPath.join(home, 'Library', 'LaunchAgents', `${label}.plist`)
 				: platform === 'win32'
-					? `Saturday ${id}.lnk`
+					? loginNames[0]
 					: platformPath.join(configHome, 'autostart', `saturday-${id}.desktop`),
-		loginContent: platform === 'darwin' ? plist : desktopFile('login'),
-		desktopContent: desktopFile('open')
+		loginContent: platform === 'darwin' ? plist : entry('login'),
+		legacyLoginContent: platform === 'darwin' ? plist : legacyLoginDesktopFile,
+		desktopContent: entry('open')
 	};
 }
 async function native(command, args, encoding = 'utf8') {
@@ -449,8 +484,26 @@ async function windowsShortcut(value, artifact, action, folder) {
 			artifact.marker
 		);
 		const helper = join(state, 'shortcut-helper.js');
-		const helperContent = `// ${artifact.marker}\nvar a=WScript.Arguments, s=new ActiveXObject("WScript.Shell"), f=new ActiveXObject("Scripting.FileSystemObject");\nfunction reply(value){var r=f.CreateTextFile(a(4),false,true);r.Write(value);r.Close();}\nvar p=s.SpecialFolders(a(1))+"\\\\"+a(2), target=s.ExpandEnvironmentStrings("%SystemRoot%\\\\System32\\\\wscript.exe"), args=${JSON.stringify(windowsArg(launcher))};\nif(f.FileExists(p)){var old=s.CreateShortcut(p);if(old.Description!==a(3)||old.TargetPath.toLowerCase()!==target.toLowerCase()||old.Arguments!==args){reply("foreign");WScript.Quit(0);}}\nif(a(0)==="read"){reply(f.FileExists(p)?"enabled":"disabled");}\nelse if(a(0)==="remove"){if(f.FileExists(p))f.DeleteFile(p);reply("disabled");}\nelse {var l=s.CreateShortcut(p);l.TargetPath=target;l.Arguments=args;l.Description=a(3);l.WorkingDirectory=${JSON.stringify(value.code_root)};l.Save();reply(p);}\n`;
+		// Arguments: action, folder, names (|), earlier names (|), result file, tooltip, icon or "none".
+		// A shortcut is ours when it runs this installation's launcher through wscript.exe, so the
+		// visible Description can be a friendly tooltip. The first name that is already ours, or else
+		// the first free one, is used; earlier-version names that are ours are replaced or removed.
+		const helperContent = `// ${artifact.marker}
+var a=WScript.Arguments, s=new ActiveXObject("WScript.Shell"), f=new ActiveXObject("Scripting.FileSystemObject");
+function reply(value){var r=f.CreateTextFile(a(4),false,true);r.Write(value);r.Close();}
+var dir=s.SpecialFolders(a(1)), target=s.ExpandEnvironmentStrings("%SystemRoot%\\\\System32\\\\wscript.exe"), args=${JSON.stringify(windowsArg(launcher))};
+function ours(p){var l=s.CreateShortcut(p);return l.TargetPath.toLowerCase()===target.toLowerCase()&&l.Arguments===args;}
+var names=a(2).split("|"), old=a(3).split("|"), mine=[], oldMine=[], free="", i, p;
+for(i=0;i<names.length;i++){p=dir+"\\\\"+names[i];if(f.FileExists(p)){if(ours(p))mine.push(p);}else if(!free)free=p;}
+for(i=0;i<old.length;i++){p=dir+"\\\\"+old[i];if(f.FileExists(p)&&ours(p))oldMine.push(p);}
+if(a(0)==="read"){reply(mine.length||oldMine.length?"enabled":"disabled");}
+else if(a(0)==="remove"){for(i=0;i<mine.length;i++)f.DeleteFile(mine[i]);for(i=0;i<oldMine.length;i++)f.DeleteFile(oldMine[i]);reply("disabled");}
+else{p=mine.length?mine[0]:free;if(!p){reply("foreign");WScript.Quit(0);}
+var l=s.CreateShortcut(p);l.TargetPath=target;l.Arguments=args;l.Description=a(5);l.WorkingDirectory=${JSON.stringify(value.code_root)};if(a(6)!=="none")l.IconLocation=a(6)+",0";l.Save();
+for(i=0;i<oldMine.length;i++)f.DeleteFile(oldMine[i]);reply(p);}
+`;
 		await ownedText(helper, helperContent, artifact.marker);
+		const names = folder === 'Desktop' ? artifact.desktopNames : artifact.loginNames;
 		await native(
 			'cscript.exe',
 			[
@@ -459,9 +512,13 @@ async function windowsShortcut(value, artifact, action, folder) {
 				helper,
 				action,
 				folder,
-				folder === 'Desktop' ? artifact.desktop : artifact.login,
-				artifact.marker,
-				response
+				names.join('|'),
+				(folder === 'Desktop' ? artifact.legacyDesktopNames : artifact.legacyLoginNames).join('|'),
+				response,
+				artifact.description,
+				existsSync(join(value.code_root, 'static', 'icons', 'saturday.ico'))
+					? artifact.icon
+					: 'none'
 			],
 			'utf16le'
 		);
@@ -469,12 +526,11 @@ async function windowsShortcut(value, artifact, action, folder) {
 		const result = (await fs.readFile(response, 'utf16le')).trim();
 		if (!result) throw new Error('Windows shortcut helper returned no result.');
 		if (result === 'foreign')
-			throw new Error('An unrelated shortcut occupies the path and was preserved.');
+			throw Object.assign(new Error('An unrelated shortcut occupies the path and was preserved.'), {
+				code: 'FOREIGN'
+			});
 		if (action === 'create') {
-			if (
-				!win32.isAbsolute(result) ||
-				win32.basename(result) !== (folder === 'Desktop' ? artifact.desktop : artifact.login)
-			)
+			if (!win32.isAbsolute(result) || !names.includes(win32.basename(result)))
 				throw new Error('Windows shortcut helper returned an invalid path.');
 			return win32.normalize(result);
 		}
@@ -489,6 +545,29 @@ async function windowsShortcut(value, artifact, action, folder) {
 		}
 	}
 }
+// Whether a macOS application bundle or Linux desktop entry was created by this installation.
+async function ownsDesktopItem(path, artifact) {
+	const bundle = process.platform === 'darwin';
+	try {
+		const stat = await fs.lstat(path);
+		// A macOS application is a directory with our launcher inside; a Linux entry is a file.
+		if (stat.isSymbolicLink() || stat.isFile() === bundle) return false;
+		const owned = bundle ? join(path, 'Contents', 'MacOS', 'open-saturday') : path;
+		return (await fs.readFile(owned, 'utf8')).includes(artifact.marker);
+	} catch {
+		return false;
+	}
+}
+/** The name to use: one that is already ours, else the first free one, never an unrelated item. */
+async function chooseDesktopPath(artifact) {
+	const candidates = artifact.desktopNames.map((name) => join(artifact.desktopRoot, name));
+	for (const path of candidates)
+		if (existsSync(path) && (await ownsDesktopItem(path, artifact))) return path;
+	for (const path of candidates) if (!existsSync(path)) return path;
+	throw new Error(
+		'Every Saturday shortcut name on the desktop is used by other items. They were preserved.'
+	);
+}
 export async function createDesktopShortcut({ desktop } = {}) {
 	const value = getInstallation();
 	const artifact = launcherArtifacts(value, {
@@ -500,10 +579,11 @@ export async function createDesktopShortcut({ desktop } = {}) {
 	});
 	let shortcut = artifact.desktop;
 	if (process.platform === 'darwin') {
+		shortcut = await chooseDesktopPath(artifact);
 		for (const path of [
-			artifact.desktop,
-			join(artifact.desktop, 'Contents'),
-			join(artifact.desktop, 'Contents', 'MacOS')
+			shortcut,
+			join(shortcut, 'Contents'),
+			join(shortcut, 'Contents', 'MacOS')
 		]) {
 			if (
 				existsSync(path) &&
@@ -511,26 +591,38 @@ export async function createDesktopShortcut({ desktop } = {}) {
 			)
 				throw new Error('Unsafe desktop application path. Existing files were preserved.');
 		}
-		if (
-			existsSync(artifact.desktop) &&
-			!(
-				await fs.readFile(join(artifact.desktop, 'Contents', 'MacOS', 'open-saturday'), 'utf8')
-			).includes(artifact.marker)
-		)
-			throw new Error('An unrelated application occupies the desktop path.');
 		await ownedText(
-			join(artifact.desktop, 'Contents', 'MacOS', 'open-saturday'),
+			join(shortcut, 'Contents', 'MacOS', 'open-saturday'),
 			artifact.shell,
 			artifact.marker,
 			0o700
 		);
-		const plist = `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${artifact.label}</string><key>CFBundleName</key><string>Open Saturday</string><key>CFBundleExecutable</key><string>open-saturday</string><key>CFBundlePackageType</key><string>APPL</string><key>SaturdayOwner</key><string>${artifact.marker}</string></dict></plist>`;
-		await ownedText(join(artifact.desktop, 'Contents', 'Info.plist'), plist, artifact.marker);
+		const resources = join(shortcut, 'Contents', 'Resources');
+		const hasIcon = existsSync(artifact.icon);
+		if (hasIcon) {
+			if (
+				existsSync(resources) &&
+				((await fs.lstat(resources)).isSymbolicLink() || !(await fs.lstat(resources)).isDirectory())
+			)
+				throw new Error('Unsafe desktop application path. Existing files were preserved.');
+			await fs.mkdir(resources, { recursive: true, mode: 0o700 });
+			await fs.copyFile(artifact.icon, join(resources, 'saturday.icns'));
+		}
+		const plist = `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${artifact.label}</string><key>CFBundleName</key><string>Saturday</string><key>CFBundleDisplayName</key><string>Saturday</string>${hasIcon ? '<key>CFBundleIconFile</key><string>saturday</string>' : ''}<key>CFBundleExecutable</key><string>open-saturday</string><key>CFBundlePackageType</key><string>APPL</string><key>SaturdayOwner</key><string>${artifact.marker}</string></dict></plist>`;
+		await ownedText(join(shortcut, 'Contents', 'Info.plist'), plist, artifact.marker);
 	} else if (process.platform === 'win32')
 		shortcut = await windowsShortcut(value, artifact, 'create', 'Desktop');
-	else if (process.platform === 'linux')
-		await ownedText(artifact.desktop, artifact.desktopContent, artifact.marker, 0o700);
-	else throw new Error('Desktop integration is unavailable on this OS.');
+	else if (process.platform === 'linux') {
+		shortcut = await chooseDesktopPath(artifact);
+		await ownedText(shortcut, artifact.desktopContent, artifact.marker, 0o700);
+	} else throw new Error('Desktop integration is unavailable on this OS.');
+	if (process.platform !== 'win32')
+		// Replace what earlier versions created (Windows does this inside its helper).
+		for (const name of artifact.legacyDesktopNames) {
+			const old = join(artifact.desktopRoot, name);
+			if (old !== shortcut && existsSync(old) && (await ownsDesktopItem(old, artifact)))
+				await fs.rm(old, { recursive: true });
+		}
 	await atomicJson(value.descriptor_path, { ...value, desktop_shortcut: shortcut });
 	return shortcut;
 }
@@ -556,7 +648,9 @@ export async function loginStartupStatus() {
 		if (
 			!stat.isFile() ||
 			stat.isSymbolicLink() ||
-			(await fs.readFile(artifact.login, 'utf8')) !== artifact.loginContent
+			![artifact.loginContent, artifact.legacyLoginContent].includes(
+				await fs.readFile(artifact.login, 'utf8')
+			)
 		)
 			throw new Error(
 				'Login registration differs from this installation. Repair it before changing startup.'
@@ -630,16 +724,12 @@ export async function removeDesktopShortcut() {
 				: {})
 	});
 	if (process.platform === 'win32') return windowsShortcut(value, artifact, 'remove', 'Desktop');
-	if (!existsSync(artifact.desktop)) return;
-	if ((await fs.lstat(artifact.desktop)).isSymbolicLink())
-		throw new Error('The shortcut path is linked; it was retained.');
-	const owned =
-		process.platform === 'darwin'
-			? join(artifact.desktop, 'Contents', 'MacOS', 'open-saturday')
-			: artifact.desktop;
-	if (!(await fs.readFile(owned, 'utf8')).includes(artifact.marker))
-		throw new Error('An unowned desktop item was retained.');
-	await fs.rm(artifact.desktop, { recursive: true });
+	// Remove every item of ours (the current name and earlier ones); anything else stays.
+	for (const name of [...artifact.desktopNames, ...artifact.legacyDesktopNames]) {
+		const path = join(artifact.desktopRoot, name);
+		if (existsSync(path) && (await ownsDesktopItem(path, artifact)))
+			await fs.rm(path, { recursive: true });
+	}
 }
 
 export async function refreshLoginStartup(previous, next, enabled) {
@@ -654,7 +744,7 @@ export async function refreshLoginStartup(previous, next, enabled) {
 		throw new Error('Login registration changed during update. Review startup before repair.');
 	const content = await fs.readFile(before.login, 'utf8');
 	if (content === after.loginContent) return;
-	if (content !== before.loginContent)
+	if (![before.loginContent, before.legacyLoginContent].includes(content))
 		throw new Error('An unrecognized login registration was retained.');
 	await ownedText(
 		after.login,

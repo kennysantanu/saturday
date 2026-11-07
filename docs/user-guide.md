@@ -207,7 +207,7 @@ The Extensions directory provides open, enable/disable, independent backup/resto
 
 ## LAN access
 
-1. On the computer running Saturday, open the **Open Saturday** desktop shortcut and go to **Settings → LAN access**.
+1. On the computer running Saturday, open the **Saturday** desktop shortcut and go to **Settings → LAN access**.
 2. Choose **Allow LAN access**, read the warning, then confirm. Cancel leaves the preference unchanged. Password protection is optional and configured separately.
 3. Choose **Restart now** or **Later**. Settings shows the saved startup preference, running mode, and **Restart required** while they differ. Later applies the preference at the next restart or launch of a stopped server. Opening an already-running instance does not restart it.
 4. Once LAN access is running, connect your phone to the same trusted network and open a displayed **Phone address** in its browser. Sign in if password login is enabled. Jobs, documents, uploads/downloads, and both logout actions work from the phone.
@@ -221,7 +221,7 @@ LAN/password preferences, installation/server/start-at-login controls, and openi
 
 ## Password login
 
-Open Saturday with its desktop shortcut, then go to **Settings → Password**. Protection is optional and off by default. Choose **Set a password**, enter and confirm a password, then **Enable password login**. Any non-empty password is accepted, with no minimum length or required character mix. The current browser stays signed in; other browsers must enter the same password. No username or online account is needed. Password login applies to local and LAN browsers; it does not enable LAN access by itself.
+Open Saturday with its **Saturday** desktop shortcut, then go to **Settings → Password**. Protection is optional and off by default. Choose **Set a password**, enter and confirm a password, then **Enable password login**. Any non-empty password is accepted, with no minimum length or required character mix. The current browser stays signed in; other browsers must enter the same password. No username or online account is needed. Password login applies to local and LAN browsers; it does not enable LAN access by itself.
 
 **Sign out after inactivity (hours)** accepts 0.25–720 hours, including fractions such as 0.5 for 30 minutes. The default is 1 hour. Navigation, actions, scrolling, and typing keep the session active; passive reading without interaction eventually counts as inactivity. Background polling does not keep you signed in. Without JavaScript, only navigation and form requests count. Each browser session has its own timer; tabs sharing a session share its activity.
 
