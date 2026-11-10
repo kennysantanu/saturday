@@ -1,4 +1,4 @@
-// Optional stress check: node --max-old-space-size=128 --test tests/files.large.integration.mjs
+// Optional stress check: npm run test:large
 // Uses temporary disk space for an incompressible collection above 1 GiB.
 import test from 'node:test';
 import assert from 'node:assert/strict';
