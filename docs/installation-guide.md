@@ -2,11 +2,11 @@
 
 Use this guide to install, open, update, repair, or remove Saturday. For assistant-led execution, also read the [agent guide](agent-guide.md). For connecting a client after installation, use the [assistant guide](assistant-guide.md).
 
-Saturday is preparing its first `0.1.0` release. Setup preserves existing data and rejects incompatible storage unchanged. See the [compatibility policy](contributing.md#release-and-compatibility-policy) and [provisional support matrix](contributing.md#provisional-support-matrix).
+Saturday is preparing its first published release. Setup preserves existing data and rejects incompatible storage unchanged. See the [compatibility policy](contributing.md#release-and-compatibility-policy) and [provisional support matrix](contributing.md#provisional-support-matrix).
 
 ## Requirements
 
-Version `0.1.0` remains a release candidate. Automated macOS checks and an isolated managed installation have passed; Windows/Ubuntu and real desktop/client/device acceptance remain user tests. Public upstream installation/update discovery requires a separately published release.
+Version `0.1.0` is the frozen first release baseline but is not yet published, and later versions are in development. Automated macOS checks and an isolated managed installation have passed; Windows/Ubuntu and real desktop/client/device acceptance remain user tests. Until a release is published, installations follow `main`; once one exists they move to releases when that is a step forward (see [Updates](#updates)).
 
 The managed installer targets macOS 14+ (Apple silicon/x64), Windows 11 x64, and Ubuntu 22.04/24.04 x64 with graphical GNOME. Platform, reboot/login and accessibility certification remains pending.
 
@@ -195,7 +195,9 @@ The first command reads actual OS registration. Enable/disable affects only this
 
 ## Updates
 
-Use **Settings → Updates and installation → Check for updates**, review the target, then confirm **Update Saturday**. Checks and updates are manual. Disconnect Saturday's MCP connection before publication; an alive client lease blocks it. A failed/stale check or local source change does not mean the app is up to date.
+Use **Settings → Updates and installation → Check for updates**, review the installed → target version and **See changes since your build**, then confirm **Update Saturday**. Checks and updates are manual. A check expires after 15 minutes; Settings then asks you to check again. A failed/stale check or local source change does not mean the app is up to date.
+
+Quit your assistant app (or disconnect Saturday's MCP connection) before the update finishes building. Settings warns when an assistant is connected. After staging, Saturday waits up to two minutes for disconnection, then stops without changing code or data. With password login on, Settings shows progress until the UI stops, then reloads when Saturday is ready so you can sign in and see the result. If an update stops partway, Settings shows **Repair needed** with a **Repair now** button.
 
 Source-checkout shortcuts:
 
@@ -204,7 +206,7 @@ npm run update:check
 npm run update -- --confirm
 ```
 
-The update command performs a fresh check. To pin the exact reviewed check, use the controller:
+The update command performs a fresh check, prints the target, changes link and notes, then asks `Install …? [y/N]`. Without an interactive terminal, or with `--json`, it installs nothing and prints the exact `--check-id` command instead. Command-line updates and all repairs (including Settings → Repair installation) are refused immediately while an assistant is connected, before anything is downloaded or built; the command-line update also stops before its prompt in that case or when local source changes would block it. To pin the exact reviewed check, use the controller:
 
 ```sh
 node scripts/install.mjs check --installation <descriptor> --json
@@ -214,7 +216,7 @@ node scripts/install.mjs status --installation <descriptor> --json
 
 Wait for persisted status `complete`. `--background` returns an operation receipt, not completion. `install.mjs status` reports installation operations; `status.mjs` checks UI readiness. With password login off, progress remains available through the external local controller while the UI is stopped, and readiness reloads the UI. With password login on, the separate browser progress gateway is disabled; the operation continues, and the **Saturday** shortcut followed by sign-in shows its durable result. CLI status and local logs remain available. Keep operation logs/recovery paths if reopening fails.
 
-Source-channel updates compare exact `main` commits. Stable-release selection uses verified release metadata and version ordering; released installations never silently fall back to `main`. Dirty source checkouts block updates. Successful source updates retain the previous HEAD/build and switch to a pinned detached checkout. Managed updates retain previous code and independent database/file/extension recovery snapshots. Updates never silently reset data or downgrade over migrated storage.
+Source-channel updates compare exact `main` commits. Stable-release selection uses verified release metadata and version ordering; released installations never silently fall back to `main`. A `main` build moves to the newest release only when that release is newer than the build and supports its storage versions; otherwise the check reports `held_back` with the reason and the build stays put. Dirty source checkouts block updates. Successful source updates retain the previous HEAD/build and switch to a pinned detached checkout. Managed updates retain the most recent previous build and independent database/file/extension recovery snapshots. Older previous builds and leftover staging/controller folders under `installation.state/` are removed when the next operation starts, never while an interrupted publication awaits Repair. Updates never silently reset data or downgrade over migrated storage.
 
 After completion, reconnect MCP and [verify installation/dataset/build identities](assistant-guide.md#verify-the-connection). Regenerate configuration if runtime paths changed.
 

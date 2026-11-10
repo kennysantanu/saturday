@@ -33,6 +33,10 @@ import {
 const repository = 'kennysantanu/saturday';
 const api = `https://api.github.com/repos/${repository}`;
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+// A reviewed check stays valid for 15 minutes; Settings hides Update after that.
+export const CHECK_TTL_MS = 15 * 60 * 1000;
+// Older previous builds have no restore path; keep only the newest for manual review.
+export const PREVIOUS_BUILDS_RETAINED = 1;
 const activeStates = [
 	'queued',
 	'staging',
@@ -88,6 +92,7 @@ export function operationStatus() {
 				: state.status,
 		step: state.step,
 		error: state.error,
+		error_code: state.error_code,
 		target: state.target,
 		started_at: state.started_at,
 		completed_at: state.completed_at,
@@ -217,7 +222,38 @@ async function candidateMetadata(commit, request, target) {
 		throw new Error(
 			'This candidate needs a newer runtime. Use a compatible installer/runtime before updating.'
 		);
-	return pkg.saturday;
+	return { requirements: pkg.saturday, version: pkg.version };
+}
+function installedPackage(config) {
+	try {
+		const path = config.code_root && join(config.code_root, 'package.json');
+		return path && existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : null;
+	} catch {
+		return null;
+	}
+}
+// A development (main) build moves to releases only when that is a move forward. A build
+// ahead of the newest release, or with newer storage, stays put instead of being "updated" to
+// code that cannot read its data. Returns the reason to hold, or null.
+export function developmentHold(config, metadata) {
+	if (config.build?.commit && config.build.commit === metadata.commit)
+		return `This build is release ${metadata.release}.`;
+	const installed = installedPackage(config);
+	if (!installed) return null;
+	const storage = installed.saturday?.storage;
+	if (
+		storage &&
+		(metadata.storage.database.currentVersion < storage.database?.currentVersion ||
+			metadata.storage.manifest.version < storage.manifest?.version)
+	)
+		return `Your data uses a newer storage format than release ${metadata.release} supports. Saturday keeps this build until a compatible release is published.`;
+	try {
+		if (compareVersions(metadata.release, installed.version) < 0)
+			return `This build (${installed.version}) is newer than the latest release (${metadata.release}). Saturday keeps it until a newer release is published.`;
+	} catch {
+		// An unrecognized installed version cannot be ordered; storage checks above still apply.
+	}
+	return null;
 }
 export async function selectTarget(config, request = github, assetRequest = fetch) {
 	let releases = [];
@@ -257,6 +293,7 @@ export async function selectTarget(config, request = github, assetRequest = fetc
 			commit = await request(`/commits/${encodeURIComponent(r.tag_name)}`);
 		if (commit.sha !== metadata.commit)
 			throw new Error('Release tag does not match its source metadata.');
+		const hold = config.release ? null : developmentHold(config, metadata);
 		return {
 			kind: 'release',
 			commit: metadata.commit,
@@ -266,7 +303,8 @@ export async function selectTarget(config, request = github, assetRequest = fetc
 			metadata,
 			url: `https://github.com/${repository}/releases/tag/${encodeURIComponent(r.tag_name)}`,
 			notes: (r.body || '').slice(0, 8000),
-			available: !config.release || compareVersions(metadata.release, config.release) > 0
+			available: config.release ? compareVersions(metadata.release, config.release) > 0 : !hold,
+			...(hold ? { held_back: hold } : {})
 		};
 	}
 	if (config.release)
@@ -358,8 +396,13 @@ export async function checkUpdates({ request } = {}) {
 	try {
 		const local = await localCodeState(config),
 			target = await selectTarget(config, request);
-		if (target.available)
-			target.requirements = await candidateMetadata(target.commit, request || github, target);
+		if (target.available) {
+			const candidate = await candidateMetadata(target.commit, request || github, target);
+			target.requirements = candidate.requirements;
+			target.version = candidate.version;
+			if (config.build?.commit && target.commit && config.build.commit !== target.commit)
+				target.compare_url = `https://github.com/${repository}/compare/${config.build.commit}...${target.commit}`;
+		}
 		const result = {
 			format: 'saturday.update-check',
 			version: 1,
@@ -500,7 +543,7 @@ export async function queueOperation(
 				check.id !== check_id ||
 				check.error ||
 				check.installation_id !== config.installation_id ||
-				Date.now() - Date.parse(check.checked_at) > 15 * 60 * 1000
+				Date.now() - Date.parse(check.checked_at) > CHECK_TTL_MS
 			)
 				throw new Error('The update check is stale. Check again.');
 			if (!check.target?.available) throw new Error('No checked update is available.');
@@ -508,10 +551,23 @@ export async function queueOperation(
 				throw new Error('Local source changes must be preserved/reviewed before updating.');
 			selected = check;
 		}
+		// Without a disconnect wait, refuse now instead of after a multi-minute build.
+		if (
+			operation !== 'uninstall' &&
+			!(operation === 'update' && wait_for_disconnect) &&
+			(await connectedClients(config))
+		)
+			throw Object.assign(
+				new Error(
+					`An assistant is connected to Saturday. Quit the assistant app or disconnect Saturday, then ${operation === 'update' ? 'update' : 'repair'}.`
+				),
+				{ code: 'MCP_CONNECTED' }
+			);
 		if (operation === 'uninstall') {
 			const targets = ownedRemovalTargets(config, delete_data);
 			await assertSafeRemoval(targets);
 		}
+		await pruneOperationArtifacts(paths);
 		const id = randomUUID(),
 			worker = join(paths.root, `controller-${id}`);
 		await fs.mkdir(worker, { recursive: true, mode: 0o700 });
@@ -586,6 +642,68 @@ export async function queueOperation(
 	}
 }
 
+// Counts live assistant (MCP) processes. Web UI leases are excluded; they stop with the UI.
+export async function connectedClients(config = getInstallation()) {
+	const dir = join(config.extension_state, 'processes');
+	let names;
+	try {
+		names = await fs.readdir(dir);
+	} catch (e) {
+		if (e.code === 'ENOENT') return 0;
+		throw e;
+	}
+	let count = 0;
+	for (const name of names) {
+		if (!/^\d+\.json$/.test(name)) continue;
+		const pid = Number(name.slice(0, -5));
+		if (pid === process.pid || !alive(pid)) continue;
+		let role;
+		try {
+			role = JSON.parse(await fs.readFile(join(dir, name), 'utf8')).role;
+		} catch {
+			// An unreadable lease is treated as a client.
+		}
+		if (role !== 'web') count++;
+	}
+	return count;
+}
+// Removes disposable controller/staging folders and previous builds beyond retention.
+// `keep` protects a running operation's controller/staging folders, never its previous build,
+// so the newest previous build always counts toward retention.
+// Does nothing while a publication journal exists: Repair needs those folders.
+export async function pruneOperationArtifacts(paths = operationPaths(), keep = new Set()) {
+	if (existsSync(paths.journal)) return [];
+	let names;
+	try {
+		names = await fs.readdir(paths.root);
+	} catch (e) {
+		if (e.code === 'ENOENT') return [];
+		throw e;
+	}
+	const stale = [],
+		previous = [];
+	for (const name of names) {
+		const match = /^(controller|work|previous)-([a-f0-9-]{36})$/.exec(name);
+		if (!match || (match[1] !== 'previous' && keep.has(match[2]))) continue;
+		const path = join(paths.root, name),
+			stat = await fs.lstat(path);
+		if (!stat.isDirectory() || stat.isSymbolicLink()) continue;
+		if (match[1] === 'previous') previous.push({ path, time: stat.mtimeMs });
+		else stale.push(path);
+	}
+	previous.sort((a, b) => b.time - a.time);
+	stale.push(...previous.slice(PREVIOUS_BUILDS_RETAINED).map((entry) => entry.path));
+	const removed = [];
+	for (const path of stale) {
+		try {
+			await fs.rm(path, { recursive: true, force: true });
+			removed.push(path);
+		} catch {
+			// A controller that is still exiting (Windows file locks) is retried next time.
+		}
+	}
+	return removed;
+}
 async function hashFile(path) {
 	const { createReadStream } = await import('node:fs');
 	const h = createHash('sha256');
@@ -690,7 +808,7 @@ async function assertClientsStopped(config) {
 		if (pid !== process.pid && alive(pid))
 			throw Object.assign(
 				new Error(
-					'Waiting for assistant disconnect. Pause/disconnect all Saturday MCP clients, then retry.'
+					'Stopped waiting for assistant disconnect. Quit the assistant app or disconnect Saturday, then retry.'
 				),
 				{ code: 'MCP_CONNECTED' }
 			);
@@ -763,7 +881,12 @@ async function publish(config, app, previous, target, journal, writeJournal) {
 		journal.next = next;
 		journal.phase = 'prepared';
 		await writeJournal();
-		if (existsSync(config.code_root)) await fs.rename(config.code_root, previous);
+		if (existsSync(config.code_root)) {
+			await fs.rename(config.code_root, previous);
+			// Retention orders previous builds by when they were replaced.
+			const now = new Date();
+			await fs.utimes(previous, now, now);
+		}
 		journal.phase = 'old_saved';
 		await writeJournal();
 		await fs.rename(app, config.code_root);
@@ -851,9 +974,14 @@ export async function executeOperation(
 		Object.assign(state, { status, step, ...extra });
 		await atomicJson(paths.status, state);
 	};
+	// Writes run one at a time, in order, so the log is never truncated by an older snapshot.
+	let logWrite = Promise.resolve();
 	const record = (chunk) => {
 		buffer = (buffer + String(chunk)).slice(-1024 * 1024);
-		fs.writeFile(state.log, buffer, { mode: 0o600 }).catch(() => {});
+		const snapshot = buffer;
+		logWrite = logWrite
+			.then(() => fs.writeFile(state.log, snapshot, { mode: 0o600 }))
+			.catch(() => {});
 	};
 	// Child setup logs are bounded and retained outside replaceable code.
 	const loggingRun = async (cmd, args, options = {}) => {
@@ -1205,6 +1333,8 @@ export async function executeOperation(
 		const work = join(paths.root, `work-${state.id}`);
 		try {
 			await fs.rm(work, { recursive: true, force: true });
+			// Apply build retention now, protecting only this running controller.
+			await pruneOperationArtifacts(paths, new Set([state.id]));
 		} catch (e) {
 			state.warning = `Completed; staging cleanup needs attention: ${e.message}`;
 		}
@@ -1221,28 +1351,39 @@ export async function executeOperation(
 	} catch (e) {
 		record(`${e.message}\n`);
 		const recoveryRequired = existsSync(paths.journal);
-		await update(
-			recoveryRequired
-				? 'recovery_required'
-				: /Waiting for assistant disconnect/.test(e.message)
-					? 'waiting_for_disconnect'
-					: 'failed',
-			e.message,
-			{ error: e.message, completed_at: new Date().toISOString(), recovery: state.recovery }
-		);
+		let restartWarning;
 		// Before publication, the existing compatible app can resume. Afterwards, keep maintenance persistent for explicit repair.
 		if (!recoveryRequired) {
+			// Nothing was published, so the staged candidate is disposable.
+			try {
+				await fs.rm(join(paths.root, `work-${state.id}`), { recursive: true, force: true });
+			} catch {
+				/* Pruned by the next operation. */
+			}
 			if (admission) {
 				await admission();
 				admission = null;
 			}
 			delete process.env.SATURDAY_MAINTENANCE_TOKEN;
+			// Restart before reporting failure, so a client that sees `failed` can reload the UI
+			// (and receive the restarted server's control session) from `url`.
 			if (wasRunning)
 				try {
-					await startServer();
-				} catch {}
+					state.url = (await startServer()).url;
+				} catch (restart) {
+					restartWarning = `Saturday could not restart: ${restart.message}. Use the Saturday shortcut to reopen it.`;
+				}
 		}
+		// Terminal states only: an error must never look like active work.
+		await update(recoveryRequired ? 'recovery_required' : 'failed', e.message, {
+			error: e.message,
+			error_code: e.code === 'MCP_CONNECTED' ? 'MCP_CONNECTED' : undefined,
+			completed_at: new Date().toISOString(),
+			recovery: state.recovery,
+			...(restartWarning ? { warning: restartWarning } : {})
+		});
 	} finally {
+		await logWrite;
 		if (admission && state.status === 'complete') {
 			await admission();
 			delete process.env.SATURDAY_MAINTENANCE_TOKEN;
