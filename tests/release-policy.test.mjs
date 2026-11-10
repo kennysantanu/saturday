@@ -40,20 +40,33 @@ function fixture() {
 				return JSON.stringify(value);
 			});
 	};
-	return { root, edit, bump, close: () => rmSync(root, { recursive: true, force: true }) };
+	// Freeze only this disposable candidate; released repository baselines stay untouched.
+	freezeRelease(root);
+	const version = JSON.parse(readFileSync(join(root, 'package.json'))).version;
+	const parts = version.split('.').map(Number);
+	parts[2] += 1;
+	const nextVersion = parts.join('.');
+	return {
+		root,
+		edit,
+		bump,
+		version,
+		nextVersion,
+		close: () => rmSync(root, { recursive: true, force: true })
+	};
 }
 
-test('0.1.0 is frozen at schema/file version 1; changed code requires an app bump and cannot refreeze the release', () => {
+test('a frozen candidate keeps schema/file version 1; changed code requires an app bump and cannot refreeze it', () => {
 	const f = fixture();
 	try {
 		const current = checkReleasePolicy(f.root, { requireFrozen: true });
-		assert.equal(current.version, '0.1.0');
+		assert.equal(current.version, f.version);
 		assert.equal(current.storage.database.currentVersion, 1);
 		assert.equal(current.storage.manifest.version, 1);
 		f.edit('src/lib/server/local/jobs.js', (text) => text + '\n// Fictional future code change.\n');
 		assert.throws(() => checkReleasePolicy(f.root), /Bump the app version/);
 		assert.throws(() => freezeRelease(f.root), /Bump the app version/);
-		f.bump('0.1.1');
+		f.bump(f.nextVersion);
 		assert.equal(checkReleasePolicy(f.root).frozen, false);
 		assert.throws(
 			() => checkReleasePolicy(f.root, { requireFrozen: true }),
@@ -79,7 +92,7 @@ test('released SQL cannot be changed, renamed or removed even after an app versi
 	]) {
 		const f = fixture();
 		try {
-			f.bump('0.1.1');
+			f.bump(f.nextVersion);
 			f.edit('src/lib/server/migrations.js', mutate);
 			assert.throws(
 				() => checkReleasePolicy(f.root),
@@ -107,7 +120,7 @@ test('new migrations require the next schema version, matching package metadata 
 			return JSON.stringify(pkg);
 		});
 		assert.throws(() => checkReleasePolicy(f.root), /Bump the app version/);
-		f.bump('0.1.1');
+		f.bump(f.nextVersion);
 		assert.equal(checkReleasePolicy(f.root).storage.database.currentVersion, 2);
 		assert.throws(() => freezeRelease(f.root), /populated fixture matching/);
 	} finally {
@@ -118,11 +131,13 @@ test('new migrations require the next schema version, matching package metadata 
 test('version checks catch package/lock mismatches, changed fixtures and unsupported version suffixes', () => {
 	const f = fixture();
 	try {
-		f.edit('package.json', (text) => text.replace('"version": "0.1.0"', '"version": "0.1.1"'));
+		f.edit('package.json', (text) =>
+			JSON.stringify({ ...JSON.parse(text), version: f.nextVersion })
+		);
 		assert.throws(() => checkReleasePolicy(f.root), /lockfile versions disagree/);
 		f.bump('0.1.0-beta');
 		assert.throws(() => checkReleasePolicy(f.root), /stable release version/);
-		f.bump('0.1.1');
+		f.bump(f.nextVersion);
 		f.edit('tests/fixtures/release-0.1.0-current/expected.json', (text) => text + '\n');
 		assert.throws(() => checkReleasePolicy(f.root), /storage fixture was changed/);
 	} finally {
@@ -194,7 +209,7 @@ test('an actual core.autocrlf=true Git checkout preserves all frozen artifact by
 				cwd: checkout,
 				encoding: 'utf8'
 			}),
-			/app 0\.1\.0 \(frozen\)/
+			new RegExp(`app ${f.version.replaceAll('.', '\\.')} \\(frozen\\)`)
 		);
 		const document = join(
 			checkout,

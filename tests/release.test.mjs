@@ -15,7 +15,7 @@ import { join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { generateRelease, checkRelease } from '../scripts/release.mjs';
 import { selectTarget } from '../src/lib/server/installation-operations.js';
-import { releaseSourceFiles } from '../scripts/check-release.mjs';
+import { releaseSourceFiles, freezeRelease } from '../scripts/check-release.mjs';
 function fixture() {
 	const base = mkdtempSync(join(tmpdir(), 'saturday-release-')),
 		root = join(base, 'source');
@@ -29,6 +29,9 @@ function fixture() {
 		join(root, 'tests/fixtures/release-0.1.0-current'),
 		{ recursive: true }
 	);
+	// Prepare a fictional release of the current version in this disposable copy.
+	freezeRelease(root);
+	const version = JSON.parse(readFileSync(join(root, 'package.json'))).version;
 	const git = (...args) =>
 		execFileSync('git', ['-C', root, ...args], {
 			encoding: 'utf8',
@@ -53,13 +56,14 @@ function fixture() {
 	return {
 		base,
 		root,
+		version,
 		git,
 		commit,
 		options: {
 			root,
 			commit: sha,
 			verifiedCommit: sha,
-			tag: 'v0.1.0',
+			tag: `v${version}`,
 			output: join(base, 'saturday-release.json')
 		},
 		close: () => rmSync(base, { recursive: true, force: true })
@@ -69,11 +73,11 @@ test('verified clean candidate generates matching metadata accepted by existing 
 	const f = fixture();
 	try {
 		const generated = generateRelease(f.options);
-		assert.equal(generated.metadata.release, '0.1.0');
+		assert.equal(generated.metadata.release, f.version);
 		assert.equal(generated.metadata.commit, f.options.commit);
 		assert.equal(checkRelease({ ...f.options, metadata: generated.path }).digest, generated.digest);
 		const release = {
-			tag_name: 'v0.1.0',
+			tag_name: `v${f.version}`,
 			id: 1,
 			assets: [
 				{ name: 'saturday-release.json', state: 'uploaded', id: 2, digest: generated.digest }
@@ -84,7 +88,7 @@ test('verified clean candidate generates matching metadata accepted by existing 
 			async (path) => (path.startsWith('/releases') ? [release] : { sha: f.options.commit }),
 			async () => new Response(readFileSync(generated.path))
 		);
-		assert.equal(selected.release, '0.1.0');
+		assert.equal(selected.release, f.version);
 		assert.equal(selected.commit, f.options.commit);
 		await assert.rejects(
 			selectTarget(

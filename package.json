@@ -1,7 +1,7 @@
 {
 	"name": "saturday",
 	"private": true,
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"type": "module",
 	"engines": {
 		"node": ">=22.13.0"
@@ -18,7 +18,7 @@
 		"status": "node scripts/status.mjs",
 		"preview": "vite preview --host 127.0.0.1",
 		"prepare": "svelte-kit sync || echo ''",
-		"check": "npm run check:release && npm run check:scripts && npm run extensions:generate && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check": "node tests/run.mjs check",
 		"check:release": "node scripts/check-release.mjs",
 		"release:freeze": "node scripts/check-release.mjs --freeze",
 		"check:scripts": "node scripts/check-scripts.mjs",
@@ -27,12 +27,12 @@
 		"format": "prettier --write .",
 		"backup": "node scripts/backup.mjs",
 		"restore": "node scripts/restore.mjs",
-		"test": "npm run build:mcp && node --test tests/*.test.mjs",
-		"test:contracts": "node --test tests/application.test.mjs tests/application-contract.test.mjs",
-		"test:cloudflare": "node --test tests/cloudflare.integration.mjs",
-		"test:web": "npm run build && node --test tests/web.integration.mjs tests/server-lifecycle.integration.mjs tests/access.integration.mjs tests/access.browser.mjs tests/lan.integration.mjs tests/workflow.integration.mjs tests/dashboard.integration.mjs tests/dashboard-attention.integration.mjs tests/theme.integration.mjs tests/recents.integration.mjs tests/job-picker.integration.mjs tests/job-duplicates.integration.mjs tests/network-job-picker.integration.mjs tests/document-editor.integration.mjs tests/profile.integration.mjs tests/feedback.integration.mjs tests/record-deletion.integration.mjs tests/reminders.integration.mjs tests/tags.integration.mjs tests/installation-release.integration.mjs",
-		"test:beta": "node scripts/review-documents.mjs",
-		"verify": "npm run lint && npm run check && npm test && npm run test:cloudflare && npm run test:web && npm run test:beta",
+		"test": "node tests/run.mjs unit",
+		"test:contracts": "node tests/run.mjs contracts",
+		"test:cloudflare": "node tests/run.mjs cloudflare",
+		"test:web": "node tests/run.mjs web",
+		"test:beta": "node tests/run.mjs beta",
+		"verify": "node tests/run.mjs verify",
 		"files": "node scripts/files.mjs",
 		"setup:pdf": "puppeteer browsers install chrome",
 		"extension": "node scripts/extensions.mjs",
@@ -43,7 +43,8 @@
 		"update:check": "node scripts/install.mjs check",
 		"update": "node scripts/install.mjs update",
 		"repair": "node scripts/install.mjs repair",
-		"uninstall": "node scripts/install.mjs uninstall"
+		"uninstall": "node scripts/install.mjs uninstall",
+		"test:large": "node tests/run.mjs large"
 	},
 	"devDependencies": {
 		"@internationalized/date": "^3.12.4",
