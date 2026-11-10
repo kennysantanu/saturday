@@ -48,6 +48,13 @@ test(
 			);
 			const migrationTwo =
 				"{version: 2, name: 'fictional_release_index', sql: 'CREATE INDEX fictional_release_upgrade ON jobs(company_name, id);'}";
+			// Fictional releases reuse real version numbers with current source, so the real frozen
+			// baselines would reject them once shipped code changes after 0.1.0. Keep only the format.
+			const baselines = JSON.parse(await fs.readFile(join(source, 'release-baselines.json')));
+			await fs.writeFile(
+				join(source, 'release-baselines.json'),
+				JSON.stringify({ ...baselines, releases: [] }, null, 2)
+			);
 			for (const version of ['0.1.0', '0.1.1', '0.1.2', '0.1.3', '0.1.4', '0.1.5', '0.1.6']) {
 				const migrated = !['0.1.0', '0.1.1'].includes(version);
 				for (const file of ['package.json', 'package-lock.json']) {

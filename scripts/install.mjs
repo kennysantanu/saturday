@@ -7,6 +7,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
+import { createInterface } from 'node:readline/promises';
 const repo = 'kennysantanu/saturday';
 export const runtimeVersion = '24.21.0';
 export const runtimeHashes = {
@@ -637,6 +638,42 @@ export async function install(values, services = {}) {
 		await fs.rmdir(lock);
 	}
 }
+async function confirmUpdate(label, json) {
+	// Agents and scripts pass --check-id; only an interactive terminal may confirm here.
+	if (json || !process.stdin.isTTY) return false;
+	const prompt = createInterface({ input: process.stdin, output: process.stderr });
+	try {
+		return /^y(es)?$/i.test((await prompt.question(`Install ${label}? [y/N] `)).trim());
+	} finally {
+		prompt.close();
+	}
+}
+async function waitForOperation(result, background, operationStatus) {
+	if (background) return result;
+	let step = '';
+	while (
+		[
+			'queued',
+			'staging',
+			'backing_up',
+			'publishing',
+			'migrating',
+			'restarting',
+			'removing',
+			'waiting_for_disconnect'
+		].includes(result.status) &&
+		!result.error
+	) {
+		if (step !== result.step) {
+			step = result.step;
+			say(step);
+		}
+		await new Promise((r) => setTimeout(r, 500));
+		result = operationStatus();
+	}
+	if (result.status !== 'complete') process.exitCode = 1;
+	return result;
+}
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
 	try {
 		const { values, positionals } = parseArgs({
@@ -686,19 +723,56 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
 				);
 			}
 		}
-		const { checkUpdates, operationStatus, queueOperation, executeOperation } = operations || {};
+		const { checkUpdates, operationStatus, queueOperation, executeOperation, connectedClients } =
+			operations || {};
 		let result;
 		if (action === 'check') result = await checkUpdates();
 		else if (action === 'status') result = operationStatus();
 		else if (action === 'execute') {
 			await executeOperation(values['operation-id'], { downloadSource, copySource, run });
 			result = operationStatus();
-		} else if (['update', 'repair', 'uninstall'].includes(action)) {
-			if (action === 'update' && !values['check-id']) {
-				const check = await checkUpdates();
-				say(`Selected ${check.target.release || check.target.commit}`);
-				values['check-id'] = check.id;
+		} else if (action === 'update' && !values['check-id']) {
+			// Show the checked target before anything is installed.
+			const check = await checkUpdates(),
+				target = check.target,
+				label = target.release || target.version || target.commit?.slice(0, 12) || 'current build';
+			result = check;
+			if (!target.available) say(target.held_back || `Saturday is up to date (${label}).`);
+			else if (check.local?.dirty) {
+				// The controller refuses dirty sources; do not offer an install that cannot run.
+				say(
+					`Update available: ${label}. Local source changes block updating; commit or preserve them, then check again.`
+				);
+				process.exitCode = 1;
+			} else if (connectedClients && (await connectedClients())) {
+				say(
+					`Update available: ${label}. An assistant is connected to Saturday; quit the assistant app or disconnect Saturday, then run the update again.`
+				);
+				process.exitCode = 1;
+			} else {
+				say(
+					`Update available: ${label}${target.commit ? ` (commit ${target.commit.slice(0, 12)})` : ''}`
+				);
+				if (target.compare_url) say(`Changes: ${target.compare_url}`);
+				if (target.notes) say(`Notes:\n${target.notes.slice(0, 2000)}`);
+				if (values.confirm && (await confirmUpdate(label, values.json))) {
+					result = await waitForOperation(
+						await queueOperation('update', {
+							check_id: check.id,
+							confirm: true,
+							retry_pdf: values['retry-pdf']
+						}),
+						values.background,
+						operationStatus
+					);
+				} else {
+					say(
+						`Update not started. To install this reviewed check within 15 minutes, run:\nnode scripts/install.mjs update${values.installation ? ` --installation "${resolve(values.installation)}"` : ''} --check-id ${check.id} --confirm`
+					);
+					process.exitCode = 1;
+				}
 			}
+		} else if (['update', 'repair', 'uninstall'].includes(action)) {
 			result = await queueOperation(action, {
 				check_id: values['check-id'],
 				confirm: values.confirm,
@@ -706,34 +780,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
 				source: values.source,
 				retry_pdf: values['retry-pdf']
 			});
-			if (!values.background) {
-				let step = '';
-				while (
-					[
-						'queued',
-						'staging',
-						'backing_up',
-						'publishing',
-						'migrating',
-						'restarting',
-						'removing',
-						'waiting_for_disconnect'
-					].includes(result.status) &&
-					!result.error
-				) {
-					if (step !== result.step) {
-						step = result.step;
-						say(step);
-					}
-					await new Promise((r) => setTimeout(r, 500));
-					result = operationStatus();
-				}
-				if (result.status !== 'complete') process.exitCode = 1;
-			}
+			result = await waitForOperation(result, values.background, operationStatus);
 		} else if (action === 'install') result = await install(values);
 		else throw new Error('Use install/check/update/repair/uninstall/status.');
 		if (values.json) console.log(JSON.stringify(result));
-		else say(result?.url ? `Saturday is ready at ${result.url}.` : JSON.stringify(result));
+		// The update prompt already summarized its check.
+		else if (action === 'check' || result?.format !== 'saturday.update-check')
+			say(result?.url ? `Saturday is ready at ${result.url}.` : JSON.stringify(result));
 	} catch (e) {
 		if (process.argv.includes('--json'))
 			console.log(

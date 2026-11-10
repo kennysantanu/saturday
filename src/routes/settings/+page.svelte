@@ -11,6 +11,11 @@
 	import { withPending, enhanceWithFocus, focusFirstError, trackChanges } from '$lib/forms';
 	import { page } from '$app/state';
 	import { formatBytes, formatDateTime } from '$lib/format';
+	import {
+		activeInstallationStates,
+		pollInstallationProgress
+	} from '$lib/installation-progress.js';
+	import { parseReleaseNotes } from '$lib/release-notes.js';
 	import { documentDesignations } from '$lib/file-types';
 	import Clipboard from '@lucide/svelte/icons/clipboard';
 	import Check from '@lucide/svelte/icons/check';
@@ -54,16 +59,6 @@
 		uninstallDialog = $state(false),
 		deleteUserData = $state(false);
 	let installationProgress = $state<any>(null);
-	const installationActive = [
-		'queued',
-		'staging',
-		'waiting_for_disconnect',
-		'backing_up',
-		'publishing',
-		'migrating',
-		'restarting',
-		'removing'
-	];
 	let deleteOpen = $state(false);
 	let confirmDelete = $state<{ id: string; contents: string } | null>(null);
 	let stopDialog = $state(false),
@@ -231,47 +226,35 @@
 	$effect(() => {
 		if (form?.serverOperation) void reconnectServer(form.serverOperation);
 	});
-	async function pollInstallation(initial: any, cancelled: () => boolean) {
-		if (data.access.password_enabled) {
-			installationProgress = {
-				...initial,
-				step: 'Operation continues. Reopen Saturday to sign in and check the result in Settings.'
-			};
-			return;
-		}
-		let operation = initial;
-		const deadline = Date.now() + 20 * 60 * 1000;
-		while (!cancelled() && Date.now() < deadline) {
-			installationProgress = operation;
-			if (operation.error || !installationActive.includes(operation.status)) {
-				if (operation.status === 'complete' && operation.operation !== 'uninstall' && operation.url)
-					window.location.assign(`${operation.url}/settings#updates`);
-				return;
-			}
-			await new Promise((r) => setTimeout(r, 750));
-			try {
-				const response = await fetch(operation.poll_url || '/settings/installation', {
-					credentials: 'include',
-					cache: 'no-store',
-					signal: AbortSignal.timeout(2000)
-				});
-				if (response.ok) operation = await response.json();
-			} catch {
-				/* The retained controller continues across UI shutdown. */
-			}
-		}
-		if (!cancelled())
-			installationProgress = {
-				...operation,
-				error:
-					'Progress timed out. Inspect the installation log or run the installation status command; do not repeat an uncertain operation.'
-			};
-	}
+	// The controller refuses updates until Repair finishes an interrupted publication.
+	const repairPending = $derived(
+		['recovery_required', 'interrupted'].includes(
+			(installationProgress || data.installationOperation)?.status
+		)
+	);
+	// Main builds show their package version with the commit for exact identity.
+	const targetLabel = (target: any) => {
+		const commit = target?.commit?.slice(0, 12);
+		if (target?.release) return target.release;
+		return target?.version ? `${target.version} (${commit})` : commit;
+	};
 	$effect(() => {
 		const operation = form?.installationOperation || data.installationOperation;
-		if (operation && installationActive.includes(operation.status) && !operation.error) {
+		if (operation && activeInstallationStates.includes(operation.status) && !operation.error) {
 			let cancelled = false;
-			void pollInstallation(operation, () => cancelled);
+			void pollInstallationProgress({
+				initial: operation,
+				passwordLogin: data.access.password_enabled,
+				request: (path) =>
+					fetch(path, {
+						credentials: 'include',
+						cache: 'no-store',
+						signal: AbortSignal.timeout(2000)
+					}),
+				navigate: (url) => window.location.assign(url),
+				report: (progress) => (installationProgress = progress),
+				cancelled: () => cancelled
+			});
 			return () => {
 				cancelled = true;
 			};
@@ -326,6 +309,18 @@
 		}))
 	);
 </script>
+
+<!-- Release notes render as text elements only; parseReleaseNotes never produces HTML. -->
+{#snippet inlines(parts: any[])}
+	{#each parts as part, index (index)}
+		{#if part.type === 'strong'}<strong>{part.text}</strong>
+		{:else if part.type === 'code'}<code>{part.text}</code>
+		{:else if part.type === 'link'}<a class="link" href={part.href} target="_blank" rel="noreferrer"
+				>{part.text}</a
+			>
+		{:else}{part.text}{/if}
+	{/each}
+{/snippet}
 
 {#snippet sectionLinks(closeOnPick: boolean)}
 	{#each sectionGroups as group (group.label)}
@@ -1043,16 +1038,25 @@
 					{#if installationProgress || data.installationOperation}
 						{@const operation = installationProgress || data.installationOperation}
 						<Notice
-							tone={operation.error ? 'error' : 'info'}
-							title={operation.operation === 'uninstall' && operation.status === 'complete'
-								? 'Saturday uninstalled'
-								: 'Installation status'}
+							tone={operation.error || repairPending ? 'error' : 'info'}
+							title={repairPending
+								? 'Repair needed'
+								: operation.error_code === 'MCP_CONNECTED'
+									? 'Assistant still connected'
+									: operation.operation === 'uninstall' && operation.status === 'complete'
+										? 'Saturday uninstalled'
+										: 'Installation status'}
 						>
+							{#if repairPending}<p class="mb-2">
+									The operation stopped partway. Your data is retained, and recovery snapshots are
+									kept. Run Repair to finish safely; it never resets records.
+								</p>{/if}
 							{operation.step}{#if operation.error && operation.error !== operation.step}<p
 									class="mt-2"
 								>
 									{operation.error}
 								</p>{/if}
+							{#if operation.warning}<p class="mt-2">{operation.warning}</p>{/if}
 							{#if operation.logs}<p class="mt-2 text-sm break-all">Log: {operation.logs}</p>{/if}
 							{#if operation.status === 'complete' && operation.operation === 'uninstall'}<p
 									class="mt-2"
@@ -1064,17 +1068,37 @@
 						</Notice>
 					{/if}
 					{#if data.updateCheck?.target}
+						{@const target = data.updateCheck.target}
 						<p class="text-sm">
-							{data.updateCheck.target.available
-								? data.updateCheck.target.kind === 'release'
-									? 'Release available'
-									: 'Latest main available'
-								: 'You’re up to date'}:
-							<a class="link" href={data.updateCheck.target.url} target="_blank" rel="noreferrer"
-								>{data.updateCheck.target.release ||
-									data.updateCheck.target.commit?.slice(0, 12)}</a
-							>
+							{#if target.available}
+								{target.kind === 'release' ? 'Release available' : 'Latest main available'}:
+								{data.applicationVersion} →
+								<a class="link" href={target.url} target="_blank" rel="noreferrer"
+									>{targetLabel(target)}</a
+								>
+							{:else}
+								{target.held_back ? 'Latest release' : 'You’re up to date'}:
+								<a class="link" href={target.url} target="_blank" rel="noreferrer"
+									>{target.release || target.commit?.slice(0, 12)}</a
+								>
+							{/if}
 						</p>
+						{#if target.available && target.compare_url}<p class="text-sm">
+								<a class="link" href={target.compare_url} target="_blank" rel="noreferrer"
+									>See changes since your build</a
+								>
+							</p>{/if}
+						{#if data.updateCheck.checked_at}<p class="text-sm text-muted-foreground">
+								Last checked {formatDateTime(data.updateCheck.checked_at)}
+							</p>{/if}
+						{#if target.available && data.updateCheckExpired}<Notice title="Check expired"
+								>This check is more than 15 minutes old. Check again before updating.</Notice
+							>{:else if target.available && data.assistantConnected}<Notice
+								title="Assistant connected"
+								>An assistant is connected to Saturday. Quit the assistant app or disconnect
+								Saturday before the update finishes building. Saturday waits up to two minutes, then
+								stops without changing anything.</Notice
+							>{/if}
 						{#if data.updateCheck.local?.dirty}<Notice title="Local changes retained"
 								>Local source changes block updating. Commit or preserve them before checking again.</Notice
 							>{/if}
@@ -1082,9 +1106,29 @@
 								>The original source fingerprint is unknown. Review the selected snapshot; your
 								current code will be retained in recovery.</Notice
 							>{/if}
-						{#if data.updateCheck.target.notes}<details class="disclosure">
-								<summary>Update notes</summary>
-								<p class="mt-3 text-sm whitespace-pre-wrap">{data.updateCheck.target.notes}</p>
+						{#if target.held_back}<Notice title="Staying on this build">{target.held_back}</Notice
+							>{/if}
+						{#if target.notes && !target.held_back}<details
+								class="disclosure"
+								open={target.kind === 'release' && target.available}
+							>
+								<summary>{target.kind === 'release' ? 'What’s new' : 'Update notes'}</summary>
+								<div class="disclosure-body gap-2 text-sm">
+									{#each parseReleaseNotes(target.notes) as block, index (index)}
+										{#if block.type === 'heading'}
+											{#if block.level < 3}<h3 class="pt-1 font-semibold">
+													{@render inlines(block.inlines)}
+												</h3>
+											{:else}<h4 class="font-medium">{@render inlines(block.inlines)}</h4>{/if}
+										{:else if block.type === 'list'}
+											<ul class="list-disc space-y-1 pl-5">
+												{#each block.items as item, itemIndex (itemIndex)}
+													<li>{@render inlines(item)}</li>
+												{/each}
+											</ul>
+										{:else}<p>{@render inlines(block.inlines)}</p>{/if}
+									{/each}
+								</div>
 							</details>{/if}
 					{/if}
 					{#if data.server.controlsAvailable}
@@ -1093,6 +1137,8 @@
 								method="POST"
 								action="?/checkUpdates"
 								use:enhance={withPending(() => async ({ update }) => {
+									// Fresh server data replaces any earlier live progress notice.
+									installationProgress = null;
 									await update();
 									await tick();
 									focusFirstError();
@@ -1102,7 +1148,7 @@
 									>Check for updates</Button
 								>
 							</form>
-							{#if data.updateCheck?.target?.available && !data.updateCheck.local?.dirty}<Button
+							{#if data.updateCheck?.target?.available && !data.updateCheck.local?.dirty && !data.updateCheckExpired && !repairPending}<Button
 									variant="outline"
 									disabled={!data.server.controlsAvailable}
 									onclick={() => (updateDialog = true)}>Update Saturday</Button
@@ -1111,6 +1157,7 @@
 								method="POST"
 								action="?/installationOperation"
 								use:enhance={withPending(() => async ({ result }) => {
+									installationProgress = null;
 									await applyAction(result);
 									await tick();
 									focusFirstError();
@@ -1118,8 +1165,9 @@
 							>
 								<input type="hidden" name="operation" value="repair" /><Button
 									type="submit"
-									variant="outline"
-									disabled={!data.server.controlsAvailable}>Repair installation</Button
+									variant={repairPending ? 'default' : 'outline'}
+									disabled={!data.server.controlsAvailable}
+									>{repairPending ? 'Repair now' : 'Repair installation'}</Button
 								>
 							</form>
 						</div>
@@ -1132,6 +1180,7 @@
 						action="?/installationOperation"
 						use:enhance={withPending(() => async ({ result }) => {
 							updateDialog = false;
+							installationProgress = null;
 							await applyAction(result);
 							await tick();
 							focusFirstError();
@@ -1141,12 +1190,16 @@
 							type="hidden"
 							name="check_id"
 							value={data.updateCheck?.id || ''}
-						/><input type="hidden" name="confirm" value="true" />
+						/><input type="hidden" name="confirm" value="true" /><input
+							type="hidden"
+							name="wait_for_disconnect"
+							value="true"
+						/>
 					</form>
 					<ConfirmDialog
 						bind:open={updateDialog}
 						title="Update Saturday?"
-						description={`Install ${data.updateCheck?.target?.release || data.updateCheck?.target?.commit?.slice(0, 12) || 'the checked build'} after staging and verified recovery backups. Disconnect your assistant before publication. Data will be preserved.`}
+						description={`Install ${targetLabel(data.updateCheck?.target) || 'the checked build'} after staging and verified recovery backups. Quit your assistant app or disconnect Saturday; Saturday waits up to two minutes after building. Data will be preserved.`}
 						confirmLabel="Update Saturday"
 						formId="update-saturday"
 					/>

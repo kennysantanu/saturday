@@ -20,7 +20,11 @@ export async function withAccessChange(work) {
 		);
 	try {
 		const operation = operationStatus();
-		if (operation && !finished.has(operation.status))
+		// Older builds saved disconnect failures as waiting_for_disconnect with an error.
+		const settled =
+			finished.has(operation?.status) ||
+			(operation?.error && operation.status !== 'recovery_required');
+		if (operation && !settled)
 			throw new AccessError(
 				'Installation work is queued or running. Wait before changing sign-in settings.',
 				409

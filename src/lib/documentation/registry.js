@@ -4,7 +4,7 @@ export const documentationRegistry = [
 		'release',
 		'docs/release-notes.md',
 		'Release notes',
-		'Version 0.1.0 features, limits and distribution status.',
+		'Version 0.1.2 update changes plus 0.1.0 features, limits and distribution status.',
 		['release', 'beta', 'version']
 	],
 	[

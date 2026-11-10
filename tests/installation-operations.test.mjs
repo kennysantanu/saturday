@@ -19,7 +19,11 @@ import {
 	operationPaths,
 	executeOperation,
 	codeFingerprint,
-	prepareRuntime
+	prepareRuntime,
+	developmentHold,
+	pruneOperationArtifacts,
+	connectedClients,
+	PREVIOUS_BUILDS_RETAINED
 } from '../src/lib/server/installation-operations.js';
 import { copySource, install, run as installerRun } from '../scripts/install.mjs';
 import { getInstallation, createDesktopShortcut } from '../src/lib/server/installation.js';
@@ -587,5 +591,165 @@ test('interrupted managed publication resumes with guarded storage instead of re
 		for (const key of Object.keys(process.env)) if (!(key in prior)) delete process.env[key];
 		Object.assign(process.env, prior);
 		await fs.rm(f.root, { recursive: true, force: true });
+	}
+});
+
+test('operation cleanup removes disposable folders, keeps the newest previous build and respects journals', async () => {
+	const root = await fs.mkdtemp(join(tmpdir(), 'saturday-prune-'));
+	try {
+		const paths = { root, journal: join(root, 'publication.json') };
+		const id = (n) =>
+			`${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`;
+		const names = [
+			`controller-${id(1)}`,
+			`work-${id(2)}`,
+			`previous-${id(3)}`,
+			`previous-${id(4)}`,
+			`controller-${id(5)}`,
+			`previous-${id(5)}`
+		];
+		for (const name of names) await fs.mkdir(join(root, name, 'app'), { recursive: true });
+		await fs.writeFile(join(root, 'retained-extension-x.sqlite'), 'keep');
+		await fs.writeFile(join(root, `${id(1)}.log`), 'keep');
+		await fs.utimes(join(root, `previous-${id(3)}`), new Date(1000), new Date(1000));
+		await fs.utimes(join(root, `previous-${id(4)}`), new Date(2000), new Date(2000));
+		await fs.writeFile(paths.journal, '{}');
+		assert.deepEqual(await pruneOperationArtifacts(paths), [], 'a pending journal blocks cleanup');
+		await fs.rm(paths.journal);
+		// As after a completed update: keep protects the running controller, but its own
+		// previous build still counts toward retention and older builds are removed.
+		await pruneOperationArtifacts(paths, new Set([id(5)]));
+		assert.equal(PREVIOUS_BUILDS_RETAINED, 1);
+		assert.deepEqual((await fs.readdir(root)).sort(), [
+			`${id(1)}.log`,
+			`controller-${id(5)}`,
+			`previous-${id(5)}`,
+			'retained-extension-x.sqlite'
+		]);
+	} finally {
+		await fs.rm(root, { recursive: true, force: true });
+	}
+});
+
+test('connected assistants are refused before staging and failed updates leave terminal state without staging', async () => {
+	const f = await fixture(),
+		prior = { ...process.env },
+		client = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+	Object.assign(process.env, f.env);
+	try {
+		await new Promise((r) => client.once('spawn', r));
+		const config = getInstallation(),
+			paths = operationPaths(),
+			leases = join(config.extension_state, 'processes');
+		await fs.mkdir(leases, { recursive: true });
+		await fs.writeFile(
+			join(leases, `${client.pid}.json`),
+			JSON.stringify({ pid: client.pid, role: 'web' })
+		);
+		assert.equal(await connectedClients(config), 0, 'web UI leases are not assistants');
+		await fs.writeFile(
+			join(leases, `${client.pid}.json`),
+			JSON.stringify({ pid: client.pid, role: 'mcp' })
+		);
+		assert.equal(await connectedClients(config), 1);
+		const target = { kind: 'development', commit: 'd'.repeat(40), available: true },
+			fingerprint = await codeFingerprint(f.app),
+			checkId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+		await fs.mkdir(paths.root, { recursive: true });
+		await fs.writeFile(
+			paths.check,
+			JSON.stringify({
+				format: 'saturday.update-check',
+				version: 1,
+				id: checkId,
+				installation_id: config.installation_id,
+				checked_at: new Date().toISOString(),
+				local: { dirty: false, fingerprint },
+				target
+			})
+		);
+		await assert.rejects(
+			queueOperation('update', { check_id: checkId, confirm: true }),
+			/assistant is connected/
+		);
+		await assert.rejects(queueOperation('repair', {}), /assistant is connected.*then repair/);
+		assert.equal(operationStatus(), null, 'nothing was queued');
+		await fs.rm(join(leases, `${client.pid}.json`));
+
+		const id = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+		await fs.writeFile(
+			paths.status,
+			JSON.stringify({
+				format: 'saturday.operation',
+				version: 1,
+				id,
+				installation_id: config.installation_id,
+				pid: process.pid,
+				operation: 'update',
+				status: 'queued',
+				config,
+				selected: { local: { fingerprint }, target },
+				started_at: new Date().toISOString(),
+				log: join(paths.root, 'failed-update.log')
+			})
+		);
+		await executeOperation(id, {
+			copySource,
+			downloadSource: async () => {
+				throw Object.assign(Error('Stopped waiting for assistant disconnect.'), {
+					code: 'MCP_CONNECTED'
+				});
+			},
+			run: () => {},
+			resolveTarget: async () => target
+		});
+		const failed = operationStatus();
+		assert.equal(failed.status, 'failed', JSON.stringify(failed));
+		assert.equal(failed.error_code, 'MCP_CONNECTED');
+		assert.equal(existsSync(join(paths.root, `work-${id}`)), false, 'staging is removed');
+		assert.ok(existsSync(f.app), 'installed code is untouched');
+	} finally {
+		client.kill();
+		for (const key of Object.keys(process.env)) if (!(key in prior)) delete process.env[key];
+		Object.assign(process.env, prior);
+		await fs.rm(f.root, { recursive: true, force: true });
+	}
+});
+
+test('a main build moves to releases only when the release is a step forward', async () => {
+	const root = await fs.mkdtemp(join(tmpdir(), 'saturday-hold-'));
+	try {
+		const metadata = {
+			release: '0.2.0',
+			commit: sha,
+			storage: {
+				database: { currentVersion: 2 },
+				manifest: { version: 1 }
+			}
+		};
+		const installed = async (version, database = 1, manifest = 1) => {
+			await fs.writeFile(
+				join(root, 'package.json'),
+				JSON.stringify({
+					version,
+					saturday: {
+						storage: { database: { currentVersion: database }, manifest: { version: manifest } }
+					}
+				})
+			);
+			return { code_root: root, build: { commit: other } };
+		};
+		assert.equal(developmentHold({ build: { commit: null } }, metadata), null, 'fresh install');
+		assert.equal(developmentHold(await installed('0.1.9'), metadata), null, 'older main build');
+		assert.equal(developmentHold(await installed('0.2.0', 2), metadata), null, 'same version');
+		assert.match(developmentHold(await installed('0.2.1', 2), metadata), /newer than the latest/);
+		assert.match(developmentHold(await installed('0.1.9', 3), metadata), /newer storage format/);
+		assert.match(developmentHold(await installed('0.1.9', 1, 2), metadata), /newer storage/);
+		assert.match(
+			developmentHold({ code_root: root, build: { commit: sha } }, metadata),
+			/This build is release 0.2.0/
+		);
+	} finally {
+		await fs.rm(root, { recursive: true, force: true });
 	}
 });

@@ -39,7 +39,11 @@ const {
 	setExtensionsEnabled
 } = localPlatform;
 import { ServiceError, ValidationError } from '$lib/server/validation.js';
-import { ownedRemovalTargets } from '$lib/server/installation-operations.js';
+import {
+	ownedRemovalTargets,
+	connectedClients,
+	CHECK_TTL_MS
+} from '$lib/server/installation-operations.js';
 import {
 	accessForm,
 	accessCookieName,
@@ -112,12 +116,22 @@ export async function load(event) {
 	const diagnostics = localPlatform.storageDiagnostics(fileSummary);
 	let installationOperation = null,
 		updateCheck = null,
+		updateCheckExpired = false,
+		assistantConnected = false,
 		installationError = null,
 		deleteDataPaths = [],
 		deletionUnavailable = null;
 	try {
 		installationOperation = operationStatus();
 		updateCheck = installedCheck();
+		updateCheckExpired = Boolean(
+			updateCheck?.checked_at && Date.now() - Date.parse(updateCheck.checked_at) > CHECK_TTL_MS
+		);
+		try {
+			assistantConnected = (await connectedClients(installation)) > 0;
+		} catch {
+			// Lease inspection is advisory; the controller still enforces disconnection.
+		}
 		deleteDataPaths = ownedRemovalTargets(installation, true);
 	} catch (e) {
 		deletionUnavailable = e.message;
@@ -150,6 +164,8 @@ export async function load(event) {
 		network: networkSummary(readAccessSettings(), Number(url.port || 80)),
 		installationOperation,
 		updateCheck,
+		updateCheckExpired,
+		assistantConnected,
 		installationError,
 		deleteDataPaths,
 		deletionUnavailable,
@@ -406,7 +422,9 @@ export const actions = {
 				check_id: String(values.get('check_id') || ''),
 				confirm: values.get('confirm') === 'true',
 				delete_data: deleteData,
-				retry_pdf: operation === 'repair'
+				retry_pdf: operation === 'repair',
+				// Settings updates wait for the assistant to disconnect after staging.
+				wait_for_disconnect: values.get('wait_for_disconnect') === 'true'
 			});
 			return { installationOperation: result };
 		} catch (e) {

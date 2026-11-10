@@ -95,6 +95,27 @@ test('installation operation admission blocks access changes and preserves the o
 			/queued or running/
 		);
 		assert.equal(await readFile(accessPath(), 'utf8'), before);
+		// A disconnect failure saved by an older build is finished, not active.
+		await atomicJson(paths.status, {
+			format: 'saturday.operation',
+			version: 1,
+			installation_id: getInstallation().installation_id,
+			status: 'waiting_for_disconnect',
+			error: 'Waiting for assistant disconnect.',
+			pid: process.pid
+		});
+		assert.equal(await withAccessChange(() => 'allowed'), 'allowed');
+		await atomicJson(paths.status, {
+			format: 'saturday.operation',
+			version: 1,
+			installation_id: getInstallation().installation_id,
+			status: 'recovery_required',
+			error: 'Publication interrupted.'
+		});
+		await assert.rejects(
+			withAccessChange(() => 'blocked'),
+			/queued or running/
+		);
 	}));
 
 test('password changes before source setup return actionable 409 without running the change', async () =>
