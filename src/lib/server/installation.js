@@ -1,7 +1,7 @@
 export const installationApiVersion = 1;
 
 // Installation identity and paths shared by scripts, web, CLI and MCP. No store initialization on read.
-import { existsSync, readFileSync, lstatSync } from 'node:fs';
+import { existsSync, readFileSync, lstatSync, statSync } from 'node:fs';
 import { resolve, dirname, join, sep, basename, win32, posix, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -116,6 +116,70 @@ const pathKeys = [
 	'extension_backups',
 	'logs'
 ];
+// Every recorded path is either a directory that setup creates, or a file/externally owned path.
+export const recordedDirectoryKeys = [
+	'data_root',
+	'files',
+	'files_state',
+	'database_backups',
+	'database_restore',
+	'file_backups',
+	'extension_state',
+	'extension_code',
+	'extension_backups',
+	'logs'
+];
+// Optional directories: recorded only for some installations. Never created eagerly, because a
+// failure to prepare the renderer must not fail the whole installation; the PDF step owns them.
+export const optionalDirectoryKeys = ['pdf_cache'];
+export const recordedNonDirectoryKeys = ['code_root', 'node_path', 'runtime_root', 'database'];
+/** Recorded path keys that are in neither list, so a new path cannot be forgotten. */
+export const unclassifiedPathKeys = () =>
+	pathKeys.filter(
+		(key) =>
+			!recordedDirectoryKeys.includes(key) &&
+			!optionalDirectoryKeys.includes(key) &&
+			!recordedNonDirectoryKeys.includes(key)
+	);
+/** Creates missing recorded directories (owner-only); existing ones and their contents are kept. */
+export async function ensureRecordedDirectories(value) {
+	// Required directories only. Optional ones such as pdf_cache are created by the step that needs
+	// them, so an unavailable renderer cannot abort setup or repair.
+	for (const key of recordedDirectoryKeys) {
+		const path = value[key];
+		const existing = await fs.stat(path).catch(() => null);
+		if (existing?.isDirectory()) continue;
+		if (existing || (await fs.lstat(path).catch(() => null)))
+			throw new Error(
+				`Installation ${key} (${path}) exists but is not a directory. Move it aside and repair; no data was changed.`
+			);
+		try {
+			await fs.mkdir(path, { recursive: true, mode: 0o700 });
+		} catch (e) {
+			throw new Error(
+				`Installation ${key} (${path}) could not be created (${e.code || e.message}). Check permissions and repair.`
+			);
+		}
+	}
+}
+/** Returns problems for recorded directories that are missing or not directories. */
+export function checkRecordedDirectories(value) {
+	const problems = unclassifiedPathKeys().map((key) => `${key} is not classified`);
+	// Optional directories are reported only when present; their absence is legitimate when PDF
+	// preparation was skipped or failed, and must not fail the installation.
+	for (const key of recordedDirectoryKeys) {
+		try {
+			if (!statSync(value[key]).isDirectory()) problems.push(`${key} is not a directory`);
+		} catch (e) {
+			problems.push(
+				e.code === 'ENOENT' || e.code === 'ENOTDIR'
+					? `${key} is missing`
+					: `${key} could not be inspected (${e.code || e.message})`
+			);
+		}
+	}
+	return problems;
+}
 export function validateInstallation(value) {
 	if (
 		value?.format !== 'saturday.installation' ||

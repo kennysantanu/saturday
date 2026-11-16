@@ -11,10 +11,6 @@ node_modules
 # Local data (SQLite database lives here)
 /data
 
-# Plans
-/plans
-/.agents
-
 # OS
 .DS_Store
 Thumbs.db
@@ -33,3 +29,8 @@ vite.config.ts.timestamp-*
 /extensions
 /src/lib/extensions.generated.js
 /src/lib/server/extensions.generated.js
+
+# Spec Kit
+.specify/
+specs/
+.agents/
