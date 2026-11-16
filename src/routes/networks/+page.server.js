@@ -18,7 +18,7 @@ export async function load({ url }) {
 			if (
 				filters[key]?.trim() &&
 				filters[key] !== 'all' &&
-				!(key === 'sort' && filters[key] === 'name')
+				!(key === 'sort' && filters[key] === 'latest_interaction')
 			)
 				params.set(key, filters[key].trim());
 		for (const id of filters.tag_ids) params.append('tag_ids', id);

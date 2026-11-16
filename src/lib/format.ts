@@ -1,4 +1,4 @@
-export { formatDate, daysBetween, relativeDay, formatReminder } from './dates.js';
+export { formatDate, daysBetween, relativeDay, formatReminder, formatAge } from './dates.js';
 
 /** The host of a link without "www.", or the original text when it is not a valid URL. */
 export function hostOf(url: string): string {

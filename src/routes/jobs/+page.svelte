@@ -121,9 +121,13 @@
 			filtered: data.chips.length > 0
 		}) + (data.totalPages > 1 ? ` · Page ${data.page} of ${data.totalPages}` : '')
 	);
+	// The Dashboard's milestone-history link applies only this filter; its chip is enough, so the
+	// panel stays collapsed. Any other advanced filter still opens it.
 	const advancedOpen = $derived(
-		data.chips.some((chip: { key: string }) => advancedKeys.includes(chip.key.split(':')[0])) ||
-			Object.keys(errors).some((key) => advancedKeys.includes(key))
+		data.chips.some((chip: { key: string }) => {
+			const key = chip.key.split(':')[0];
+			return key !== 'milestone_stage' && advancedKeys.includes(key);
+		}) || Object.keys(errors).some((key) => advancedKeys.includes(key))
 	);
 	const categoryGroups = $derived([
 		{
@@ -208,12 +212,7 @@
 				/>
 			</div>
 			<div class="filter-row-one">
-				<Field
-					id="status"
-					label="Status"
-					error={errors.view ?? errors.current_stage}
-					hint={statusLocked ? 'Milestone history includes active and closed jobs.' : undefined}
-				>
+				<Field id="status" label="Status" error={errors.view ?? errors.current_stage}>
 					{#snippet control(attrs)}
 						<NativeSelect
 							{...attrs}

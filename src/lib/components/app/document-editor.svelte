@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from 'svelte';
 	import { enhance, applyAction } from '$app/forms';
+	import type { SubmitFunction } from '@sveltejs/kit';
 	import { goto } from '$app/navigation';
 	import Download from '@lucide/svelte/icons/download';
 	import Pencil from '@lucide/svelte/icons/pencil';
@@ -12,7 +13,8 @@
 	import { formatBytes, formatDateTime } from '$lib/format';
 	import { toast } from '$lib/toast.svelte';
 	import { UnsavedChanges } from '$lib/unsaved.svelte';
-	import { visualMarkdownSupported, documentDesignations, fileType } from '$lib/file-types';
+	import { documentDesignations, fileType } from '$lib/file-types';
+	import { visualMarkdownBlocker } from '$lib/markdown-visual';
 	import PageHeader from './page-header.svelte';
 	import PageShell from './page-shell.svelte';
 	import Notice from './notice.svelte';
@@ -45,7 +47,41 @@
 	let MarkdownEditor = $state<any>(null);
 	const doc = $derived(data.document);
 	const isMarkdown = $derived((doc?.format ?? data.format ?? 'markdown') === 'markdown');
-	const supported = $derived(visualMarkdownSupported(content));
+	// Deciding whether the visual editor can hold a document means a full read-and-write round trip, so it
+	// runs once per revision: when a document opens, and (debounced) while the user types in the source
+	// view. Edits made in the visual editor never re-run it; that would be per keystroke and could eject the
+	// user from the editor mid-edit. The save below checks once more instead.
+	let gatedText = untrack(() => content);
+	let blocker = $state<string | null>(untrack(() => visualMarkdownBlocker(content)));
+	let saveBlocked = $state<string | null>(null);
+	let saveBlockedNote = $state<HTMLElement | null>(null);
+	let noticeKind = $state<'save' | 'copy' | 'switch'>('save');
+	// The visual editor, asked at save time whether the Markdown it writes would lose anything it shows.
+	let visualEditor = $state<{
+		saveBlocker(): string | null;
+		liveDoc(): object | null;
+		restoreDoc(json: unknown): boolean;
+	} | null>(null);
+	function regate() {
+		if (content === gatedText) return;
+		gatedText = content;
+		blocker = visualMarkdownBlocker(content);
+	}
+	const supported = $derived(blocker === null);
+	const blockedNote = $derived(
+		blocker
+			? `The visual editor can’t keep ${blocker}, so this document opens as Markdown source. Edit the source, or remove that formatting to use Visual.`
+			: ''
+	);
+	const status = $derived(
+		saveBlocked && noticeKind !== 'switch'
+			? 'Not saved yet'
+			: guard.dirty
+				? 'Unsaved changes'
+				: doc
+					? 'No changes yet'
+					: 'Not saved yet'
+	);
 	const editing = $derived(Boolean(data.edit && (!doc || doc.can_edit_text) && !data.textError));
 	const meta = $derived(
 		doc
@@ -54,9 +90,80 @@
 	);
 	$effect(() => {
 		content = form?.values?.content ?? data.content;
+		untrack(regate);
 		name = form?.values?.filename ?? (data.suggestedName || (data.document ? '' : 'Untitled'));
 		guard.dirty = !!form?.values && Object.hasOwn(form.values, 'content');
 	});
+	$effect(() => {
+		// In the source view, follow what is typed once the user pauses.
+		if (!source && supported) return;
+		const typed = content;
+		const timer = setTimeout(() => untrack(() => content === typed && regate()), 400);
+		return () => clearTimeout(timer);
+	});
+	// The visual editor writes Markdown back out. If that output is something it could not read again,
+	// keep the edits and move to the source view rather than save text that would not reopen as shown.
+	// What the live visual editor holds right now that its Markdown could not carry, or null when there is
+	// no live visual editor (source view, other formats) or nothing would be lost.
+	function liveLoss(): string | null {
+		return isMarkdown && supported && !source ? (visualEditor?.saveBlocker() ?? null) : null;
+	}
+	// Refuse an action that would commit or discard lossy visual edits, and say so while the edits are
+	// still live. 'save' and 'copy' report "Not saved yet"; 'switch' explains why Markdown is not shown.
+	function refuse(problem: string, kind: 'save' | 'copy' | 'switch') {
+		saveBlocked = problem;
+		noticeKind = kind;
+		void tick().then(() => saveBlockedNote?.querySelector<HTMLElement>('[role="alert"]')?.focus());
+	}
+	const guardedCopy: SubmitFunction = (input) => {
+		const problem = liveLoss();
+		if (problem) {
+			input.cancel();
+			refuse(problem, 'copy');
+			return;
+		}
+		saveBlocked = null;
+	};
+	function showMarkdown() {
+		const problem = liveLoss();
+		if (problem) return refuse(problem, 'switch');
+		saveBlocked = null;
+		source = true;
+	}
+	function showVisual() {
+		if (!source) return;
+		// The debounced gate may be behind what was just typed: decide on the text as it is now.
+		gatedText = content;
+		blocker = visualMarkdownBlocker(content);
+		if (blocker) return;
+		saveBlocked = null;
+		source = false;
+		void applyHeldDoc();
+	}
+	async function applyHeldDoc() {
+		const held = heldDoc;
+		heldDoc = null;
+		if (!held || held.content !== content) return;
+		await tick();
+		if (!visualEditor?.restoreDoc(held.doc)) heldDoc = held;
+	}
+	const guardedSave: SubmitFunction = (input) => {
+		if (isMarkdown && supported && !source) {
+			// First what the editor holds right now against what it would write for it (the written text
+			// alone cannot show what writing already changed), then the written text against the gate.
+			gatedText = content;
+			const problem = visualEditor?.saveBlocker() ?? visualMarkdownBlocker(content);
+			if (problem) {
+				input.cancel();
+				// Keep the visual editor mounted (and its undo history): the live document may be the only
+				// intact copy of what was typed. Nothing was saved: move to the notice that says why.
+				refuse(problem, 'save');
+				return;
+			}
+			blocker = null;
+		}
+		saveBlocked = null;
+	};
 	onMount(async () => {
 		MarkdownEditor = (await import('./markdown-editor.svelte')).default;
 		// A new document starts on its name, selected, so typing replaces "Untitled".
@@ -67,13 +174,28 @@
 		}
 	});
 	// ----- Drafts: kept in this browser so a refresh, crash or swipe-back does not lose work.
-	type Draft = { content: string; name: string; updatedAt: string | null; savedAt: number };
+	// `doc` is the visual editor's live document, kept only while it holds something its Markdown cannot
+	// carry (so `content` alone would restore a lossy copy). Older drafts have none and restore from `content`.
+	type Draft = {
+		content: string;
+		name: string;
+		updatedAt: string | null;
+		savedAt: number;
+		doc?: object;
+	};
 	const draftKey = $derived(
 		`saturday-draft:${data.scope}:${doc?.id ?? `new:${data.designation ?? ''}`}`
 	);
 	let draft = $state<Draft | null>(null);
 	let draftTimer: ReturnType<typeof setTimeout> | undefined;
 	let wasDirty = false;
+	// Bumped on every change to the live visual document, including ones that serialize to identical Markdown
+	// (which leave `content` and `dirty` untouched), so the draft is rewritten for them too.
+	let docRev = $state(0);
+	// A draft's live document restored while the source view was showing (the visual editor was not there to
+	// take it). Kept, with the Markdown it belongs to, so drafts keep carrying it and Visual applies it when the
+	// user returns, as long as the Markdown was not edited in the meantime (then the source edits win).
+	let heldDoc: { doc: object; content: string } | null = null;
 	const readDraft = (): Draft | null => {
 		try {
 			const raw = localStorage.getItem(draftKey);
@@ -98,6 +220,8 @@
 				updatedAt: doc?.updated_at ?? null,
 				savedAt: Date.now()
 			};
+			if (liveLoss()) value.doc = visualEditor?.liveDoc() ?? undefined;
+			else if (heldDoc && heldDoc.content === content) value.doc = heldDoc.doc;
 			localStorage.setItem(draftKey, JSON.stringify(value));
 		} catch {
 			/* Quota or privacy mode: skip silently. */
@@ -111,7 +235,7 @@
 			!saved ||
 			saved.updatedAt !== (doc?.updated_at ?? null) ||
 			Date.now() - saved.savedAt > 14 * 24 * 3600 * 1000 ||
-			saved.content === (data.content ?? '');
+			(saved.content === (data.content ?? '') && !saved.doc);
 		if (stale) {
 			if (saved) clearDraft();
 			draft = null;
@@ -123,20 +247,39 @@
 			wasDirty = true;
 			content;
 			name;
+			docRev;
 			clearTimeout(draftTimer);
 			draftTimer = setTimeout(writeDraft, 600);
 		} else if (wasDirty) {
 			// A successful save cleans the form: the draft has served its purpose.
 			wasDirty = false;
+			heldDoc = null;
 			clearDraft();
 		}
 	});
-	function restoreDraft() {
+	async function restoreDraft() {
 		if (!draft) return;
+		const live = draft.doc;
 		content = draft.content;
+		// Re-gate on the restored text now, not on the debounce: while Visual is active the cached gate
+		// still describes the old text, and the visual parser would silently drop what it cannot hold.
+		gatedText = content;
+		blocker = visualMarkdownBlocker(content);
+		if (blocker) {
+			source = true;
+			saveBlocked = null;
+		}
 		if (!doc) name = draft.name;
 		guard.markDirty();
 		draft = null;
+		// Put the exact live document back when the visual editor is showing; otherwise the Markdown stands.
+		if (live && !source && supported && isMarkdown) {
+			await tick();
+			visualEditor?.restoreDoc(live);
+		} else if (live && isMarkdown) {
+			// Source view (or not yet visual-safe): hold the JSON; see heldDoc.
+			heldDoc = { doc: live, content };
+		}
 	}
 	function discardDraft() {
 		clearDraft();
@@ -206,9 +349,7 @@
 
 {#snippet barActions()}
 	<div class="editor-bar-actions">
-		<span class="editor-status" role="status"
-			>{guard.dirty ? 'Unsaved changes' : doc ? 'No changes yet' : 'Not saved yet'}</span
-		>
+		<span class="editor-status" role="status">{status}</span>
 		<Button href={data.returnTo ?? (doc ? `${data.base}/${doc.id}` : data.base)} variant="ghost"
 			>Cancel</Button
 		>
@@ -231,10 +372,10 @@
 			type="button"
 			aria-pressed={!source && supported}
 			disabled={!supported}
-			title={supported ? undefined : 'This document uses formatting the visual editor cannot keep.'}
-			onclick={() => (source = false)}>Visual</button
+			title={supported ? undefined : blockedNote}
+			onclick={showVisual}>Visual</button
 		>
-		<button type="button" aria-pressed={source || !supported} onclick={() => (source = true)}
+		<button type="button" aria-pressed={source || !supported} onclick={showMarkdown}
 			>Markdown</button
 		>
 	</div>
@@ -334,11 +475,32 @@
 		</Notice>
 	{/if}
 	{#if editing}
+		{#if saveBlocked}
+			<div bind:this={saveBlockedNote}>
+				{#if noticeKind === 'switch'}
+					<Notice tone="error" title="Can’t show Markdown yet">
+						Your edits can’t be written as Markdown exactly as they appear ({saveBlocked}), so the
+						visual editor stays open and nothing was changed. Undo the last edit, then switch.
+					</Notice>
+				{:else if noticeKind === 'copy'}
+					<Notice tone="error" title="Not saved yet">
+						The visual editor can’t write this document back exactly as it appears ({saveBlocked}),
+						so no copy was saved. Undo the last edit, then save the copy again.
+					</Notice>
+				{:else}
+					<Notice tone="error" title="Not saved yet">
+						The visual editor can’t write this document back exactly as it appears ({saveBlocked}),
+						so nothing was saved. Your edits are still in the editor: undo the last edit, then save
+						again.
+					</Notice>
+				{/if}
+			</div>
+		{/if}
 		<form
 			id="document-form"
 			method="POST"
 			action="?/save"
-			use:enhance={guard.enhance}
+			use:enhance={guard.enhanceAfter(guardedSave)}
 			class="space-y-5"
 		>
 			<input type="hidden" name="designation" value={data.designation ?? ''} />
@@ -367,17 +529,18 @@
 			{/if}
 			{#if isMarkdown && supported && !source && MarkdownEditor}
 				<MarkdownEditor
+					bind:this={visualEditor}
 					value={content}
 					toolbarEnd={barEnd}
 					onchange={(value: string, changed: boolean) => {
 						content = value;
+						docRev++;
 						if (changed) guard.markDirty();
 					}}
 				/><input type="hidden" name="content" value={content} />
 			{:else}
-				{#if isMarkdown && !supported}<p class="text-sm text-muted-foreground">
-						This document uses formatting outside the basic visual editor. Edit its Markdown source
-						to preserve it.
+				{#if isMarkdown && !supported}<p class="text-sm text-muted-foreground" role="status">
+						{blockedNote}
 					</p>{/if}
 				<div class="editor-card">
 					<div class="editor-sticky">
@@ -410,7 +573,7 @@
 			{/if}
 			<div class="editor-actionbar">
 				<p class="text-sm text-muted-foreground" role="status">
-					{guard.dirty ? 'Unsaved changes' : doc ? 'No changes yet' : 'Not saved yet'}
+					{status}
 				</p>
 				<div class="flex items-center gap-2">
 					<Button
@@ -430,9 +593,7 @@
 					class="disclosure-body space-y-3"
 					method="POST"
 					action="?/saveCopy"
-					use:enhance={withPending(undefined, () => {
-						guard.saving = false;
-					})}
+					use:enhance={guard.enhanceAfter(guardedCopy)}
 				>
 					<input type="hidden" name="content" value={content} />
 					<Field id="copy_filename" label="New filename" required>
@@ -443,9 +604,7 @@
 								value={doc ? `copy-${doc.filename}` : 'draft.md'}
 							/>{/snippet}
 					</Field>
-					<Button type="submit" variant="outline" onclick={() => (guard.saving = true)}
-						>Save as copy</Button
-					>
+					<Button type="submit" variant="outline">Save as copy</Button>
 				</form>
 			</details>
 		{/if}
@@ -468,7 +627,10 @@
 	{:else if isMarkdown && doc?.can_read_text && !data.textError}{#if supported && MarkdownEditor}<MarkdownEditor
 				value={content}
 				readonly
-			/>{:else}<pre class="inset-surface overflow-auto p-4 whitespace-pre-wrap">{content}</pre>{/if}
+			/>{:else}{#if blocker}<p class="mb-2 text-sm text-muted-foreground" role="status">
+					Shown as source: {blockedNote}
+				</p>{/if}
+			<pre class="inset-surface overflow-auto p-4 whitespace-pre-wrap">{content}</pre>{/if}
 	{:else if doc?.format === 'text' && doc.can_read_text && !data.textError}<pre
 			class="inset-surface overflow-auto p-4 whitespace-pre-wrap">{content}</pre>
 	{:else}<Notice

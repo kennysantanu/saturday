@@ -4,10 +4,25 @@
 
 Not yet released. Database schema 1 and file manifest 1 are unchanged.
 
+### Lists and sorting
+
+- Network lists people by their latest recorded interaction by default, with people who have no interaction last.
+- Documents lists files by recently updated by default.
+- Dashboard board cards are ordered by the job's latest update, and a reminder change now counts as job activity.
+- Stage age on board cards reads in days under a month, then months, then years (5d, 3mo, 1y).
+
+### Documents and editing
+
+- Markdown files with a pipe in ordinary text or a horizontal rule now open in the visual editor instead of source mode. Tables and task lists (`- [ ]` checkboxes) now open in the visual editor too, and are saved back as the same Markdown tables and checkboxes. Before a Markdown file opens visually, Saturday now reads and rewrites it exactly as the visual editor would and compares the result, so a file the editor would change (a checkbox item with a wrapped second line, extra spaces inside code in a table cell, a table row the editor reads differently) stays in source mode instead of being altered. Documents with raw HTML, images, link or footnote definitions, or headings underlined with `---` or `===` also open in source mode, and the page says which construct is the reason. Saving from the visual editor is refused, with your edits kept, if the result would not read back.
+
 ### Installation and PDF setup
 
 - Setup recovers from an interrupted Chrome download. A half-finished version folder that Puppeteer refuses to reuse is renamed aside with an `.incomplete-` suffix under the installation's cache instead of blocking PDF export; nothing is deleted, so you can remove the leftover folder yourself.
 - Setup now creates every folder its descriptor records, so a fresh installation no longer points at an extension folder that does not exist.
+
+### Dashboard and Jobs
+
+- Opening Milestone history from the Dashboard no longer expands Advanced filters; other advanced filters still do.
 
 ## Saturday 0.1.2
 

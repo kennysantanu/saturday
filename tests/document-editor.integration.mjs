@@ -7,7 +7,12 @@ import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import puppeteer from 'puppeteer';
-import { createDocument, listDocuments } from '../src/lib/server/files/documents.js';
+import {
+	createDocument,
+	editDocument,
+	getDocument,
+	listDocuments
+} from '../src/lib/server/files/documents.js';
 
 test('document editor: no false unsaved state, formatting, Ctrl+S, rename in place and a ready New document form', async (t) => {
 	if (!existsSync(await puppeteer.executablePath())) return t.skip('Managed Chrome is required.');
@@ -27,12 +32,17 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 			(_, i) => `Paragraph ${i} with some words to fill a line.`
 		).join('\n\n')
 	});
+	const tableText = '| a | b |\n| --- | --- |\n| `x y` | z |\n';
+	await createDocument({ filename: 'table.md', content: tableText });
+	await createDocument({ filename: 'copy.md', content: tableText });
 	await createDocument({
 		filename: 'letter.html',
 		content: '<!doctype html>\n<html><body><h1>Cover</h1><p>Dear hiring manager</p></body></html>\n'
 	});
 	const docs = (await listDocuments({})).documents;
 	const id = docs.find((d) => d.filename === 'resume.md').id;
+	const tableId = docs.find((d) => d.filename === 'table.md').id;
+	const copyId = docs.find((d) => d.filename === 'copy.md').id;
 	const longId = docs.find((d) => d.filename === 'long.md').id;
 	const socket = createServer();
 	await new Promise((r) => socket.listen(0, '127.0.0.1', r));
@@ -250,6 +260,227 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		// One tab stop in the toolbar; arrow keys move within it.
 		assert.equal(await page.$$eval('.editor-toolbar [tabindex="0"]', (e) => e.length), 1);
 		assert.deepEqual(errors, []);
+		// A space typed inside code in a table cell would be squeezed out on save. Save is refused, the
+		// stored file is untouched, and the "Not saved yet" notice appears and takes focus.
+		await page.setViewport({ width: 1100, height: 900 });
+		await page.goto(`${base}/documents/${tableId}?edit=1`, { waitUntil: 'networkidle0' });
+		await page.waitForSelector('.markdown-editor .document-prose td code');
+		await new Promise((r) => setTimeout(r, 400));
+		await page.click('.markdown-editor .document-prose td code');
+		await page.keyboard.press('Home');
+		await page.keyboard.press('ArrowRight');
+		await page.keyboard.type(' ');
+		assert.equal(await page.$eval('.document-prose td code', (e) => e.textContent), 'x  y');
+		await page.keyboard.down('Control');
+		await page.keyboard.press('s');
+		await page.keyboard.up('Control');
+		const notice = await page.waitForSelector('[role="alert"]');
+		assert.match(await notice.evaluate((e) => e.textContent), /Not saved yet/);
+		// The refused save must not unmount the live editor: it holds the only intact copy of the edit.
+		assert.equal(
+			await page.$('#document_content'),
+			null,
+			'the source view did not replace the editor'
+		);
+		assert.equal(
+			await page.$eval('.document-prose td code', (e) => e.textContent),
+			'x  y',
+			'the edit is still in the visual editor'
+		);
+		assert.equal(
+			await page.evaluate(() => document.activeElement?.getAttribute('role')),
+			'alert',
+			'focus moves to the notice'
+		);
+		assert.equal(await status(), 'Not saved yet');
+		assert.equal(new URL(page.url()).pathname, `/documents/${tableId}`);
+		assert.equal(
+			(await listDocuments({})).documents.find((d) => d.id === tableId).size,
+			tableText.length,
+			'the stored file was not rewritten'
+		);
+		// The notice does not block the editor: correct the edit in place and save again.
+		await page.click('.markdown-editor .document-prose td code');
+		await page.keyboard.press('Home');
+		await page.keyboard.press('ArrowRight');
+		await page.keyboard.press('ArrowRight');
+		await page.keyboard.press('Backspace');
+		assert.equal(await page.$eval('.document-prose td code', (e) => e.textContent), 'x y');
+		await page.keyboard.down('Control');
+		await page.keyboard.press('s');
+		await page.keyboard.up('Control');
+		await page.waitForFunction(() => !new URL(location.href).searchParams.has('edit'), {
+			timeout: 10000
+		});
+		assert.equal(
+			await page.evaluate(() => document.body.innerText.includes('Not saved yet')),
+			false,
+			'recovered save shows no refusal notice'
+		);
+		const recovered = (await getDocument({ id: tableId, include_content: true })).content;
+		assert.match(recovered, /`x y`/, 'the corrected edit was saved');
+		assert.doesNotMatch(recovered, /x {2}y/);
+		// Put the original bytes back so the scenarios below start from the same file.
+		const after = await getDocument({ id: tableId });
+		await editDocument({ id: tableId, token: after.token, content: tableText });
+		// Bypass 1: switching to Markdown must not destroy lossy live edits and then let source save them.
+		// Pages left with unsaved edits ask before leaving; accept so each scenario starts fresh.
+		page.on('dialog', (dialog) => dialog.accept());
+		// Type the extra space inside the code span; retry in case the editor was still settling.
+		const typeCodeSpace = async () => {
+			for (let attempt = 0; attempt < 5; attempt++) {
+				await new Promise((r) => setTimeout(r, 500));
+				await page.click('.markdown-editor .document-prose td code');
+				await page.keyboard.press('Home');
+				await page.keyboard.press('ArrowRight');
+				await page.keyboard.type(' ');
+				if ((await page.$eval('.document-prose td code', (e) => e.textContent)) === 'x  y') return;
+			}
+			assert.fail('could not type the extra space inside the code span');
+		};
+		const lossyEdit = async (docId) => {
+			await page.goto(`${base}/documents/${docId}?edit=1`, { waitUntil: 'networkidle0' });
+			await page.waitForSelector('.markdown-editor .document-prose td code');
+			await typeCodeSpace();
+		};
+		const stored = async (docId) =>
+			(await listDocuments({})).documents.find((d) => d.id === docId).size;
+		await lossyEdit(tableId);
+		await page.locator('.segmented button::-p-text(Markdown)').click();
+		const switchNotice = await page.waitForSelector('[role="alert"]');
+		assert.match(await switchNotice.evaluate((e) => e.textContent), /Can’t show Markdown yet/);
+		assert.equal(await page.$('#document_content'), null, 'the visual editor was not discarded');
+		assert.equal(await page.$eval('.document-prose td code', (e) => e.textContent), 'x  y');
+		assert.equal(await stored(tableId), tableText.length, 'nothing was saved');
+		// Crash: the draft keeps the live document, so the lossy edit (and its exact text) survives a reload,
+		// and a draft whose Markdown equals the stored file is not discarded as "no changes".
+		await new Promise((r) => setTimeout(r, 1000));
+		await page.goto(`${base}/documents/${tableId}?edit=1`, { waitUntil: 'networkidle0' });
+		await page.waitForFunction(() =>
+			document.body.innerText.includes('Restore your unsaved draft')
+		);
+		await page.waitForSelector('.markdown-editor .document-prose td code');
+		await page.locator('button::-p-text(Restore draft)').click();
+		await page.waitForFunction(
+			() => document.querySelector('.document-prose td code')?.textContent === 'x  y',
+			{ timeout: 5000 }
+		);
+		// Path 2: an edit that serializes to the same Markdown still reschedules the draft write.
+		await new Promise((r) => setTimeout(r, 1000));
+		await page.evaluate(() => localStorage.clear());
+		await page.click('.markdown-editor .document-prose td code');
+		await page.keyboard.press('Home');
+		await page.keyboard.press('ArrowRight');
+		await page.keyboard.type(' ');
+		await page.waitForFunction(
+			() => document.querySelector('.document-prose td code')?.textContent === 'x   y',
+			{ timeout: 5000 }
+		);
+		await new Promise((r) => setTimeout(r, 1200));
+		assert.match(
+			await page.evaluate(() => JSON.stringify(Object.values(localStorage))),
+			/x {3}y/,
+			'a change invisible in Markdown still rewrote the draft'
+		);
+		// Path 1: restoring a draft with live JSON while in source view keeps that JSON for Visual and for later drafts.
+		await page.goto(`${base}/documents/${tableId}?edit=1`, { waitUntil: 'networkidle0' });
+		await page.waitForFunction(() =>
+			document.body.innerText.includes('Restore your unsaved draft')
+		);
+		await page.waitForSelector('.markdown-editor .document-prose');
+		await page.locator('.segmented button::-p-text(Markdown)').click();
+		await page.waitForSelector('#document_content');
+		await page.locator('button::-p-text(Restore draft)').click();
+		await new Promise((r) => setTimeout(r, 1200));
+		assert.match(
+			await page.evaluate(() => JSON.stringify(Object.values(localStorage))),
+			/x {3}y/,
+			'the draft kept its live document through a source-mode restore'
+		);
+		await page.$eval('.segmented button:first-child', (e) => e.click());
+		await page.waitForFunction(
+			() => document.querySelector('.document-prose td code')?.textContent === 'x   y',
+			{ timeout: 5000 }
+		);
+		// Bypass 2: the save-as-copy form runs the same guard. A conflict makes the copy form appear.
+		await page.goto(`${base}/documents/${copyId}?edit=1`, { waitUntil: 'networkidle0' });
+		await page.waitForSelector('.markdown-editor .document-prose td code');
+		await new Promise((r) => setTimeout(r, 400));
+		const current = await getDocument({ id: copyId });
+		await editDocument({ id: copyId, token: current.token, content: `${tableText}\nChanged.\n` });
+		await page.click('.markdown-editor .document-prose td:last-child');
+		await page.keyboard.type('q');
+		await page.keyboard.down('Control');
+		await page.keyboard.press('s');
+		await page.keyboard.up('Control');
+		await page.waitForSelector('form[action="?/saveCopy"]');
+		await page.waitForFunction(() => document.body.innerText.includes('changed elsewhere'));
+		await page.waitForSelector('.markdown-editor .document-prose td code');
+		await typeCodeSpace();
+		await page.click('form[action="?/saveCopy"] button[type="submit"]');
+		await page.waitForFunction(() =>
+			[...document.querySelectorAll('[role="alert"]')].some((e) =>
+				e.textContent.includes('no copy was saved')
+			)
+		);
+		assert.equal(
+			(await listDocuments({})).documents.some((d) => d.filename === 'copy-copy.md'),
+			false,
+			'no copy was written'
+		);
+		// A refused copy is not a save in flight: the button is live and leaving still asks first.
+		assert.equal(
+			await page.$eval('.editor-bar button[type="submit"]', (e) => e.textContent.trim()),
+			'Save',
+			'the save button does not claim a save is running'
+		);
+		let leavePrompted = false;
+		const noteLeave = (dialog) => {
+			if (dialog.type() === 'beforeunload') leavePrompted = true;
+		};
+		page.on('dialog', noteLeave);
+		await page.goto(`${base}/documents/${tableId}?edit=1`, { waitUntil: 'networkidle0' });
+		page.off('dialog', noteLeave);
+		assert.equal(leavePrompted, true, 'leaving after a refused copy still prompts');
+		// Restore: a draft the visual editor cannot hold must not be loaded into it.
+		await page.waitForSelector('.markdown-editor .document-prose');
+		await new Promise((r) => setTimeout(r, 400));
+		await page.evaluate(() => localStorage.clear());
+		await page.locator('.segmented button::-p-text(Markdown)').click();
+		await page.waitForSelector('#document_content');
+		await page.click('#document_content');
+		await page.keyboard.down('Control');
+		await page.keyboard.press('a');
+		await page.keyboard.up('Control');
+		await page.keyboard.type('Draft title\n===');
+		await new Promise((r) => setTimeout(r, 1000));
+		await page.goto(`${base}/documents/${tableId}?edit=1`, { waitUntil: 'networkidle0' });
+		await page.waitForFunction(() =>
+			document.body.innerText.includes('Restore your unsaved draft')
+		);
+		await page.waitForSelector('.markdown-editor .document-prose');
+		await page.locator('button::-p-text(Restore draft)').click();
+		await page.waitForSelector('#document_content');
+		assert.equal(await page.$('.markdown-editor'), null, 'visual mode was not kept');
+		assert.match(await page.$eval('#document_content', (e) => e.value), /Draft title\n===/);
+		assert.match(await page.$eval('p[role="status"]', (e) => e.textContent), /headings underlined/);
+		await page.evaluate(() => localStorage.clear());
+		// Bypass 3: Visual pressed inside the 400 ms debounce must re-check the text as typed now.
+		await page.goto(`${base}/documents/${tableId}?edit=1`, { waitUntil: 'networkidle0' });
+		await page.waitForSelector('.markdown-editor .document-prose');
+		await new Promise((r) => setTimeout(r, 400));
+		await page.locator('.segmented button::-p-text(Markdown)').click();
+		await page.waitForSelector('#document_content');
+		await page.click('#document_content');
+		await page.keyboard.down('Control');
+		await page.keyboard.press('a');
+		await page.keyboard.up('Control');
+		await page.keyboard.type('Title\n===');
+		await page.$eval('.segmented button:first-child', (e) => e.click());
+		await new Promise((r) => setTimeout(r, 100));
+		assert.notEqual(await page.$('#document_content'), null, 'stayed in the source view');
+		assert.equal(await page.$('.markdown-editor'), null, 'visual mode was not entered');
+		assert.match(await page.$eval('p[role="status"]', (e) => e.textContent), /headings underlined/);
 	} finally {
 		await browser?.close();
 		child.kill();

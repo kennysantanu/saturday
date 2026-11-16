@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
+import { defaultDocumentSort, documentSorts } from '../src/lib/file-types.js';
 
 const root = await mkdtemp(join(tmpdir(), 'saturday-doc-filters-'));
 process.env.SATURDAY_FILES_PATH = join(root, 'files');
@@ -20,7 +21,7 @@ test('document list filters by type and sorts by name, update time and size', as
 	await d.uploadDocument({ filename: 'scan.png', stream: Readable.from([Buffer.alloc(500)]) });
 	await d.uploadDocument({ filename: 'data.bin', stream: Readable.from([Buffer.alloc(5)]) });
 
-	assert.deepEqual(names(await d.listDocuments()), [
+	assert.deepEqual(names(await d.listDocuments({ sort: 'name' })), [
 		'a-letter.md',
 		'b-notes.md',
 		'c-page.html',
@@ -46,4 +47,17 @@ test('document list filters by type and sorts by name, update time and size', as
 
 	await assert.rejects(d.listDocuments({ type: 'nope' }), { code: 'VALIDATION' });
 	await assert.rejects(d.listDocuments({ sort: 'nope' }), { code: 'VALIDATION' });
+});
+
+test('document list defaults to recently updated, newest first', async () => {
+	await d.createDocument({ filename: 'zz-first.md', content: 'x' });
+	await new Promise((resolve) => setTimeout(resolve, 5));
+	await d.createDocument({ filename: 'zz-second.md', content: 'x' });
+	assert.deepEqual(names(await d.listDocuments({ query: 'zz-' })), ['zz-second.md', 'zz-first.md']);
+	assert.deepEqual(names(await d.listDocuments({ query: 'zz-', sort: 'name' })), [
+		'zz-first.md',
+		'zz-second.md'
+	]);
+	assert.equal(defaultDocumentSort, 'updated');
+	assert.deepEqual(documentSorts.map((option) => option.value).sort(), ['name', 'size', 'updated']);
 });

@@ -28,6 +28,11 @@ function scope(db, input) {
 		throw new ServiceError('Reminder owner was not found.', 'not_found');
 	return { column, id };
 }
+// A job's reminders are part of the job's activity: touching one is a job update.
+function touchJob(db, column, jobId) {
+	if (column === 'job_id')
+		db.prepare('UPDATE jobs SET updated_at=? WHERE id=?').run(new Date().toISOString(), jobId);
+}
 const fromRow = (row) => ({ ...row, is_active: Boolean(row.is_active) });
 function entry(db, input) {
 	const { column, id } = scope(db, input),
@@ -47,6 +52,7 @@ export function insertReminder(db, input, createdVia = 'manual') {
 			`INSERT INTO reminders(${column},scheduled_at,note,created_via,created_at,updated_at) VALUES(?,?,?,?,?,?)`
 		)
 		.run(id, values.scheduled_at, values.note, via, stamp, stamp);
+	touchJob(db, column, id);
 	return fromRow(db.prepare('SELECT * FROM reminders WHERE id=?').get(result.lastInsertRowid));
 }
 export function createReminder(input, createdVia = 'manual') {
@@ -95,11 +101,11 @@ export function editReminder(input) {
 			});
 			const stamp = new Date().toISOString(),
 				dismissed = values.is_active ? null : (previous.dismissed_at ?? stamp);
-			if (
+			const changed =
 				values.scheduled_at !== previous.scheduled_at ||
 				values.note !== previous.note ||
-				Number(values.is_active) !== previous.is_active
-			)
+				Number(values.is_active) !== previous.is_active;
+			if (changed) {
 				db.prepare(
 					'UPDATE reminders SET scheduled_at=?,note=?,is_active=?,dismissed_at=?,updated_at=? WHERE id=?'
 				).run(
@@ -110,6 +116,9 @@ export function editReminder(input) {
 					stamp,
 					previous.id
 				);
+				// Only a real change is job activity; saving identical values must not reorder Jobs.
+				if (previous.job_id) touchJob(db, 'job_id', previous.job_id);
+			}
 			return fromRow(db.prepare('SELECT * FROM reminders WHERE id=?').get(previous.id));
 		})
 	);
@@ -124,6 +133,7 @@ export function deleteReminder(input) {
 		inTransaction(db, () => {
 			const previous = entry(db, input);
 			db.prepare('DELETE FROM reminders WHERE id=?').run(previous.id);
+			if (previous.job_id) touchJob(db, 'job_id', previous.job_id);
 			return { reminder_id: previous.id, deleted: true };
 		})
 	);

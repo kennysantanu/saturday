@@ -508,3 +508,23 @@ test('failed coordinated file publication recovers the replaced Network state', 
 	});
 	assert.deepEqual(contents(), before);
 });
+
+test('network list defaults to latest recorded interaction, empty last, name as tiebreaker', () => {
+	const old = n.createNetwork({ name: 'Zed Old' });
+	const recent = n.createNetwork({ name: 'Yan Recent' });
+	const tieB = n.createNetwork({ name: 'Bea Tie' });
+	const tieA = n.createNetwork({ name: 'Abe Tie' });
+	const none = n.createNetwork({ name: 'Aaron None' });
+	const log = (person, date) =>
+		n.addNetworkUpdate({ network_id: person.id, interaction_date: date, note: 'Spoke' });
+	log(old, '2000-01-01');
+	log(recent, '2000-03-01');
+	log(tieB, '2000-02-01');
+	log(tieA, '2000-02-01');
+	const ids = n.listNetworks({}).networks.map((x) => x.id);
+	assert.deepEqual(ids, [recent.id, tieA.id, tieB.id, old.id, none.id]);
+	assert.deepEqual(
+		n.listNetworks({ sort: 'name' }).networks.map((x) => x.id),
+		[none.id, tieA.id, tieB.id, recent.id, old.id]
+	);
+});

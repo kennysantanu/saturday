@@ -125,7 +125,7 @@ export function listNetworks(input = {}) {
 				name: '',
 				follow_up: `${nextReminderSql('n', 'network_id')} IS NULL, ${nextReminderSql('n', 'network_id')}, `,
 				latest_interaction: 'latest_interaction_date IS NULL, latest_interaction_date DESC, '
-			}[filters.sort] + 'n.name COLLATE NOCASE, n.id';
+			}[filters.sort ?? 'latest_interaction'] + 'n.name COLLATE NOCASE, n.id';
 		const { rows, ...pagination } = pageRows(
 			db,
 			select + from + clause,

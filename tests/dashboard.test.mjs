@@ -18,6 +18,8 @@ import {
 	archiveWorkflowStage,
 	reorderWorkflowStage
 } from '../src/lib/server/local/workflow.js';
+import { createReminder, editReminder, deleteReminder } from '../src/lib/server/local/reminders.js';
+import { correctJobUpdate } from '../src/lib/server/local/jobs.js';
 import { pipelineHref, pipelinePage } from '../src/lib/job-pipeline.js';
 import { jobReturn } from '../src/lib/job-navigation.js';
 
@@ -155,4 +157,49 @@ test('a board read failure is exposed separately while sibling sections stay ava
 	assert.equal(data.stats.active, 1);
 	assert.equal(data.stages[0].history_count, 1);
 	assert.equal(data.errors.history, undefined);
+});
+
+test('pipeline cards order by last job update, including history and reminder changes', () => {
+	const [a, b, c] = ['A', 'B', 'C'].map((title) => job(title).id);
+	const order = () =>
+		getDashboardStats()
+			.pipeline.find((s) => s.name === 'New')
+			.jobs.map((j) => j.id);
+	// Reset to a known order (C newest) before each change so only that change can reorder.
+	const reset = () =>
+		withDatabase((db) => {
+			for (const [id, day] of [
+				[a, 1],
+				[b, 2],
+				[c, 3]
+			])
+				db.prepare('UPDATE jobs SET updated_at=? WHERE id=?').run(
+					`2020-01-0${day}T00:00:00.000Z`,
+					id
+				);
+		});
+	const reminderFor = (id) => createReminder({ job_id: id, scheduled_at: '2099-01-01T09:00' });
+	reset();
+	assert.deepEqual(order(), [c, b, a]);
+	const entry = addJobUpdate({ job_id: a, stage_id: stage('New').id, event_date: '2020-01-05' });
+	assert.deepEqual(order(), [a, c, b], 'a new history entry moves the job first');
+	reset();
+	correctJobUpdate(entry.id, { job_id: a, note: 'edited' });
+	assert.deepEqual(order(), [a, c, b], 'a history correction moves the job first');
+	reset();
+	const reminder = reminderFor(b);
+	assert.deepEqual(order(), [b, c, a], 'a new reminder moves the job first');
+	// Create A's reminder BEFORE the reset, so the edit is provably what moves it first.
+	const editTarget = reminderFor(a);
+	reset();
+	assert.notEqual(order()[0], a, 'A is not first before the edit');
+	editReminder({ job_id: a, reminder_id: editTarget.id, note: 'changed' });
+	assert.equal(order()[0], a, 'an edited reminder moves the job first');
+	reset();
+	// Saving identical values is not activity and must not reorder.
+	editReminder({ job_id: b, reminder_id: reminder.id, scheduled_at: '2099-01-01T09:00' });
+	assert.notEqual(order()[0], b, 'an unchanged reminder save must not move the job');
+	reset();
+	deleteReminder({ job_id: b, reminder_id: reminder.id, confirm: true });
+	assert.equal(order()[0], b, 'a deleted reminder moves the job first');
 });

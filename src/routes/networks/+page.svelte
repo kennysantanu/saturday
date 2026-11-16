@@ -106,7 +106,7 @@
 					{#snippet control(attrs)}<NativeSelect
 							{...attrs}
 							name="sort"
-							value={data.filters.sort ?? 'name'}
+							value={data.filters.sort ?? 'latest_interaction'}
 							data-instant
 						>
 							<option value="name">Name</option>

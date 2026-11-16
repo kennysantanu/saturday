@@ -73,9 +73,11 @@
 	"dependencies": {
 		"@modelcontextprotocol/server": "^2.4.0",
 		"@tiptap/core": "^3.31.4",
+		"@tiptap/extension-table": "3.31.4",
 		"@tiptap/markdown": "^3.31.4",
 		"@tiptap/pm": "^3.31.4",
 		"@tiptap/starter-kit": "^3.31.4",
+		"marked": "^17.0.6",
 		"puppeteer": "^25.16.0",
 		"yauzl": "^3.4.0",
 		"yazl": "^3.3.1",
