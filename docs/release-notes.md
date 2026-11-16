@@ -1,8 +1,17 @@
 # Saturday release notes
 
-## Saturday 0.1.2 — in development
+## Saturday 0.1.3 — in development
 
-Not yet released. These changes make updating safer and easier to follow. Database schema 1 and file manifest 1 are unchanged.
+Not yet released. Database schema 1 and file manifest 1 are unchanged.
+
+### Installation and PDF setup
+
+- Setup recovers from an interrupted Chrome download. A half-finished version folder that Puppeteer refuses to reuse is renamed aside with an `.incomplete-` suffix under the installation's cache instead of blocking PDF export; nothing is deleted, so you can remove the leftover folder yourself.
+- Setup now creates every folder its descriptor records, so a fresh installation no longer points at an extension folder that does not exist.
+
+## Saturday 0.1.2
+
+These changes made updating safer and easier to follow. Database schema 1 and file manifest 1 are unchanged.
 
 ### Updates
 

@@ -14,11 +14,14 @@ import {
 	installationEnvironment,
 	assertInstallationStorage,
 	atomicJson,
-	acquireDirectoryLock
+	acquireDirectoryLock,
+	ensureRecordedDirectories,
+	checkRecordedDirectories
 } from '../src/lib/server/installation.js';
 import { initializeAccessSettings } from '../src/lib/server/access-settings.js';
 import { storageCompatibility } from '../src/lib/server/compatibility.js';
 import { readBuildInfo } from './build-info.mjs';
+import { removeIncompleteChrome } from './pdf-cache.mjs';
 let json = process.argv.includes('--json'),
 	config,
 	path,
@@ -102,7 +105,7 @@ try {
 	}
 	Object.assign(process.env, installationEnvironment({ ...config, descriptor_path: path }));
 	assertInstallationStorage();
-	await fs.mkdir(config.logs, { recursive: true, mode: 0o700 });
+	await ensureRecordedDirectories(config);
 	const persist = () => atomicJson(path, config);
 	const command = (args) =>
 		new Promise((res, rej) => {
@@ -172,7 +175,22 @@ try {
 		'pdf',
 		values['skip-pdf'],
 		async () => {
-			await command([npm, 'run', 'setup:pdf']);
+			// An interrupted download leaves an empty version folder that Puppeteer refuses to reuse.
+			// During staging the descriptor has no pdf_cache yet, so fall back to the cache Puppeteer
+			// itself was pointed at through the environment.
+			// Only touch a cache we can attribute to this installation. Puppeteer may also read a
+			// configured cache directory we cannot see, so guessing would clean an unrelated one.
+			const cache = config.pdf_cache || process.env.PUPPETEER_CACHE_DIR;
+			const quarantined = await removeIncompleteChrome(cache);
+			for (const dir of quarantined)
+				say(`Moved incomplete Chrome download aside: ${dir} (delete it when convenient)`);
+			try {
+				await command([npm, 'run', 'setup:pdf']);
+			} catch (e) {
+				throw new Error(
+					`Chrome could not be downloaded. Check network access and permissions for the PDF cache, then retry. ${e.message}`
+				);
+			}
 			const { default: puppeteer } = await import('puppeteer');
 			const browser = await puppeteer.launch({ headless: true });
 			try {
@@ -208,6 +226,9 @@ try {
 		config.initialized.extensions = true;
 		await persist();
 	});
+	const inconsistent = checkRecordedDirectories(config);
+	if (inconsistent.length)
+		throw new Error(`Installation paths are inconsistent: ${inconsistent.join('; ')}.`);
 	config.requirements = {
 		node: JSON.parse(await fs.readFile(join(config.code_root, 'package.json'), 'utf8')).engines
 			.node,
