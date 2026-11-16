@@ -48,18 +48,12 @@ export const documentKinds = Object.freeze([
 	{ value: 'archive', label: 'Archive' },
 	{ value: 'other', label: 'Other' }
 ]);
+export const defaultDocumentSort = 'updated';
 export const documentSorts = Object.freeze([
 	{ value: 'name', label: 'Name' },
 	{ value: 'updated', label: 'Recently updated' },
 	{ value: 'size', label: 'Largest first' }
 ]);
-// Be conservative: unsupported constructs stay in source mode, never silently disappear.
-export function visualMarkdownSupported(text) {
-	return !/(<\/?[a-z!]|!\[|\||\[[ x]\]|^\s*\[.*\]:|\$\$|^\s*:::|^\s*[^\n]+\n\s*[-=]{2,}\s*$)/im.test(
-		text
-	);
-}
-
 // Known document assignments; files remain ordinary user documents.
 /** @type {Readonly<Record<string, {label: string, format: string, extension: string, description: string}>>} */
 export const documentDesignations = Object.freeze({

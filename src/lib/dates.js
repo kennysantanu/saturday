@@ -21,6 +21,20 @@ export function daysBetween(from, to) {
 	return Math.round((toUtc(to) - toUtc(from)) / 86_400_000);
 }
 
+/**
+ * Compact age badge and its spoken form: days below 30, then months (30 days each, rounded
+ * down) below 365, then years (365 days each, rounded down). 45 days is "1mo"; 400 is "1y".
+ */
+export function formatAge(days) {
+	const unit = (value, short, long) => ({
+		short: `${value}${short}`,
+		long: `${value} ${long}${value === 1 ? '' : 's'}`
+	});
+	if (days >= 365) return unit(Math.floor(days / 365), 'y', 'year');
+	if (days >= 30) return unit(Math.floor(days / 30), 'mo', 'month');
+	return unit(days, 'd', 'day');
+}
+
 /** "Tomorrow" or "In 5 days" for near dates, otherwise the formatted date. */
 export function relativeDay(isoDate, today) {
 	const days = daysBetween(today, isoDate);

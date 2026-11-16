@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { stageJobsUrl } from '$lib/job-search.js';
+	import { formatAge } from '$lib/format';
 	import { afterNavigate } from '$app/navigation';
 	import { navigating } from '$app/state';
 	import { onMount, tick } from 'svelte';
@@ -35,8 +36,9 @@
 		if (job.isStarred) names.push('starred');
 		if (overdue(job)) names.push('reminder overdue');
 		const age = !closed && job.daysInStage ? job.daysInStage : 0;
-		if (age) names.push(`${age} ${age === 1 ? 'day' : 'days'} in this stage`);
-		return { names, age };
+		const label = age ? formatAge(age) : null;
+		if (label) names.push(`${label.long} in this stage`);
+		return { names, age: label?.short ?? '' };
 	}
 	let firstVisibleStageId = $state<number | null>(null);
 	let ready = $state(false);
@@ -368,7 +370,7 @@
 													></span>{/if}
 												{#if signals(job, !!column.is_closed).age}<span
 														class="meta-text shrink-0 tabular-nums"
-														aria-hidden="true">{signals(job, !!column.is_closed).age}d</span
+														aria-hidden="true">{signals(job, !!column.is_closed).age}</span
 													>{/if}
 											</p>
 										</a>

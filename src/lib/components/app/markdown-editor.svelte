@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount, tick, untrack, type Snippet } from 'svelte';
 	import { Editor } from '@tiptap/core';
-	import StarterKit from '@tiptap/starter-kit';
-	import { Markdown } from '@tiptap/markdown';
+	import { markdownExtensions, privateMarkdown } from '$lib/markdown-extensions';
+	import { visualEditorLoss } from '$lib/markdown-visual';
 	import Bold from '@lucide/svelte/icons/bold';
 	import Italic from '@lucide/svelte/icons/italic';
 	import Strikethrough from '@lucide/svelte/icons/strikethrough';
@@ -38,6 +38,9 @@
 	// The Markdown the editor produced when it loaded. Loading can reformat a document, so
 	// "changed" means different from this, not different from the stored text.
 	let baseline = '';
+	// The document the editor first held. A change that leaves the Markdown identical (a lossy serializer
+	// can do that) is still a change, so edits are judged against this as well.
+	let baselineDoc: any = null;
 	// The Markdown last loaded into the editor or emitted by it. The text prop is applied to the
 	// editor only when it differs from this, never by comparing with getMarkdown() (which drops a
 	// trailing newline and so would never match, re-running the effect without end).
@@ -98,6 +101,14 @@
 					node.removeAttribute(attribute.name);
 		});
 		return parsed.body.innerHTML;
+	}
+	function inTableCell($pos: {
+		depth: number;
+		node: (depth: number) => { type: { name: string } };
+	}) {
+		for (let depth = $pos.depth; depth > 0; depth--)
+			if (['tableCell', 'tableHeader'].includes($pos.node(depth).type.name)) return true;
+		return false;
 	}
 	const block = () => {
 		track();
@@ -191,27 +202,43 @@
 		editor?.chain().focus().extendMarkRange('link').unsetLink().run();
 		linkOpen = false;
 	}
+	/**
+	 * Names what saving would lose, or returns null. The Markdown written for the document on screen is read
+	 * back and compared with that document itself, so loss inside the writer cannot go unseen.
+	 */
+	export function saveBlocker(): string | null {
+		return editor ? visualEditorLoss(editor.getJSON()) : null;
+	}
+	/** The live document, for a draft: the Markdown alone cannot carry what the serializer would change. */
+	export function liveDoc(): object | null {
+		return editor ? editor.getJSON() : null;
+	}
+	/** Load a live document saved by liveDoc(). Returns false (leaving the editor untouched) if it is not valid. */
+	export function restoreDoc(json: unknown): boolean {
+		if (!editor || editor.isDestroyed || !json || typeof json !== 'object') return false;
+		try {
+			editor.schema.nodeFromJSON(json).check();
+			return editor.commands.setContent(json as any, { emitUpdate: true });
+		} catch {
+			return false;
+		}
+	}
 	onMount(() => {
 		editor = new Editor({
 			element,
-			extensions: [
-				StarterKit.configure({
-					link: {
-						openOnClick: false,
-						autolink: false,
-						protocols: ['https', 'http', 'mailto'],
-						isAllowedUri: (url) => /^(https?:|mailto:|\/[^/]|#)/i.test(url)
-					},
-					underline: false
-				}),
-				Markdown
-			],
+			extensions: [...markdownExtensions(), privateMarkdown()],
 			content: value,
 			contentType: 'markdown',
 			editable: !readonly,
 			editorProps: {
 				transformPastedHTML: cleanPaste,
-				handleKeyDown: (_view, event) => {
+				handleKeyDown: (view, event) => {
+					// A table cell is one line of Markdown. A line break there would be written as <br>, which
+					// the editor cannot read back, so Enter (and Shift+Enter) does nothing inside a cell.
+					if (event.key === 'Enter' && inTableCell(view.state.selection.$from)) {
+						event.preventDefault();
+						return true;
+					}
 					if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k' && !readonly) {
 						event.preventDefault();
 						void openLink();
@@ -226,17 +253,21 @@
 					'aria-multiline': 'true'
 				}
 			},
-			onCreate: ({ editor }) => (baseline = editor.getMarkdown()),
+			onCreate: ({ editor }) => {
+				baseline = editor.getMarkdown();
+				baselineDoc = editor.state.doc;
+			},
 			onUpdate: ({ editor }) => {
 				const markdown = editor.getMarkdown();
 				synced = markdown;
-				onchange(markdown, markdown !== baseline);
+				onchange(markdown, markdown !== baseline || !editor.state.doc.eq(baselineDoc));
 			},
 			// Bump without letting a running effect depend on the counter it is writing.
 			onTransaction: () => untrack(() => version++)
 		});
 		synced = value;
 		baseline = editor.getMarkdown();
+		baselineDoc = editor.state.doc;
 		return () => editor?.destroy();
 	});
 	$effect(() => {
@@ -247,6 +278,7 @@
 			synced = next;
 			current.commands.setContent(next, { contentType: 'markdown', emitUpdate: false });
 			baseline = current.getMarkdown();
+			baselineDoc = current.state.doc;
 		});
 	});
 	$effect(() => {
@@ -420,6 +452,41 @@
 	}
 	.markdown-editor :global(.document-prose pre) {
 		white-space: pre-wrap;
+	}
+	.markdown-editor :global(.document-prose table) {
+		width: 100%;
+		margin-block: 0.65rem;
+		border-collapse: collapse;
+		table-layout: fixed;
+	}
+	.markdown-editor :global(.document-prose th),
+	.markdown-editor :global(.document-prose td) {
+		border: 1px solid var(--border);
+		padding: 0.4rem 0.6rem;
+		text-align: left;
+		vertical-align: top;
+	}
+	.markdown-editor :global(.document-prose th) {
+		font-weight: 600;
+	}
+	.markdown-editor :global(.document-prose th > p),
+	.markdown-editor :global(.document-prose td > p) {
+		margin-block: 0;
+	}
+	.markdown-editor :global(.document-prose ul[data-type='taskList']) {
+		list-style: none;
+		padding-left: 0.25rem;
+	}
+	.markdown-editor :global(.document-prose ul[data-type='taskList'] li) {
+		display: flex;
+		gap: 0.5rem;
+		align-items: flex-start;
+	}
+	.markdown-editor :global(.document-prose ul[data-type='taskList'] li > label) {
+		margin-top: 0.4rem;
+	}
+	.markdown-editor :global(.document-prose ul[data-type='taskList'] li > div) {
+		flex: 1;
 	}
 	.markdown-editor :global(.document-prose a) {
 		text-decoration: underline;

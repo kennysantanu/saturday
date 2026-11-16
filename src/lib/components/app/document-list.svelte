@@ -36,7 +36,13 @@
 	import UserRound from '@lucide/svelte/icons/user-round';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import { fileIconFor } from '$lib/file-icons';
-	import { fileType, documentDesignations, documentKinds, documentSorts } from '$lib/file-types';
+	import {
+		fileType,
+		documentDesignations,
+		documentKinds,
+		documentSorts,
+		defaultDocumentSort
+	} from '$lib/file-types';
 	import { formatBytes, formatDateTime } from '$lib/format';
 	import { toast } from '$lib/toast.svelte';
 	let { data, form } = $props();
@@ -73,7 +79,7 @@
 		`?${new URLSearchParams({
 			...(data.query ? { query: data.query } : {}),
 			...(data.type ? { type: data.type } : {}),
-			...(data.sort !== 'name' ? { sort: data.sort } : {}),
+			...(data.sort !== defaultDocumentSort ? { sort: data.sort } : {}),
 			page: String(target)
 		})}`;
 	function finishDialog() {
@@ -249,7 +255,7 @@
 		clearHref={data.base}
 		applyLabel={filterLabels.search}
 		clearLabel={filterLabels.clear}
-		showClear={filtered || data.sort !== 'name'}
+		showClear={filtered || data.sort !== defaultDocumentSort}
 		instant
 		{chips}
 	>

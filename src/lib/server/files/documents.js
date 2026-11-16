@@ -3,7 +3,13 @@ import { basename } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createWriteStream } from 'node:fs';
 import { Transform } from 'node:stream';
-import { fileType, documentDesignations, documentKinds, documentSorts } from '../../file-types.js';
+import {
+	fileType,
+	documentDesignations,
+	documentKinds,
+	documentSorts,
+	defaultDocumentSort
+} from '../../file-types.js';
 import { databaseIdentity } from '../database.js';
 import {
 	withFileLock,
@@ -93,7 +99,7 @@ export async function listDocuments({
 	scope = 'documents',
 	query = '',
 	type = '',
-	sort = 'name',
+	sort = defaultDocumentSort,
 	page = 1,
 	limit = 50,
 	catalog_token,

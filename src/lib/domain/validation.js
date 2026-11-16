@@ -323,7 +323,7 @@ export const networkSearchShape = {
 	organization: text,
 	job_id: recordIdInputSchema.optional(),
 	follow_up: z.enum(['all', 'overdue', 'today', 'upcoming', 'not_scheduled']).default('all'),
-	sort: z.enum(['name', 'follow_up', 'latest_interaction']).default('name'),
+	sort: z.enum(['name', 'follow_up', 'latest_interaction']).default('latest_interaction'),
 	...networkPaginationShape
 };
 export const networkLinkShape = {

@@ -1,4 +1,9 @@
-import { documentDesignations, documentKinds, documentSorts } from '../../file-types.js';
+import {
+	documentDesignations,
+	documentKinds,
+	documentSorts,
+	defaultDocumentSort
+} from '../../file-types.js';
 import { fail, redirect, error } from '@sveltejs/kit';
 import * as documents from '../application.js';
 import { generateDocumentPdf } from '../application.js';
@@ -18,7 +23,7 @@ export async function listLoad(event) {
 	const type = documentKinds.some((kind) => kind.value === param('type')) ? param('type') : '';
 	const sort = documentSorts.some((option) => option.value === param('sort'))
 		? param('sort')
-		: 'name';
+		: defaultDocumentSort;
 	try {
 		const result = await documents.listDocuments({
 			scope,
@@ -48,7 +53,7 @@ export async function listLoad(event) {
 			catalog_token: '',
 			query: '',
 			type: '',
-			sort: 'name',
+			sort: defaultDocumentSort,
 			fileError: e.code ? e.message : 'File store is unavailable.'
 		};
 	}
