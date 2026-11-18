@@ -1042,7 +1042,9 @@
 							title={repairPending
 								? 'Repair needed'
 								: operation.error_code === 'MCP_CONNECTED'
-									? 'Assistant still connected'
+									? operation.error?.startsWith('Could not verify')
+										? 'Assistant connection unverified'
+										: 'Assistant still connected'
 									: operation.operation === 'uninstall' && operation.status === 'complete'
 										? 'Saturday uninstalled'
 										: 'Installation status'}
@@ -1094,10 +1096,9 @@
 						{#if target.available && data.updateCheckExpired}<Notice title="Check expired"
 								>This check is more than 15 minutes old. Check again before updating.</Notice
 							>{:else if target.available && data.assistantConnected}<Notice
-								title="Assistant connected"
-								>An assistant is connected to Saturday. Quit the assistant app or disconnect
-								Saturday before the update finishes building. Saturday waits up to two minutes, then
-								stops without changing anything.</Notice
+								title={data.assistantNotice?.title || 'Assistant connected'}
+								>{data.assistantNotice?.message ||
+									'An assistant is connected to Saturday. Quit the assistant app or disconnect Saturday before the update finishes building. Saturday waits up to two minutes, then stops without changing anything.'}</Notice
 							>{/if}
 						{#if data.updateCheck.local?.dirty}<Notice title="Local changes retained"
 								>Local source changes block updating. Commit or preserve them before checking again.</Notice

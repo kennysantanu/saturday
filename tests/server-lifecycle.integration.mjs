@@ -1,12 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { createServer } from 'node:http';
+import { dirname, join, resolve } from 'node:path';
+import { createServer as createHttpServer } from 'node:http';
+import { connect } from 'node:net';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { withServerActivity } from '../src/lib/server/server-lifecycle.js';
+import { connectedClients } from '../src/lib/server/installation-operations.js';
+import { inspectProcessLeases } from '../src/lib/server/process-leases.js';
+import { getInstallation } from '../src/lib/server/installation.js';
 const run = (script, args, env) =>
 	new Promise((res, rej) => {
 		const child = spawn(process.execPath, [script, ...args], {
@@ -42,7 +47,7 @@ test('owned background server reuses, handles collisions, protects active work a
 		SATURDAY_EXTENSIONS_PATH: join(root, 'extension-code'),
 		SATURDAY_INSTALLATION_PATH: ''
 	};
-	const other = createServer((request, response) => {
+	const other = createHttpServer((request, response) => {
 		response.setHeader('content-type', 'application/json');
 		response.end(JSON.stringify({ app: 'unrelated' }));
 	});
@@ -64,6 +69,16 @@ test('owned background server reuses, handles collisions, protects active work a
 		const first = JSON.parse(started.stdout);
 		assert.equal(first.created, true);
 		assert.notEqual(new URL(first.url).port, env.PORT);
+		const inspectedInitial = await inspectProcessLeases(getInstallation(), { includeSelf: false });
+		const webLease = inspectedInitial.entries.find(
+			(entry) => entry.status === 'genuine' && entry.role === 'web'
+		);
+		assert.ok(webLease, 'owned web server publishes v2 lease');
+		assert.equal(
+			await connectedClients(getInstallation()),
+			0,
+			'live web lease excluded from assistant count'
+		);
 		const reused = await run('scripts/start.mjs', ['--background', '--json'], env);
 		assert.equal(reused.status, 0, reused.stderr + reused.stdout);
 		assert.equal(JSON.parse(reused.stdout).created, false);
@@ -152,6 +167,77 @@ test('owned background server reuses, handles collisions, protects active work a
 		const updated = await fetch(`${first.url}/settings`);
 		const newCookie = updated.headers.get('set-cookie').split(';')[0];
 		await updated.text();
+
+		// Settings notice distinguishes unverified unknown leases from genuine MCP leases.
+		const checkPath = join(
+			dirname(env.SATURDAY_INSTALLATION_PATH),
+			'installation.state',
+			'check.json'
+		);
+		await mkdir(dirname(checkPath), { recursive: true });
+		await writeFile(
+			checkPath,
+			JSON.stringify({
+				format: 'saturday.update-check',
+				version: 1,
+				id: '11111111-1111-4111-8111-111111111111',
+				installation_id: first.installation_id,
+				checked_at: new Date().toISOString(),
+				local: { dirty: false },
+				target: {
+					kind: 'development',
+					commit: 'e'.repeat(40),
+					available: true,
+					url: 'https://example.invalid/commit'
+				}
+			})
+		);
+		const unknownSleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
+			stdio: 'ignore'
+		});
+		await new Promise((res) => unknownSleeper.once('spawn', res));
+		const unknownLeasePath = join(
+			root,
+			'data',
+			'extensions',
+			'processes',
+			`${unknownSleeper.pid}.json`
+		);
+		await writeFile(unknownLeasePath, '{corrupt');
+		try {
+			const unverifiedHtml = await (await fetch(`${first.url}/settings`)).text();
+			assert.ok(unverifiedHtml.includes('Assistant connection unverified'));
+			assert.ok(unverifiedHtml.includes('Could not verify whether an assistant is connected'));
+			assert.ok(unverifiedHtml.includes(String(unknownSleeper.pid)));
+			assert.ok(unverifiedHtml.includes(unknownLeasePath));
+			assert.equal(unverifiedHtml.includes('An assistant is connected to Saturday'), false);
+		} finally {
+			unknownSleeper.kill('SIGKILL');
+			await new Promise((res) => unknownSleeper.once('exit', res));
+			await rm(unknownLeasePath, { force: true });
+		}
+		const previewMcp = spawn(process.execPath, ['build/mcp/index.js'], {
+			env,
+			stdio: ['pipe', 'pipe', 'pipe']
+		});
+		const previewMcpLeasePath = join(
+			root,
+			'data',
+			'extensions',
+			'processes',
+			`${previewMcp.pid}.json`
+		);
+		try {
+			await waitFor(async () => existsSync(previewMcpLeasePath));
+			const connectedHtml = await (await fetch(`${first.url}/settings`)).text();
+			assert.ok(connectedHtml.includes('Assistant connected'));
+			assert.ok(connectedHtml.includes('An assistant is connected to Saturday'));
+		} finally {
+			previewMcp.kill('SIGTERM');
+			await new Promise((res) => previewMcp.once('exit', res));
+			await rm(checkPath, { force: true });
+		}
+
 		const stopped = await post('stop', { cookie: newCookie });
 		assert.equal(stopped.status, 200);
 		assert.equal((await stopped.json()).type, 'success');
@@ -162,6 +248,13 @@ test('owned background server reuses, handles collisions, protects active work a
 		assert.equal(
 			(await (await fetch(`http://127.0.0.1:${env.PORT}/health`)).json()).app,
 			'unrelated'
+		);
+		assert.equal(
+			(await inspectProcessLeases(getInstallation(), { includeSelf: false })).entries.some(
+				(entry) => entry.status === 'genuine' && entry.role === 'web'
+			),
+			false,
+			'owned web stop removes its v2 lease'
 		);
 		// Real stdio MCP process stays available after the UI server stops.
 		mcp = spawn(process.execPath, ['build/mcp/index.js'], { env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -231,10 +324,22 @@ test('owned background server reuses, handles collisions, protects active work a
 		});
 		assert.notEqual(result.isError, true);
 		assert.ok(JSON.parse(result.content[0].text).id);
+		const mcpLeasePath = join(root, 'data', 'extensions', 'processes', `${mcp.pid}.json`);
+		assert.equal(existsSync(mcpLeasePath), true, 'MCP process publishes v2 lease');
+		const mcpLease = JSON.parse(await readFile(mcpLeasePath, 'utf8'));
+		assert.equal(mcpLease.lease_version, 2);
+		assert.equal(mcpLease.role, 'mcp');
+		assert.equal(await connectedClients(getInstallation()), 1);
+		assert.equal(stderr.includes(mcpLease.secret), false, 'secret is never logged to stderr');
 	} finally {
 		if (mcp) {
 			mcp.kill('SIGTERM');
 			await new Promise((res) => mcp.once('close', res));
+			assert.equal(
+				existsSync(join(root, 'data', 'extensions', 'processes', `${mcp.pid}.json`)),
+				false,
+				'MCP SIGTERM removes its v2 lease'
+			);
 		}
 		await run('scripts/start.mjs', ['stop', '--json'], env);
 		await waitFor(async () => {
@@ -255,6 +360,171 @@ test('owned background server reuses, handles collisions, protects active work a
 		for (const key of Object.keys(process.env)) if (!(key in prior)) delete process.env[key];
 		Object.assign(process.env, prior);
 		await new Promise((res) => other.close(res));
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test('production MCP EOF/SIGINT/SIGKILL and web SIGINT/forced-timeout shutdown honor process lease lifetime', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'saturday-lease-lifecycle-'));
+	const env = {
+		...process.env,
+		SATURDAY_PROJECT_ROOT: resolve('.'),
+		SATURDAY_DB_PATH: join(root, 'data', 'saturday.db'),
+		SATURDAY_FILES_PATH: join(root, 'data', 'files'),
+		SATURDAY_EXTENSION_STATE_PATH: join(root, 'data', 'extensions'),
+		SATURDAY_EXTENSIONS_PATH: join(root, 'extension-code'),
+		SATURDAY_INSTALLATION_PATH: ''
+	};
+	const prior = { ...process.env };
+	const children = [];
+	try {
+		const setup = await run(
+			'scripts/setup.mjs',
+			['--skip-dependencies', '--skip-build', '--skip-pdf', '--json'],
+			env
+		);
+		assert.equal(setup.status, 0, setup.stderr + setup.stdout);
+		env.SATURDAY_INSTALLATION_PATH = JSON.parse(setup.stdout).descriptor_path;
+		Object.assign(process.env, env);
+		const config = getInstallation();
+		const leasesDir = join(config.extension_state, 'processes');
+
+		// 1. Built MCP stdin EOF triggers exit hook and removes lease without leaking secret on stdout.
+		const mcpEof = spawn(process.execPath, ['build/mcp/index.js'], {
+			env,
+			stdio: ['pipe', 'pipe', 'pipe']
+		});
+		children.push(mcpEof);
+		let mcpOut = '';
+		mcpEof.stdout.on('data', (d) => (mcpOut += d));
+		const eofLeasePath = join(leasesDir, `${mcpEof.pid}.json`);
+		await waitFor(async () => existsSync(eofLeasePath));
+		const eofLease = JSON.parse(await readFile(eofLeasePath, 'utf8'));
+		assert.equal(await connectedClients(config), 1);
+		mcpEof.stdin.end();
+		const eofExit = await new Promise((res) => mcpEof.once('exit', res));
+		assert.equal(eofExit, 0);
+		assert.equal(existsSync(eofLeasePath), false, 'MCP EOF removes its lease');
+		assert.equal(mcpOut.includes(eofLease.secret), false);
+
+		// 1b. Built MCP SIGINT triggers exit handler (130) and removes its v2 lease.
+		const mcpInt = spawn(process.execPath, ['build/mcp/index.js'], {
+			env,
+			stdio: ['pipe', 'pipe', 'pipe']
+		});
+		children.push(mcpInt);
+		const intLeasePath = join(leasesDir, `${mcpInt.pid}.json`);
+		await waitFor(async () => existsSync(intLeasePath));
+		assert.equal(await connectedClients(config), 1);
+		mcpInt.kill('SIGINT');
+		const intExit = await new Promise((res) => mcpInt.once('exit', res));
+		assert.equal(intExit, 130);
+		assert.equal(existsSync(intLeasePath), false, 'MCP SIGINT removes its v2 lease');
+		assert.equal(await connectedClients(config), 0);
+
+		// 2. Built MCP SIGKILL leaves crash debris, which is ignored on death and synthetic PID reuse.
+		const mcpKill = spawn(process.execPath, ['build/mcp/index.js'], {
+			env,
+			stdio: ['pipe', 'pipe', 'pipe']
+		});
+		children.push(mcpKill);
+		const killLeasePath = join(leasesDir, `${mcpKill.pid}.json`);
+		await waitFor(async () => existsSync(killLeasePath));
+		mcpKill.kill('SIGKILL');
+		await new Promise((res) => mcpKill.once('exit', res));
+		assert.equal(existsSync(killLeasePath), true, 'SIGKILL leaves crash lease file');
+		assert.equal(await connectedClients(config), 0, 'dead SIGKILL lease is ignored');
+		const killLease = JSON.parse(await readFile(killLeasePath, 'utf8'));
+		const reusedSleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
+			stdio: 'ignore'
+		});
+		children.push(reusedSleeper);
+		await new Promise((res) => reusedSleeper.once('spawn', res));
+		await writeFile(
+			join(leasesDir, `${reusedSleeper.pid}.json`),
+			JSON.stringify({ ...killLease, pid: reusedSleeper.pid })
+		);
+		assert.equal(
+			await connectedClients(config),
+			0,
+			'synthetic PID reuse with dead endpoint is ignored'
+		);
+
+		// 3. Production web forced-timeout SIGTERM branch (7s) removes its own v2 lease.
+		const probePort = createHttpServer();
+		await new Promise((res) => probePort.listen(0, '127.0.0.1', res));
+		const webPort = probePort.address().port;
+		await new Promise((res) => probePort.close(res));
+
+		const webProc = spawn(process.execPath, ['scripts/web.mjs'], {
+			env: { ...env, PORT: String(webPort) },
+			stdio: ['ignore', 'pipe', 'pipe']
+		});
+		children.push(webProc);
+		let webOut = '';
+		webProc.stdout.on('data', (d) => (webOut += d));
+		await waitFor(async () => webOut.includes('Listening on'));
+		const webLeasePath = join(leasesDir, `${webProc.pid}.json`);
+		await waitFor(async () => existsSync(webLeasePath));
+		const inspectedWeb = await inspectProcessLeases(config, { includeSelf: false });
+		assert.equal(
+			inspectedWeb.entries.some(
+				(e) => e.pid === webProc.pid && e.status === 'genuine' && e.role === 'web'
+			),
+			true
+		);
+		// Hold an active (incomplete) HTTP request so server.closeIdleConnections() cannot drain it
+		// and the 7s forced-timeout branch in scripts/web.mjs runs.
+		const heldSocket = connect({ host: '127.0.0.1', port: webPort });
+		heldSocket.on('error', () => {});
+		await new Promise((res) => heldSocket.once('connect', res));
+		heldSocket.write('GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\n');
+		await new Promise((res) => setTimeout(res, 100));
+		const stopStarted = Date.now();
+		webProc.kill('SIGTERM');
+		const webExit = await new Promise((res) => webProc.once('exit', res));
+		const elapsed = Date.now() - stopStarted;
+		heldSocket.destroy();
+		assert.equal(webExit, 0);
+		assert.ok(elapsed >= 6500, `expected forced-timeout shutdown (>=6500ms), got ${elapsed}ms`);
+		assert.equal(existsSync(webLeasePath), false, 'web forced-timeout branch removes v2 lease');
+
+		// 4. Production web SIGINT shutdown removes its own v2 lease.
+		const probeIntPort = createHttpServer();
+		await new Promise((res) => probeIntPort.listen(0, '127.0.0.1', res));
+		const webIntPort = probeIntPort.address().port;
+		await new Promise((res) => probeIntPort.close(res));
+
+		const webIntProc = spawn(process.execPath, ['scripts/web.mjs'], {
+			env: { ...env, PORT: String(webIntPort) },
+			stdio: ['ignore', 'pipe', 'pipe']
+		});
+		children.push(webIntProc);
+		let webIntOut = '';
+		webIntProc.stdout.on('data', (d) => (webIntOut += d));
+		await waitFor(async () => webIntOut.includes('Listening on'));
+		const webIntLeasePath = join(leasesDir, `${webIntProc.pid}.json`);
+		await waitFor(async () => existsSync(webIntLeasePath));
+		const inspectedWebInt = await inspectProcessLeases(config, { includeSelf: false });
+		assert.equal(
+			inspectedWebInt.entries.some(
+				(e) => e.pid === webIntProc.pid && e.status === 'genuine' && e.role === 'web'
+			),
+			true
+		);
+		webIntProc.kill('SIGINT');
+		const webIntExit = await new Promise((res) => webIntProc.once('exit', res));
+		assert.equal(webIntExit, 0);
+		assert.equal(existsSync(webIntLeasePath), false, 'web SIGINT shutdown removes v2 lease');
+	} finally {
+		for (const child of children) {
+			if (child && child.exitCode === null && child.signalCode === null) {
+				child.kill('SIGKILL');
+				await new Promise((res) => child.once('exit', res));
+			}
+		}
+		for (const key of Object.keys(process.env)) if (!(key in prior)) delete process.env[key];
+		Object.assign(process.env, prior);
 		await rm(root, { recursive: true, force: true });
 	}
 });

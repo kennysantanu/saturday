@@ -17,7 +17,7 @@ import {
 	jobDeletionRecoveryMessage
 } from '$lib/server/job-deletion-state.js';
 let runtimeUnavailable = false;
-// Record web startup even before the first request. Stale PID leases are reclaimed offline.
+// Record web startup even before the first request; identity inspection and exit cleanup handle stale leases.
 export async function init() {
 	if (building) return;
 	try {

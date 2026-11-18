@@ -3,7 +3,7 @@ import { createNetwork, deleteNetwork } from '../src/lib/server/local/people.js'
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -444,6 +444,15 @@ test('built MCP discovers multiple namespaced tools, shares data and rejects dis
 		assert.equal(created.isError, undefined);
 		const question = JSON.parse(created.content[0].text);
 		assert.equal(question.id, 1);
+		const leaseFile = join(
+			process.env.SATURDAY_EXTENSION_STATE_PATH,
+			'processes',
+			`${child.pid}.json`
+		);
+		assert.equal(existsSync(leaseFile), true);
+		const leaseRecord = JSON.parse(await fs.readFile(leaseFile, 'utf8'));
+		assert.equal(leaseRecord.lease_version, 2);
+		assert.equal(leaseRecord.role, 'mcp');
 		await assert.rejects(extensions.assertExtensionProcessesStopped(), { code: 'RUNNING' });
 		await extensions.setExtensionsEnabled(false);
 		const blocked = await request('tools/call', {
@@ -463,8 +472,14 @@ test('built MCP discovers multiple namespaced tools, shares data and rejects dis
 		});
 		assert.equal(JSON.parse(restored.content[0].text).total, 1);
 	} finally {
-		child.kill('SIGTERM');
+		if (child.exitCode === null) child.kill('SIGTERM');
 		await new Promise((r) => child.once('exit', r));
+		assert.equal(
+			existsSync(join(process.env.SATURDAY_EXTENSION_STATE_PATH, 'processes', `${child.pid}.json`)),
+			false,
+			'MCP SIGTERM removes its v2 lease file'
+		);
+		await extensions.assertExtensionProcessesStopped();
 		lines.close();
 		for (const k of [
 			'SATURDAY_EXTENSION_STATE_PATH',

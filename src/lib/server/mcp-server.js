@@ -285,12 +285,23 @@ async function refreshExtensionTools() {
 		refreshingExtensions = false;
 	}
 }
+let stopping = false;
+for (const [signal, code] of [
+	['SIGTERM', 143],
+	['SIGINT', 130]
+]) {
+	process.on(signal, () => {
+		if (stopping) return;
+		stopping = true;
+		process.exit(code);
+	});
+}
 await recoverJobDeletion();
 try {
 	await registerExtensionRuntime();
 } catch (e) {
 	console.error(`Extension runtime registration failed: ${e.message}`);
-	if (e.code === 'BUSY') throw e;
+	throw e;
 }
 await refreshExtensionTools();
 const extensionRefresh = setInterval(() => void refreshExtensionTools(), 1000);

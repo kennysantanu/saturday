@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, unlink, writeFile, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { createServer } from 'node:net';
+import { spawn } from 'node:child_process';
 import { sourceInstallation, atomicJson, getInstallation } from '../src/lib/server/installation.js';
 import {
 	initializeAccessSettings,
@@ -144,6 +146,42 @@ test('access maintenance permits MCP but refuses independent web runtimes and pr
 		});
 		await assert.rejects(assertWebRuntimeStopped(), /unclassified runtime/);
 		await registerExtensionRuntime();
+		await assertWebRuntimeStopped();
+
+		// Stale v2 web lease for an unrelated live PID does not block, while unknown v2 version does.
+		const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
+			stdio: 'ignore'
+		});
+		const probe = createServer();
+		try {
+			await new Promise((r) => sleeper.once('spawn', r));
+			await new Promise((r) => probe.listen(0, '127.0.0.1', r));
+			const refusedPort = probe.address().port;
+			await new Promise((r) => probe.close(r));
+			const leasePath = join(getInstallation().extension_state, 'processes', `${sleeper.pid}.json`);
+			await atomicJson(leasePath, {
+				pid: sleeper.pid,
+				role: 'web',
+				lease_version: 2,
+				instance_id: randomUUID(),
+				secret: randomBytes(32).toString('hex'),
+				identity_port: refusedPort
+			});
+			await assertWebRuntimeStopped();
+			await atomicJson(leasePath, {
+				pid: sleeper.pid,
+				role: 'mcp',
+				lease_version: 99,
+				instance_id: randomUUID(),
+				secret: randomBytes(32).toString('hex'),
+				identity_port: refusedPort
+			});
+			await assert.rejects(assertWebRuntimeStopped(), /unsupported lease version/);
+			await unlink(leasePath);
+		} finally {
+			sleeper.kill();
+		}
+
 		const release = await claimInstallationMaintenance();
 		try {
 			await assert.rejects(registerExtensionRuntime('web'), /stopping or restarting/);
