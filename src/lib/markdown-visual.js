@@ -1,40 +1,37 @@
-import { Marked } from 'marked';
 import { getSchema } from '@tiptap/core';
 import { MarkdownManager } from '@tiptap/markdown';
-import { markdownExtensions } from './markdown-extensions.js';
+import { markdownExtensions, literalHtmlMarked } from './markdown-extensions.js';
 
 // The visual editor must never silently change a document. Deciding whether a document may open there is
 // therefore done by doing exactly what the editor will do: read it with the editor's own extensions, write
-// it back, and compare what the two say. Anything the round trip changes keeps the document in source mode,
-// and the construct responsible is named. A cheap token scan runs first, for the constructs the editor has
-// no node for at all; the round trip is the authority for everything else.
+// it back, and compare what a reader would see in the source with what the round trip leaves. Preserving
+// that meaning is the only authority. The syntax of a construct never admits or refuses a document by
+// itself; once a document has been refused, syntax is used only to put a name to the loss.
+//
+// HTML is literal text here (see literalHtmlMarked), for the editor and for the independent reader alike.
 
 // A parser of our own. The editor's Markdown extension registers its table and task tokenizers on whichever
 // marked instance it is given, so reading the *source* with a shared one would make the source and the
 // round trip agree on the same mistakes, hiding exactly the losses this gate exists to find. Neither the
-// reader below nor the editor's manager may share it.
-const reader = new Marked();
+// reader below nor the editor's manager may share it. It applies the same literal-HTML policy as the
+// editor, by policy and not by sharing an instance.
+const reader = literalHtmlMarked();
 const marked = { lexer: (text) => reader.lexer(text) };
 
-const unsupportedTypes = new Map([
-	['html', 'raw HTML'],
-	['def', 'link or footnote definitions'],
-	['image', 'images']
-]);
+const childTokens = (token) => [
+	token.tokens,
+	...(token.items ?? []).map((item) => item.tokens),
+	...(token.header ?? []).map((cell) => cell.tokens),
+	...(token.rows ?? []).flat().map((cell) => cell.tokens)
+];
 
-/** Names the first construct the visual editor has no node for, or null when there is none. */
-function firstUnsupported(tokens) {
+/** Names an image or definition inside these tokens, for the message only: it decides nothing. */
+function namedConstruct(tokens) {
 	for (const token of tokens) {
-		const reason = unsupportedTypes.get(token.type);
-		if (reason) return reason;
-		const children = [
-			token.tokens,
-			...(token.items ?? []).map((item) => item.tokens),
-			...(token.header ?? []).map((cell) => cell.tokens),
-			...(token.rows ?? []).flat().map((cell) => cell.tokens)
-		];
-		for (const child of children) {
-			const found = child && firstUnsupported(child);
+		if (token.type === 'def') return 'link or footnote definitions';
+		if (token.type === 'image') return 'images';
+		for (const child of childTokens(token)) {
+			const found = child && namedConstruct(child);
 			if (found) return found;
 		}
 	}
@@ -137,6 +134,10 @@ function signature(tokens, out = []) {
 				signature(token.tokens ?? [], out);
 				out.push(')');
 				break;
+			case 'image':
+				// An image is its destination, title and description; keeping only its alt text is a loss.
+				out.push(`img:${token.href}:${token.title ?? ''}:${decode(token.text)}`);
+				break;
 			case 'strong':
 			case 'em':
 			case 'del':
@@ -183,7 +184,7 @@ let schema;
 function editorMachinery() {
 	if (!manager) {
 		const extensions = markdownExtensions();
-		manager = new MarkdownManager({ extensions, marked: new Marked() });
+		manager = new MarkdownManager({ extensions, marked: literalHtmlMarked() });
 		schema = getSchema(extensions);
 	}
 	return { manager, schema };
@@ -272,6 +273,19 @@ function nameBlock(token) {
 }
 
 /**
+ * True when the editor would write these tokens back with everything a reader sees still in them. The
+ * editor's own conversion decides: a throw (a block image, a document the schema cannot hold) preserved
+ * nothing, and a conversion that completes still has to compare equal, so valid JSON alone never admits.
+ */
+function preserved(text, tokens) {
+	try {
+		return sameList(normalized(tokens), normalized(marked.lexer(visualMarkdownRoundTrip(text))));
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Why a Markdown document must stay in source mode, as a short plain phrase, or null when the visual
  * editor can hold it without loss. Run it once when a document opens or when the user asks for Visual;
  * it is far too costly to run on every keystroke.
@@ -279,33 +293,25 @@ function nameBlock(token) {
 export function visualMarkdownBlocker(text) {
 	// A new or empty document has nothing to lose; the editor starts it as one empty paragraph.
 	if (!String(text ?? '').trim()) return null;
+	let tokens;
 	try {
-		const tokens = marked.lexer(text);
-		if (hasSetextHeading(tokens)) return 'headings underlined with --- or ===';
-		const unsupported = firstUnsupported(tokens);
-		if (unsupported) return unsupported;
-		const before = normalized(tokens);
-		const after = normalized(marked.lexer(visualMarkdownRoundTrip(text)));
-		if (sameList(before, after)) return null;
-		// Find the block responsible so the message can name it.
-		for (const token of tokens) {
-			if (token.type === 'space') continue;
-			let kept = false;
-			try {
-				kept = sameList(
-					normalized([token]),
-					normalized(marked.lexer(visualMarkdownRoundTrip(token.raw)))
-				);
-			} catch {
-				/* unreadable alone: name it */
-			}
-			if (!kept) return nameBlock(token);
-		}
-		return 'text the editor would rewrite';
+		tokens = marked.lexer(text);
 	} catch {
 		// A document the parser cannot read must stay in source mode rather than be rewritten.
 		return 'text the editor could not read';
 	}
+	// A deliberate policy, not a measured loss: the editor has no heading that is underlined.
+	if (hasSetextHeading(tokens)) return 'headings underlined with --- or ===';
+	if (preserved(text, tokens)) return null;
+	// Refused. An image or definition anywhere in the document is itself a loss (the editor keeps neither),
+	// and naming it is more useful than the block around it. Otherwise find the block responsible.
+	const named = namedConstruct(tokens);
+	if (named) return named;
+	for (const token of tokens) {
+		if (token.type === 'space') continue;
+		if (!preserved(token.raw, [token])) return nameBlock(token);
+	}
+	return 'text the editor would rewrite';
 }
 
 export function visualMarkdownSupported(text) {

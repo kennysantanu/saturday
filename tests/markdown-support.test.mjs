@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
 	visualMarkdownSupported,
+	visualMarkdownSignature,
 	visualMarkdownBlocker,
 	visualMarkdownRoundTrip,
 	visualEditorLoss,
@@ -13,7 +14,11 @@ import {
 import { EditorState } from '@tiptap/pm/state';
 import { marked as globalMarked } from 'marked';
 import { formatAge } from '../src/lib/dates.js';
-import { markdownExtensions, privateMarkdown } from '../src/lib/markdown-extensions.js';
+import {
+	markdownExtensions,
+	privateMarkdown,
+	literalHtmlMarked
+} from '../src/lib/markdown-extensions.js';
 
 test('visual markdown accepts pipes in prose, horizontal rules and strike', () => {
 	assert(visualMarkdownSupported('**Email:** a@b.c | **Phone:** 555'));
@@ -34,10 +39,8 @@ test('visual markdown accepts pipes in prose, horizontal rules and strike', () =
 	assert(visualMarkdownSupported('a\\|b'));
 });
 
-test('visual markdown still rejects constructs the editor cannot keep', () => {
+test('visual markdown still rejects constructs the editor cannot keep, because they are lost', () => {
 	for (const text of [
-		'<div>raw</div>',
-		'<!-- comment -->',
 		'![alt](x.png)',
 		'[ref]: https://example.com',
 		'Text[^1]\n\n[^1]: Footnote',
@@ -73,8 +76,10 @@ test('the editor and the gate each read with a Marked instance of their own', ()
 	assert(first && second && first !== second, 'every editor gets its own instance');
 	assert.notEqual(first, globalMarked, 'never the global instance');
 	const gate = readFileSync('src/lib/markdown-visual.js', 'utf8');
-	assert.match(gate, /new MarkdownManager\(\{ extensions, marked: new Marked\(\) \}\)/);
-	assert.match(gate, /const reader = new Marked\(\)/);
+	assert.match(gate, /new MarkdownManager\(\{ extensions, marked: literalHtmlMarked\(\) \}\)/);
+	assert.match(gate, /const reader = literalHtmlMarked\(\)/);
+	assert(!/new Marked\(\)/.test(gate), 'every instance comes from the literal-HTML factory');
+	assert.notEqual(literalHtmlMarked(), literalHtmlMarked(), 'the factory never shares an instance');
 });
 
 test('the editor never re-runs the gate per keystroke and guards the save', () => {
@@ -202,8 +207,34 @@ test('the gate follows the editor parser, not a lookalike', () => {
 	const row = '| a | b |\n| --- | --- |\n| `a|b` | ![x](y.png) |';
 	assert(!visualMarkdownSupported(row));
 	assert(!visualMarkdownSupported('| a | b |\n| --- | --- |\n| `a|b` | [l](u) ![x](y.png) |'));
-	// Hard breaks in a cell are written as <br>, which would not read back.
-	assert(!visualMarkdownSupported('| a | b |\n| --- | --- |\n| x<br>y | z |'));
+	// A hard break in a cell would be written as <br>, which reads back as text; only a live document can
+	// hold one (Enter is ignored in a cell), and visualEditorLoss refuses to save it (see below).
+	const cell = (content) => ({
+		type: 'doc',
+		content: [
+			{
+				type: 'table',
+				content: [
+					{
+						type: 'tableRow',
+						content: [
+							{
+								type: 'tableHeader',
+								content: [{ type: 'paragraph', content }]
+							}
+						]
+					}
+				]
+			}
+		]
+	});
+	assert.equal(visualEditorLoss(cell([{ type: 'text', text: 'x' }])), null);
+	assert.match(
+		visualEditorLoss(
+			cell([{ type: 'text', text: 'x' }, { type: 'hardBreak' }, { type: 'text', text: 'y' }])
+		),
+		/change/
+	);
 });
 
 test('a document shaped like the demo script opens visually and survives the round trip', () => {
@@ -282,7 +313,6 @@ test('a mixed document keeps its table and checkboxes through the editor', () =>
 
 test('the blocker names the construct that keeps a document in source mode', () => {
 	const cases = [
-		['<div>raw</div>', 'raw HTML'],
 		['![alt](x.png)', 'images'],
 		['| a |\n| - |\n| ![x](y.png) |', 'images'],
 		['[ref]: https://example.com', 'link or footnote definitions'],
@@ -290,6 +320,270 @@ test('the blocker names the construct that keeps a document in source mode', () 
 	];
 	for (const [text, reason] of cases) assert.equal(visualMarkdownBlocker(text), reason, text);
 	assert.equal(visualMarkdownBlocker('# Fine\n\n- [ ] ok'), null);
+});
+
+// ---- HTML is literal text, and admission is decided by preservation ---------------------------------
+
+// Synthetic prose of the reported shape. It is written for these tests; no user document is copied.
+const websiteNotes = [
+	'# Site notes',
+	'',
+	'- Put all CSS inside <style> in the <head>.',
+	'- Use semantic HTML: <header>, <nav>, <main>, <section>, <footer>.',
+	'- Project 1 -> project1.jpg',
+	'- Wrap titles in <h1> and keep <script> at the end of <body>.',
+	'',
+	'The file must begin with <!DOCTYPE html>.',
+	'',
+	'After the <title> tag and a stray </body> the text goes on.'
+].join('\n');
+
+/** Every piece of text in an editor document, in order, without marks. */
+function editorText(node, out = []) {
+	if (node.text !== undefined) out.push(node.text);
+	for (const child of node.content ?? []) editorText(child, out);
+	return out;
+}
+const lastParagraphText = (json) => editorText(json.content.at(-1)).join('');
+const plain = (markdown) => markdown.replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+const flat = (markdown) => plain(markdown).replace(/\\/g, '').replace(/\s+/g, ' ').trim();
+
+function lexedTypes(tokens, found = new Set()) {
+	for (const token of tokens) {
+		found.add(token.type);
+		for (const child of [
+			token.tokens,
+			...(token.items ?? []).map((item) => item.tokens),
+			...(token.header ?? []).map((cell) => cell.tokens),
+			...(token.rows ?? []).flat().map((cell) => cell.tokens)
+		])
+			if (child) lexedTypes(child, found);
+	}
+	return found;
+}
+
+// A table whose only cell holds the given inline content, as a live editor document.
+const tableWith = (content) => ({
+	type: 'doc',
+	content: [
+		{
+			type: 'table',
+			content: [
+				{
+					type: 'tableRow',
+					content: [{ type: 'tableHeader', content: [{ type: 'paragraph', content }] }]
+				}
+			]
+		}
+	]
+});
+
+test('prose that mentions HTML tag names opens visually and keeps every word', () => {
+	assert.equal(visualMarkdownBlocker(websiteNotes), null);
+	const written = plain(roundTrip(websiteNotes));
+	for (const text of [
+		'Put all CSS inside <style> in the <head>.',
+		'<header>, <nav>, <main>, <section>, <footer>',
+		'Project 1 -> project1.jpg',
+		'<h1>',
+		'<script> at the end of <body>',
+		'The file must begin with <!DOCTYPE html>.',
+		'After the <title> tag and a stray </body> the text goes on.'
+	])
+		assert(written.includes(text), text);
+	// A second pass changes nothing, so repeated open and save cycles do not degrade the text.
+	assert.equal(roundTrip(roundTrip(websiteNotes)), roundTrip(websiteNotes));
+	for (const text of [
+		'Put it in <style>.',
+		'Use -> as an arrow.',
+		'Begin with <!DOCTYPE html> here.',
+		'- <header>, <footer>',
+		'1. Open <html> then <body>',
+		'> quoted <script> mention',
+		'a < b and c > d',
+		'Self-closing <br/> and <img src="a.png"> as text.'
+	])
+		assert.equal(visualMarkdownBlocker(text), null, text);
+});
+
+test('HTML is literal text: tags are kept as text and never swallow what follows', () => {
+	// In a browser, a raw-text tag such as <style>, <script> or <title> swallows the content after it when it
+	// reaches DOMParser, and <head>, <header> and a doctype produce nothing. They must never get that far.
+	const tags = ['<style>', '<script>', '<title>', '<head>', '<header>', '<h1>', '<!DOCTYPE html>'];
+	for (const tag of tags)
+		for (const text of [
+			`Before ${tag} after.\n\nFollowing paragraph.`,
+			`- item with ${tag} inside\n- second item\n\nFollowing paragraph.`,
+			`${tag}\n\nFollowing paragraph.`
+		]) {
+			const json = visualEditorParse(text);
+			assert(editorText(json).join('').includes(tag), `${tag} stays as text in ${text}`);
+			assert.equal(lastParagraphText(json), 'Following paragraph.', `text after ${tag} survives`);
+			assert.equal(visualMarkdownBlocker(text), null, text);
+		}
+	// Complete blocks and paired inline tags are text too, not a container or an emphasis.
+	assert.deepEqual(editorText(visualEditorParse('<div>real</div>\n\nAfter.')), [
+		'<div>real</div>',
+		'After.'
+	]);
+	const inline = visualEditorParse('a <em>hi</em> b');
+	assert.deepEqual(editorText(inline), ['a <em>hi</em> b']);
+	assert(!JSON.stringify(inline).includes('"marks"'), 'no emphasis mark');
+	assert.equal(visualMarkdownBlocker('<div>real</div>\n\nAfter.'), null);
+	assert.equal(visualMarkdownBlocker('a <em>hi</em> b'), null);
+	// Comments are not special either: shown as text, nothing dropped.
+	assert.deepEqual(editorText(visualEditorParse('<!-- note -->\n\nAfter.')), [
+		'<!-- note -->',
+		'After.'
+	]);
+	// Code keeps its literal code semantics.
+	const code = '`<style>` and\n\n```html\n<style>\np { color: red }\n</style>\n```\n\nAfter.';
+	assert.equal(visualMarkdownBlocker(code), null);
+	assert.match(roundTrip(code), /```html\n<style>\np \{ color: red \}\n<\/style>\n```/);
+});
+
+test('neither Marked instance ever produces an HTML token, at block or inline level', () => {
+	// Tiptap hands every html token to the browser's DOMParser. With both tokenizers off none exists, in the
+	// editor's instance or in the gate's reader. Overriding only `html` would still leave inline tags.
+	const samples = [
+		'<div>block</div>',
+		'a <em>inline</em> b',
+		'- item <style> here',
+		'| a |\n| - |\n| <b>x</b> |',
+		'> <script>',
+		'<!-- comment -->',
+		'<!DOCTYPE html>'
+	];
+	for (const instance of [privateMarkdown().options.marked, literalHtmlMarked()])
+		for (const sample of samples) {
+			const types = lexedTypes(instance.lexer(sample));
+			assert(!types.has('html'), `${sample} -> ${[...types]}`);
+		}
+	// The control: marked's own instance does produce them, so the check above can fail.
+	assert(lexedTypes(globalMarked.lexer('a <em>b</em>')).has('html'));
+	assert(lexedTypes(globalMarked.lexer('<div>b</div>')).has('html'));
+});
+
+test('equivalent spellings of the same text reach the same decision', () => {
+	const pairs = [
+		[
+			'The file must begin with <!DOCTYPE html>.',
+			'The file must begin with &lt;!DOCTYPE html&gt;.'
+		],
+		['Put CSS in <style> in <head>.', 'Put CSS in &lt;style&gt; in &lt;head&gt;.'],
+		['Put CSS in <style>.', 'Put CSS in \\<style\\>.'],
+		['Project 1 -> project1.jpg', 'Project 1 -&gt; project1.jpg'],
+		['One.\n\nTwo.', 'One.\n\n\n\nTwo.']
+	];
+	for (const [raw, other] of pairs) {
+		assert.equal(visualMarkdownBlocker(raw), null, raw);
+		assert.equal(visualMarkdownBlocker(other), null, other);
+		assert.equal(
+			visualMarkdownSignature(raw).join('|'),
+			visualMarkdownSignature(other).join('|'),
+			`${raw} reads as ${other}`
+		);
+		assert.equal(flat(roundTrip(raw)), flat(roundTrip(other)));
+	}
+	// The same characters in different markup are a different meaning, and still differ.
+	assert.notEqual(
+		visualMarkdownSignature('a <b> c').join('|'),
+		visualMarkdownSignature('a **b** c').join('|')
+	);
+});
+
+test('losses are refused because the comparison finds them, and are named afterwards', () => {
+	// The editor has no node for an image, so converting it keeps only its alt text. The conversion
+	// completes and the JSON is valid; only the comparison notices.
+	const inline = 'Some text ![alt](pic.png) more text.';
+	assert.equal(roundTrip(inline), 'Some text alt more text.');
+	assert.equal(visualMarkdownBlocker(inline), 'images');
+	for (const text of [
+		'![](pic.png)',
+		'Photo: ![a photo](pic.png "Title") here',
+		'- list item ![x](y.png)',
+		'> quote ![x](y.png)',
+		'**bold ![x](y.png)**',
+		'[![badge](b.png)](https://example.com)',
+		'| a | b |\n| - | - |\n| ![x](y.png) | z |',
+		'![block](pic.png)',
+		'Reference ![alt][pic] image.\n\n[pic]: pic.png',
+		'Reference ![alt][pic] image.\n\n[pic]: pic.png "T"'
+	])
+		assert.equal(visualMarkdownBlocker(text), 'images', text);
+	// Definitions carry information the editor drops.
+	const definitions = 'link or footnote definitions';
+	assert.equal(visualMarkdownBlocker('[ref]: https://example.com'), definitions);
+	assert.equal(
+		visualMarkdownBlocker('See [the site][ref].\n\n[ref]: https://example.com'),
+		definitions
+	);
+	assert.equal(visualMarkdownBlocker('Text[^1]\n\n[^1]: Footnote'), definitions);
+	// Loss in a document of otherwise ordinary prose still refuses it as a whole.
+	assert.notEqual(visualMarkdownBlocker(`${websiteNotes}\n\nAnd a ![logo](logo.png) too.`), null);
+	// Naming never admits: the same words without an image are admitted.
+	assert.equal(visualMarkdownBlocker('Some text alt more text.'), null);
+	assert.equal(visualMarkdownBlocker('A link [alt](pic.png) is fine.'), null);
+});
+
+test('schema success alone does not admit a document', () => {
+	// This conversion yields a document the schema accepts and writes without error, so every schema-level
+	// check passes; the lost image is found only by comparing meaning.
+	const text = 'Some text ![alt](pic.png) more text.';
+	const json = visualEditorParse(text);
+	assert.doesNotThrow(() => visualEditorSchema().nodeFromJSON(json).check());
+	assert.doesNotThrow(() => visualEditorMarkdown(json));
+	assert.equal(visualEditorLoss(json), null, 'the live document reads back as itself');
+	// The image is already gone from the parsed document, which is why the check above passes; only the
+	// comparison against the source finds it. Remove the `image` signature case and these fail.
+	const allText = (node) =>
+		node.text ?? JSON.stringify(node.attrs ?? {}) + (node.content ?? []).map(allText).join('');
+	assert(!allText(json).includes('pic.png'), 'the image destination is gone from the document');
+	assert.notEqual(visualMarkdownBlocker(text), null);
+	assert(!visualMarkdownSupported(text));
+	const reference = 'Some text ![alt][pic] more text.\n\n[pic]: pic.png\n';
+	const referenceJson = visualEditorParse(reference);
+	assert(!allText(referenceJson).includes('pic.png'), 'the reference image is gone too');
+	assert.notEqual(visualMarkdownBlocker(reference), null);
+	assert(!visualMarkdownSupported(reference));
+	// And schema validation still refuses what the schema cannot hold.
+	assert.throws(() => roundTrip('![block](pic.png)'));
+	assert.throws(() => roundTrip('[ref]: https://example.com'));
+	assert.throws(() =>
+		visualEditorSchema()
+			.nodeFromJSON({ type: 'doc', content: [{ type: 'text', text: 'x' }] })
+			.check()
+	);
+});
+
+test('numeric character references are refused (known limitation, pinned)', () => {
+	// The signature's entity decoding is narrower than Tiptap's, so `&#60;` reads back as `<` in the editor
+	// but not in the comparison, and the document is refused as text the editor would rewrite. This is
+	// pre-existing and deliberately not widened here; if the decoder grows, update this test with it.
+	const text = 'a &#60; b';
+	assert.match(visualMarkdownBlocker(text), /text the editor would rewrite/);
+	assert(!visualMarkdownSupported(text));
+});
+
+test('the live document is still compared before a save, whatever the HTML policy', () => {
+	assert.equal(
+		visualEditorLoss(visualEditorParse(websiteNotes)),
+		null,
+		'literal tag text reads back'
+	);
+	const x = { type: 'text', text: 'x' };
+	assert.equal(visualEditorLoss(tableWith([x])), null);
+	// A hard break in a table cell is written as <br>, which reads back as text: still refused.
+	assert.match(visualEditorLoss(tableWith([x, { type: 'hardBreak' }, x])), /change/);
+});
+
+test('admission has no syntax veto and HTML literalization is declared where it is applied', () => {
+	const gate = readFileSync('src/lib/markdown-visual.js', 'utf8');
+	assert(!/raw HTML/.test(gate), 'raw HTML is no longer a reason');
+	assert(!/unsupportedTypes|firstUnsupported/.test(gate), 'no token-type pre-scan');
+	const extensions = readFileSync('src/lib/markdown-extensions.js', 'utf8');
+	assert.match(extensions, /html\(\)\s*\{\s*return undefined;/);
+	assert.match(extensions, /tag\(\)\s*\{\s*return undefined;/);
 });
 
 test('age badge uses days, then months from 30 days, then years from 365 days', () => {
