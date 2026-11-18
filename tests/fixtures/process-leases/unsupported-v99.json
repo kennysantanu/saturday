@@ -1,0 +1,8 @@
+{
+	"pid": 12349,
+	"role": "web",
+	"lease_version": 99,
+	"instance_id": "11111111-2222-4333-8444-555555555555",
+	"secret": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	"identity_port": 49153
+}

@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
 	compareVersions,
 	selectTarget,
@@ -23,6 +23,7 @@ import {
 	developmentHold,
 	pruneOperationArtifacts,
 	connectedClients,
+	assistantConnectionNotice,
 	PREVIOUS_BUILDS_RETAINED
 } from '../src/lib/server/installation-operations.js';
 import { copySource, install, run as installerRun } from '../scripts/install.mjs';
@@ -636,22 +637,74 @@ test('connected assistants are refused before staging and failed updates leave t
 		prior = { ...process.env },
 		client = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
 	Object.assign(process.env, f.env);
+	let liveMcp;
 	try {
 		await new Promise((r) => client.once('spawn', r));
 		const config = getInstallation(),
 			paths = operationPaths(),
 			leases = join(config.extension_state, 'processes');
 		await fs.mkdir(leases, { recursive: true });
+		// Explicit legacy {pid, role} compatibility cases (no identity endpoint).
 		await fs.writeFile(
 			join(leases, `${client.pid}.json`),
 			JSON.stringify({ pid: client.pid, role: 'web' })
 		);
-		assert.equal(await connectedClients(config), 0, 'web UI leases are not assistants');
+		assert.equal(await connectedClients(config), 0, 'legacy web UI leases are not assistants');
 		await fs.writeFile(
 			join(leases, `${client.pid}.json`),
 			JSON.stringify({ pid: client.pid, role: 'mcp' })
 		);
+		assert.equal(await connectedClients(config), 1, 'legacy MCP leases still count conservatively');
+		// Stale v2 lease for an unrelated live PID with a refused endpoint is ignored.
+		const probe = createServer();
+		await new Promise((r) => probe.listen(0, '127.0.0.1', r));
+		const refusedPort = probe.address().port;
+		await new Promise((r) => probe.close(r));
+		await fs.writeFile(
+			join(leases, `${client.pid}.json`),
+			JSON.stringify({
+				pid: client.pid,
+				role: 'mcp',
+				lease_version: 2,
+				instance_id: randomUUID(),
+				secret: randomBytes(32).toString('hex'),
+				identity_port: refusedPort
+			})
+		);
+		assert.equal(
+			await connectedClients(config),
+			0,
+			'stale v2 lease for unrelated live PID is ignored'
+		);
+		assert.ok(existsSync(join(leases, `${client.pid}.json`)), 'reader does not delete stale lease');
+
+		// Owned child runtime with a genuine v2 lease blocks update and repair even with aged mtime.
+		const leaseModuleUrl = new URL('../src/lib/server/process-leases.js', import.meta.url).href;
+		liveMcp = spawn(
+			process.execPath,
+			[
+				'--input-type=module',
+				'-e',
+				`import { registerProcessLease } from ${JSON.stringify(leaseModuleUrl)}; process.on('SIGTERM', () => process.exit(143)); await registerProcessLease(JSON.parse(process.argv[1]), 'mcp'); process.stdout.write('ready\\n'); setInterval(() => {}, 60000);`,
+				JSON.stringify(config)
+			],
+			{ stdio: ['ignore', 'pipe', 'pipe'] }
+		);
+		await new Promise((res, rej) => {
+			let out = '';
+			let err = '';
+			liveMcp.stderr.on('data', (c) => (err += c));
+			liveMcp.stdout.on('data', (c) => {
+				out += c;
+				if (out.includes('ready\n')) res();
+			});
+			liveMcp.once('exit', (code) => rej(new Error(`child exited (${code}): ${err}`)));
+		});
+		const liveLeasePath = join(leases, `${liveMcp.pid}.json`);
+		const oldTime = new Date(Date.now() - 48 * 3600 * 1000);
+		await fs.utimes(liveLeasePath, oldTime, oldTime);
 		assert.equal(await connectedClients(config), 1);
+
 		const target = { kind: 'development', commit: 'd'.repeat(40), available: true },
 			fingerprint = await codeFingerprint(f.app),
 			checkId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
@@ -674,7 +727,12 @@ test('connected assistants are refused before staging and failed updates leave t
 		);
 		await assert.rejects(queueOperation('repair', {}), /assistant is connected.*then repair/);
 		assert.equal(operationStatus(), null, 'nothing was queued');
+
+		liveMcp.kill('SIGTERM');
+		await new Promise((r) => liveMcp.once('exit', r));
+		assert.equal(existsSync(liveLeasePath), false, 'child exit removes genuine v2 lease');
 		await fs.rm(join(leases, `${client.pid}.json`));
+		assert.equal(await connectedClients(config), 0);
 
 		const id = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 		await fs.writeFile(
@@ -709,6 +767,7 @@ test('connected assistants are refused before staging and failed updates leave t
 		assert.equal(existsSync(join(paths.root, `work-${id}`)), false, 'staging is removed');
 		assert.ok(existsSync(f.app), 'installed code is untouched');
 	} finally {
+		if (liveMcp && liveMcp.exitCode === null) liveMcp.kill('SIGKILL');
 		client.kill();
 		for (const key of Object.keys(process.env)) if (!(key in prior)) delete process.env[key];
 		Object.assign(process.env, prior);
@@ -751,5 +810,89 @@ test('a main build moves to releases only when the release is a step forward', a
 		);
 	} finally {
 		await fs.rm(root, { recursive: true, force: true });
+	}
+});
+
+test('assistantConnectionNotice distinguishes verified MCP leases from unverified unknown/legacy evidence', async () => {
+	const f = await fixture(),
+		prior = { ...process.env },
+		sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+	Object.assign(process.env, f.env);
+	let liveMcp;
+	try {
+		await new Promise((r) => sleeper.once('spawn', r));
+		const config = getInstallation();
+		const leases = join(config.extension_state, 'processes');
+		await fs.mkdir(leases, { recursive: true });
+
+		// 1. No leases -> not connected
+		assert.deepEqual(await assistantConnectionNotice(config), {
+			connected: false,
+			verified: false,
+			blocking: [],
+			notice: null
+		});
+
+		// 2. Unknown-only evidence -> connected stays true (blocking), wording says could not verify and names PID/path
+		const unknownPath = join(leases, `${sleeper.pid}.json`);
+		await fs.writeFile(unknownPath, '{malformed');
+		const unknownRes = await assistantConnectionNotice(config);
+		assert.equal(unknownRes.connected, true);
+		assert.equal(unknownRes.verified, false);
+		assert.match(unknownRes.notice.title, /unverified/i);
+		assert.match(unknownRes.notice.message, /could not verify/i);
+		assert.equal(unknownRes.notice.message.includes(String(sleeper.pid)), true);
+		assert.equal(unknownRes.notice.message.includes(unknownPath), true);
+		assert.equal(unknownRes.notice.message.includes('An assistant is connected'), false);
+
+		// 3. Legacy-only evidence -> connected stays true (blocking), wording says could not verify and names PID/path
+		await fs.writeFile(unknownPath, JSON.stringify({ pid: sleeper.pid, role: 'mcp' }));
+		const legacyRes = await assistantConnectionNotice(config);
+		assert.equal(legacyRes.connected, true);
+		assert.equal(legacyRes.verified, false);
+		assert.match(legacyRes.notice.message, /could not verify/i);
+		assert.equal(legacyRes.notice.message.includes(String(sleeper.pid)), true);
+		assert.equal(legacyRes.notice.message.includes(unknownPath), true);
+		await fs.rm(unknownPath);
+
+		// 4. Genuine MCP lease -> produces the "connected" wording
+		const leaseModuleUrl = new URL('../src/lib/server/process-leases.js', import.meta.url).href;
+		liveMcp = spawn(
+			process.execPath,
+			[
+				'--input-type=module',
+				'-e',
+				`import { registerProcessLease } from ${JSON.stringify(leaseModuleUrl)}; process.on('SIGTERM', () => process.exit(143)); await registerProcessLease(JSON.parse(process.argv[1]), 'mcp'); process.stdout.write('ready\\n'); setInterval(() => {}, 60000);`,
+				JSON.stringify(config)
+			],
+			{ stdio: ['ignore', 'pipe', 'pipe'] }
+		);
+		await new Promise((res, rej) => {
+			let out = '';
+			let err = '';
+			liveMcp.stderr.on('data', (c) => (err += c));
+			liveMcp.stdout.on('data', (c) => {
+				out += c;
+				if (out.includes('ready\n')) res();
+			});
+			liveMcp.once('exit', (code) => rej(new Error(`child exited (${code}): ${err}`)));
+		});
+		const genuineRes = await assistantConnectionNotice(config);
+		assert.equal(genuineRes.connected, true);
+		assert.equal(genuineRes.verified, true);
+		assert.equal(genuineRes.notice.title, 'Assistant connected');
+		assert.match(genuineRes.notice.message, /An assistant is connected to Saturday/);
+	} finally {
+		if (liveMcp && liveMcp.exitCode === null && liveMcp.signalCode === null) {
+			liveMcp.kill('SIGKILL');
+			await new Promise((r) => liveMcp.once('exit', r));
+		}
+		if (sleeper.exitCode === null && sleeper.signalCode === null) {
+			sleeper.kill('SIGKILL');
+			await new Promise((r) => sleeper.once('exit', r));
+		}
+		for (const k of Object.keys(process.env)) if (!(k in prior)) delete process.env[k];
+		Object.assign(process.env, prior);
+		await fs.rm(f.root, { recursive: true, force: true });
 	}
 });

@@ -1,5 +1,16 @@
 # Saturday release notes
 
+## Saturday 0.1.4 — in development
+
+Not yet released. Database schema 1 and file manifest 1 are unchanged.
+
+### Process leases and maintenance reliability
+
+- Web and MCP runtimes now publish version-2 process leases (`<pid>.json`) backed by a per-process 256-bit secret and an unreferenced loopback identity listener (`127.0.0.1`), and synchronously remove their own verified lease on clean exit, `SIGTERM`, `SIGINT`, or stdin EOF.
+- Update, repair, uninstall, sign-in maintenance, and extension checks now challenge live PIDs over loopback instead of trusting `pid` liveness alone. Stale v2 leases left behind after a crash whose PID was reused by an unrelated process are ignored without deleting files during reads.
+- Legacy `{pid, role}` leases without an identity endpoint, identity probe timeouts/errors, and invalid or symlinked lease entries continue to block conservatively and now report the exact PID, lease path, and reason. Reconnect upgraded assistants to publish v2 proof; if an old legacy file blocks on an unrelated live PID, stop all Saturday runtimes, inspect the PID's owner, and move only that identified file to a recovery folder.
+- Limitations: forced termination (`SIGKILL`) or power loss can still leave abandoned v2 files on disk for later offline cleanup, and mixed-version old readers remain conservative until upgraded. Cross-platform runtime verification remains separate from local macOS checks.
+
 ## Saturday 0.1.3 — in development
 
 Not yet released. Database schema 1 and file manifest 1 are unchanged.
