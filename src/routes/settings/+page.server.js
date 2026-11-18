@@ -41,7 +41,7 @@ const {
 import { ServiceError, ValidationError } from '$lib/server/validation.js';
 import {
 	ownedRemovalTargets,
-	connectedClients,
+	assistantConnectionNotice,
 	CHECK_TTL_MS
 } from '$lib/server/installation-operations.js';
 import {
@@ -118,6 +118,7 @@ export async function load(event) {
 		updateCheck = null,
 		updateCheckExpired = false,
 		assistantConnected = false,
+		assistantNotice = null,
 		installationError = null,
 		deleteDataPaths = [],
 		deletionUnavailable = null;
@@ -128,7 +129,9 @@ export async function load(event) {
 			updateCheck?.checked_at && Date.now() - Date.parse(updateCheck.checked_at) > CHECK_TTL_MS
 		);
 		try {
-			assistantConnected = (await connectedClients(installation)) > 0;
+			const connection = await assistantConnectionNotice(installation);
+			assistantConnected = connection.connected;
+			assistantNotice = connection.notice;
 		} catch {
 			// Lease inspection is advisory; the controller still enforces disconnection.
 		}
@@ -166,6 +169,7 @@ export async function load(event) {
 		updateCheck,
 		updateCheckExpired,
 		assistantConnected,
+		assistantNotice,
 		installationError,
 		deleteDataPaths,
 		deletionUnavailable,

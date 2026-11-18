@@ -30,6 +30,7 @@ import {
 	validServerSession,
 	serverPaths
 } from './server-lifecycle.js';
+import { inspectProcessLeases, formatLeaseDiagnostic } from './process-leases.js';
 const repository = 'kennysantanu/saturday';
 const api = `https://api.github.com/repos/${repository}`;
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -552,17 +553,22 @@ export async function queueOperation(
 			selected = check;
 		}
 		// Without a disconnect wait, refuse now instead of after a multi-minute build.
-		if (
-			operation !== 'uninstall' &&
-			!(operation === 'update' && wait_for_disconnect) &&
-			(await connectedClients(config))
-		)
-			throw Object.assign(
-				new Error(
-					`An assistant is connected to Saturday. Quit the assistant app or disconnect Saturday, then ${operation === 'update' ? 'update' : 'repair'}.`
-				),
-				{ code: 'MCP_CONNECTED' }
-			);
+		if (operation !== 'uninstall' && !(operation === 'update' && wait_for_disconnect)) {
+			const blocking = await blockingClientLeases(config);
+			if (blocking.length) {
+				const hasGenuine = blocking.some((entry) => entry.status === 'genuine');
+				const extra = blocking
+					.filter((entry) => entry.status === 'legacy' || entry.status === 'unknown')
+					.map(formatLeaseDiagnostic)
+					.join(' ');
+				const lead = hasGenuine
+					? `An assistant is connected to Saturday. Quit the assistant app or disconnect Saturday, then ${operation === 'update' ? 'update' : 'repair'}.`
+					: `Could not verify whether an assistant is connected to Saturday. Resolve the process lease below before trying to ${operation === 'update' ? 'update' : 'repair'}.`;
+				throw Object.assign(new Error(`${lead}${extra ? ` ${extra}` : ''}`), {
+					code: 'MCP_CONNECTED'
+				});
+			}
+		}
 		if (operation === 'uninstall') {
 			const targets = ownedRemovalTargets(config, delete_data);
 			await assertSafeRemoval(targets);
@@ -584,6 +590,7 @@ export async function queueOperation(
 			'src/lib/server/access-settings.js',
 			'src/lib/server/access-network.js',
 			'src/lib/server/server-lifecycle.js',
+			'src/lib/server/process-leases.js',
 			'src/lib/server/installation-operations.js'
 		])
 			await fs.copyFile(join(helperRoot, file), join(worker, file));
@@ -642,30 +649,56 @@ export async function queueOperation(
 	}
 }
 
-// Counts live assistant (MCP) processes. Web UI leases are excluded; they stop with the UI.
-export async function connectedClients(config = getInstallation()) {
-	const dir = join(config.extension_state, 'processes');
-	let names;
-	try {
-		names = await fs.readdir(dir);
-	} catch (e) {
-		if (e.code === 'ENOENT') return 0;
-		throw e;
+export async function blockingClientLeases(config = getInstallation(), options = {}) {
+	const inspectionOptions =
+		options && typeof options === 'object'
+			? { ...options, includeSelf: false }
+			: { includeSelf: false };
+	const { entries } = await inspectProcessLeases(config, inspectionOptions);
+	return entries.filter(
+		(entry) =>
+			entry.status === 'unknown' ||
+			((entry.status === 'genuine' || entry.status === 'legacy') && entry.role !== 'web')
+	);
+}
+export function formatAssistantConnectionNotice(blocking) {
+	if (!blocking.length) {
+		return { connected: false, verified: false, blocking, notice: null };
 	}
-	let count = 0;
-	for (const name of names) {
-		if (!/^\d+\.json$/.test(name)) continue;
-		const pid = Number(name.slice(0, -5));
-		if (pid === process.pid || !alive(pid)) continue;
-		let role;
-		try {
-			role = JSON.parse(await fs.readFile(join(dir, name), 'utf8')).role;
-		} catch {
-			// An unreadable lease is treated as a client.
+	const verified = blocking.some((entry) => entry.status === 'genuine');
+	const diagnostics = blocking
+		.filter((entry) => entry.status === 'legacy' || entry.status === 'unknown')
+		.map(formatLeaseDiagnostic)
+		.join(' ');
+	if (verified) {
+		return {
+			connected: true,
+			verified: true,
+			blocking,
+			notice: {
+				title: 'Assistant connected',
+				message:
+					'An assistant is connected to Saturday. Quit the assistant app or disconnect Saturday before the update finishes building. Saturday waits up to two minutes, then stops without changing anything.' +
+					(diagnostics ? ` ${diagnostics}` : '')
+			}
+		};
+	}
+	return {
+		connected: true,
+		verified: false,
+		blocking,
+		notice: {
+			title: 'Assistant connection unverified',
+			message: `Could not verify whether an assistant is connected. Saturday blocks updates until the lease is resolved. ${diagnostics}`
 		}
-		if (role !== 'web') count++;
-	}
-	return count;
+	};
+}
+export async function assistantConnectionNotice(config = getInstallation(), options = {}) {
+	return formatAssistantConnectionNotice(await blockingClientLeases(config, options));
+}
+// Counts live assistant (MCP) processes. Web UI leases are excluded; they stop with the UI.
+export async function connectedClients(config = getInstallation(), options = {}) {
+	return (await blockingClientLeases(config, options)).length;
 }
 // Removes disposable controller/staging folders and previous builds beyond retention.
 // `keep` protects a running operation's controller/staging folders, never its previous build,
@@ -799,20 +832,27 @@ async function dataRecovery(config, libraryRoot = config.code_root) {
 	}
 	return { database: database.path, files: archive.path, extensions: ext };
 }
-async function assertClientsStopped(config) {
-	const dir = join(config.extension_state, 'processes');
-	if (!existsSync(dir)) return;
-	for (const name of await fs.readdir(dir)) {
-		if (!/^\d+\.json$/.test(name)) throw new Error('Unrecognized client lease requires repair.');
-		const pid = Number(name.slice(0, -5));
-		if (pid !== process.pid && alive(pid))
-			throw Object.assign(
-				new Error(
-					'Stopped waiting for assistant disconnect. Quit the assistant app or disconnect Saturday, then retry.'
-				),
-				{ code: 'MCP_CONNECTED' }
-			);
-	}
+async function assertClientsStopped(config, options = {}) {
+	const inspectionOptions =
+		options && typeof options === 'object'
+			? { ...options, includeSelf: false }
+			: { includeSelf: false };
+	const { entries } = await inspectProcessLeases(config, inspectionOptions);
+	const blocking = entries.filter(
+		(entry) => entry.status === 'genuine' || entry.status === 'legacy' || entry.status === 'unknown'
+	);
+	if (!blocking.length) return;
+	const extra = blocking
+		.filter((entry) => entry.status === 'legacy' || entry.status === 'unknown')
+		.map(formatLeaseDiagnostic)
+		.join(' ');
+	throw Object.assign(
+		new Error(
+			'Stopped waiting for assistant disconnect. Quit the assistant app or disconnect Saturday, then retry.' +
+				(extra ? ` ${extra}` : '')
+		),
+		{ code: 'MCP_CONNECTED' }
+	);
 }
 async function waitForClientsStopped(config, wait) {
 	const deadline = Date.now() + (wait ? 120000 : 0);

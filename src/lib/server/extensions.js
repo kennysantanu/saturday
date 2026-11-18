@@ -1,5 +1,10 @@
 import { withServerActivity } from './server-lifecycle.js';
 import { getInstallation, assertInstallationStorage, syncDirectory } from './installation.js';
+import {
+	registerProcessLease,
+	inspectProcessLeases,
+	formatLeaseDiagnostic
+} from './process-leases.js';
 // Shared extension lifecycle, database, and recovery. Extension code is trusted, not sandboxed.
 import * as fs from 'node:fs/promises';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
@@ -265,67 +270,53 @@ export async function setExtensionState(id, enabled, { remove = false } = {}) {
 	});
 }
 export async function registerExtensionRuntime(role = 'mcp') {
-	const p = extensionPaths();
-	await fs.mkdir(join(p.state, 'processes'), { recursive: true });
-	await withServerActivity(() =>
-		atomicJson(join(p.state, 'processes', `${process.pid}.json`), { pid: process.pid, role })
-	);
+	extensionPaths();
+	return withServerActivity(() => registerProcessLease(getInstallation(), role));
 }
 // Access maintenance must also refuse an independently launched development/preview UI.
-export async function assertWebRuntimeStopped() {
-	const directory = join(extensionPaths().state, 'processes');
-	let names;
-	try {
-		names = await fs.readdir(directory);
-	} catch (e) {
-		if (e.code === 'ENOENT') return;
-		throw e;
-	}
-	for (const name of names) {
-		if (!/^\d+\.json$/.test(name)) continue;
-		let record;
-		try {
-			record = JSON.parse(await fs.readFile(join(directory, name), 'utf8'));
-		} catch (e) {
-			if (e.code === 'ENOENT') continue;
-			throw e;
-		}
-		// Older leases do not identify web versus MCP: require them to stop once.
-		if (record.role === 'mcp') continue;
-		try {
-			process.kill(Number(name.slice(0, -5)), 0);
-		} catch (e) {
-			if (e.code !== 'ESRCH') throw e;
-			await fs.rm(join(directory, name), { force: true });
-			continue;
-		}
-		rejectExtension(
-			'RUNNING',
-			'Stop the independently launched Saturday web server or older unclassified runtime before changing sign-in settings.'
-		);
-	}
+export async function assertWebRuntimeStopped(options = {}) {
+	extensionPaths();
+	const inspectionOptions =
+		options && typeof options === 'object'
+			? { ...options, includeSelf: true }
+			: { includeSelf: true };
+	const { entries } = await inspectProcessLeases(getInstallation(), inspectionOptions);
+	const blocking = entries.filter(
+		(entry) =>
+			entry.status === 'unknown' ||
+			((entry.status === 'genuine' || entry.status === 'legacy') && entry.role !== 'mcp')
+	);
+	if (!blocking.length) return;
+	const extra = blocking
+		.filter((entry) => entry.status === 'legacy' || entry.status === 'unknown')
+		.map(formatLeaseDiagnostic)
+		.join(' ');
+	rejectExtension(
+		'RUNNING',
+		'Stop the independently launched Saturday web server or older unclassified runtime before changing sign-in settings.' +
+			(extra ? ` ${extra}` : '')
+	);
 }
-export async function assertExtensionProcessesStopped() {
-	let names = [];
-	try {
-		names = await fs.readdir(join(extensionPaths().state, 'processes'));
-	} catch (e) {
-		if (e.code !== 'ENOENT') throw e;
-	}
-	for (const name of names) {
-		const pid = Number(name.replace('.json', ''));
-		if (!Number.isSafeInteger(pid) || pid === process.pid) continue;
-		try {
-			process.kill(pid, 0);
-			rejectExtension(
-				'RUNNING',
-				'Stop Saturday and all MCP processes before installing, updating, or completing removal.'
-			);
-		} catch (e) {
-			if (e.code !== 'ESRCH') throw e;
-			await fs.rm(join(extensionPaths().state, 'processes', name), { force: true });
-		}
-	}
+export async function assertExtensionProcessesStopped(options = {}) {
+	extensionPaths();
+	const inspectionOptions =
+		options && typeof options === 'object'
+			? { ...options, includeSelf: false }
+			: { includeSelf: false };
+	const { entries } = await inspectProcessLeases(getInstallation(), inspectionOptions);
+	const blocking = entries.filter(
+		(entry) => entry.status === 'genuine' || entry.status === 'legacy' || entry.status === 'unknown'
+	);
+	if (!blocking.length) return;
+	const extra = blocking
+		.filter((entry) => entry.status === 'legacy' || entry.status === 'unknown')
+		.map(formatLeaseDiagnostic)
+		.join(' ');
+	rejectExtension(
+		'RUNNING',
+		'Stop Saturday and all MCP processes before installing, updating, or completing removal.' +
+			(extra ? ` ${extra}` : '')
+	);
 }
 export function toolName(id, local) {
 	const name = `extension_${extensionId(id).replaceAll('-', '_')}_${local}`;
