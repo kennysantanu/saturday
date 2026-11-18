@@ -39,7 +39,11 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		filename: 'letter.html',
 		content: '<!doctype html>\n<html><body><h1>Cover</h1><p>Dear hiring manager</p></body></html>\n'
 	});
+	const hazardText =
+		'Before <style> inside text.\n\n- item with <script> inside\n- second item\n\nAfter paragraph.\n';
+	await createDocument({ filename: 'hazard.md', content: hazardText });
 	const docs = (await listDocuments({})).documents;
+	const hazardId = docs.find((d) => d.filename === 'hazard.md').id;
 	const id = docs.find((d) => d.filename === 'resume.md').id;
 	const tableId = docs.find((d) => d.filename === 'table.md').id;
 	const copyId = docs.find((d) => d.filename === 'copy.md').id;
@@ -481,6 +485,61 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		assert.notEqual(await page.$('#document_content'), null, 'stayed in the source view');
 		assert.equal(await page.$('.markdown-editor'), null, 'visual mode was not entered');
 		assert.match(await page.$eval('p[role="status"]', (e) => e.textContent), /headings underlined/);
+		// Real browser: literal tags must not swallow the text after them (the unit suite has no DOMParser).
+		const hazardProse = () => page.$eval('.markdown-editor .document-prose', (e) => e.innerText);
+		const expectHazardText = (prose, label) => {
+			for (const part of [
+				'Before <style> inside text.',
+				'item with <script> inside',
+				'second item',
+				'After paragraph.'
+			])
+				assert(
+					prose.includes(part),
+					`${label}: "${part}" is missing from ${JSON.stringify(prose)}`
+				);
+		};
+		await page.setViewport({ width: 1280, height: 800 });
+		await page.goto(`${base}/documents/${hazardId}?edit=1`, { waitUntil: 'networkidle0' });
+		await page.waitForSelector('.markdown-editor .document-prose');
+		assert.equal(
+			await page.$('#document_content'),
+			null,
+			'opened in the visual editor, not source'
+		);
+		assert.equal(
+			await page.$eval('.segmented button:first-child', (e) => e.getAttribute('aria-pressed')),
+			'true',
+			'Visual is the active mode'
+		);
+		expectHazardText(await hazardProse(), 'opened');
+		await new Promise((r) => setTimeout(r, 400));
+		await page.click('.markdown-editor .document-prose > p:last-child');
+		await page.keyboard.press('End');
+		await page.keyboard.type(' Edited.');
+		await page.keyboard.down('Control');
+		await page.keyboard.press('s');
+		await page.keyboard.up('Control');
+		await page.waitForFunction(
+			() => !location.search.includes('edit') || document.body.innerText.includes('Edited.'),
+			{ timeout: 10000 }
+		);
+		let saved;
+		for (let i = 0; i < 50; i++) {
+			saved = (await getDocument({ id: hazardId, include_content: true })).content;
+			if (saved.includes('Edited.')) break;
+			await new Promise((r) => setTimeout(r, 200));
+		}
+		assert.match(saved, /After paragraph\. Edited\./, 'the edit was saved');
+		// Tags are saved as text (`&lt;style&gt;`), as the design guide states, and read back as the same text.
+		for (const part of [
+			'Before &lt;style&gt; inside text.',
+			'- item with &lt;script&gt; inside\n- second item'
+		])
+			assert(saved.includes(part), `saved file keeps "${part}": ${JSON.stringify(saved)}`);
+		await page.goto(`${base}/documents/${hazardId}?edit=1`, { waitUntil: 'networkidle0' });
+		await page.waitForSelector('.markdown-editor .document-prose');
+		expectHazardText(await hazardProse(), 'reopened');
 	} finally {
 		await browser?.close();
 		child.kill();
