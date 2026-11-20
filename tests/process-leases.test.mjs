@@ -12,9 +12,11 @@ import {
 	MAX_FRAME_BYTES,
 	computeLeaseHmac,
 	defaultProbeEndpoint,
+	defaultProbePid,
 	formatLeaseDiagnostic,
 	inspectProcessLeases,
-	registerProcessLease
+	registerProcessLease,
+	sweepDeadLeases
 } from '../src/lib/server/process-leases.js';
 import { connectedClients } from '../src/lib/server/installation-operations.js';
 import {
@@ -300,7 +302,20 @@ test('classifications: unrelated live PID, dead PID, genuine runtime, web role, 
 			})
 		);
 
-		// 2. Dead PID lease -> dead (ignored, not deleted)
+		// 3. Atomic temp filename -> ignored completely
+		await fs.writeFile(join(processesDir, `${sleeper.pid}.json.${randomUUID()}.tmp`), '{}');
+
+		// 4. Genuine live assistant child -> counted
+		const mcpChild = await spawnRegisteredRuntime(config, 'mcp', 'stay');
+		children.push(mcpChild.child);
+
+		// 5. Genuine live web child -> excluded from assistant count
+		const webChild = await spawnRegisteredRuntime(config, 'web', 'stay');
+		children.push(webChild.child);
+
+		// 4b. Dead PID lease -> inspected as dead, and left in place by the reader.
+		// Written after registration on purpose: a runtime sweeps provably dead leases when it
+		// registers, so a fixture created earlier would be gone before this inspection.
 		const deadPid = 99999999;
 		const deadPath = join(processesDir, `${deadPid}.json`);
 		await fs.writeFile(
@@ -314,17 +329,6 @@ test('classifications: unrelated live PID, dead PID, genuine runtime, web role, 
 				identity_port: refusedPort
 			})
 		);
-
-		// 3. Atomic temp filename -> ignored completely
-		await fs.writeFile(join(processesDir, `${sleeper.pid}.json.${randomUUID()}.tmp`), '{}');
-
-		// 4. Genuine live assistant child -> counted
-		const mcpChild = await spawnRegisteredRuntime(config, 'mcp', 'stay');
-		children.push(mcpChild.child);
-
-		// 5. Genuine live web child -> excluded from assistant count
-		const webChild = await spawnRegisteredRuntime(config, 'web', 'stay');
-		children.push(webChild.child);
 
 		const inspected = await inspectProcessLeases(config, {
 			probePid: (pid) => (pid === deadPid ? 'dead' : 'alive')
@@ -818,6 +822,55 @@ test('concurrent readers never modify or delete lease files and respect concurre
 			}
 		});
 		assert.ok(peak <= 8 && peak >= 1, `expected peak concurrency <= 8, got ${peak}`);
+	} finally {
+		for (const child of children) await stopChild(child);
+		await fs.rm(root, { recursive: true, force: true });
+	}
+});
+
+test('a startup sweep removes only leases whose process is provably gone', async () => {
+	const { root, config, processesDir } = await makeTempConfig();
+	const children = [];
+	try {
+		await fs.mkdir(processesDir, { recursive: true });
+		const live = await spawnSleeper();
+		children.push(live);
+		const dead = await spawnSleeper();
+		const record = (pid, port) =>
+			JSON.stringify({
+				pid,
+				role: 'mcp',
+				lease_version: LEASE_VERSION,
+				instance_id: randomUUID(),
+				secret: randomBytes(32).toString('hex'),
+				identity_port: port
+			});
+		await fs.writeFile(join(processesDir, `${live.pid}.json`), record(live.pid, 40201));
+		await fs.writeFile(join(processesDir, `${dead.pid}.json`), record(dead.pid, 40202));
+		// Probes that cannot decide must never be treated as death.
+		await fs.writeFile(join(processesDir, '999001.json'), record(999001, 40203));
+		await fs.writeFile(join(processesDir, '999002.json'), record(999002, 40204));
+		// Never a lease, so never swept.
+		await fs.writeFile(join(processesDir, 'notes.txt'), 'keep');
+		await fs.writeFile(join(processesDir, '0.json'), record(0, 40205));
+
+		await stopChild(dead);
+
+		const result = await sweepDeadLeases(config, {
+			probePid: (pid) => {
+				if (pid === 999001) return 'eperm';
+				if (pid === 999002) return 'error';
+				return defaultProbePid(pid);
+			}
+		});
+		const remaining = (await fs.readdir(processesDir)).sort();
+		assert.deepEqual(result.removed, [`${dead.pid}.json`], 'only the dead lease is removed');
+		assert.ok(!remaining.includes(`${dead.pid}.json`), 'dead lease file is gone');
+		assert.ok(remaining.includes(`${live.pid}.json`), 'live lease survives');
+		assert.ok(remaining.includes('999001.json'), 'a PID we may not probe survives');
+		assert.ok(remaining.includes('999002.json'), 'a PID whose probe failed survives');
+		assert.ok(remaining.includes('notes.txt'), 'non-lease files are untouched');
+		assert.ok(remaining.includes('0.json'), 'an invalid PID is left alone');
 	} finally {
 		for (const child of children) await stopChild(child);
 		await fs.rm(root, { recursive: true, force: true });
