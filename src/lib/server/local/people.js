@@ -34,8 +34,10 @@ function person(db, id) {
 	return personRow(db.prepare(`${summary} WHERE n.id=?`).get(id) ?? missing('Person'));
 }
 function parents(db, input) {
-	person(db, input.network_id);
-	if (!db.prepare('SELECT id FROM jobs WHERE id=?').get(input.job_id)) missing('Job');
+	const p = person(db, input.network_id);
+	const j = db.prepare('SELECT id, job_title, company_name FROM jobs WHERE id=?').get(input.job_id);
+	if (!j) missing('Job');
+	return { person: p, job: j };
 }
 function origin(value) {
 	return parseSchema(z.enum(['manual', 'assistant']), value);
@@ -266,6 +268,49 @@ export function unlinkJobNetwork(input) {
 			.prepare('DELETE FROM job_networks WHERE job_id=? AND network_id=?')
 			.run(values.job_id, values.network_id);
 		return { ...values, linked: false, removed: !!result.changes };
+	});
+}
+export function unlinkJobNetworkConfirmed(input, { confirmed = false } = {}) {
+	const values = parseSchema(
+		z.object({ job_id: networkLinkShape.job_id, network_id: networkIdSchema }),
+		input
+	);
+	return write((db) => {
+		const { person: p, job } = parents(db, values);
+		const row = db
+			.prepare('SELECT notes FROM job_networks WHERE job_id=? AND network_id=?')
+			.get(values.job_id, values.network_id);
+		const note = typeof row?.notes === 'string' ? row.notes.trim() : '';
+		if (note && !confirmed) {
+			return {
+				...values,
+				job_title: job.job_title,
+				company_name: job.company_name,
+				network_name: p.name,
+				linked: false,
+				removed: false,
+				note_confirmation_required: true,
+				note
+			};
+		}
+		const result = db
+			.prepare('DELETE FROM job_networks WHERE job_id=? AND network_id=?')
+			.run(values.job_id, values.network_id);
+		return { ...values, linked: false, removed: !!result.changes };
+	});
+}
+// Whether a link carries a note worth losing. Whitespace-only counts as no note (spec edge case).
+export function jobLinkNote(input) {
+	const values = parseSchema(
+		z.object({ job_id: networkLinkShape.job_id, network_id: networkIdSchema }),
+		input
+	);
+	return read((db) => {
+		const row = db
+			.prepare('SELECT notes FROM job_networks WHERE job_id=? AND network_id=?')
+			.get(values.job_id, values.network_id);
+		const note = typeof row?.notes === 'string' ? row.notes.trim() : '';
+		return { job_id: values.job_id, network_id: values.network_id, note: note || null };
 	});
 }
 // One batched lookup lets pickers disable existing links beyond the displayed page.
