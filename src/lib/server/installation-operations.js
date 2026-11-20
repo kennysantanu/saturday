@@ -580,9 +580,13 @@ export async function queueOperation(
 		await fs.mkdir(join(worker, 'scripts'), { recursive: true });
 		await fs.mkdir(join(worker, 'src/lib/server'), { recursive: true });
 		await fs.writeFile(join(worker, 'package.json'), '{"type":"module"}');
-		const helperRoot = existsSync(config.code_root)
-			? config.code_root
-			: fileURLToPath(new URL('../../../', import.meta.url));
+		// Helpers come from the code doing this operation first, then the installed app. An older
+		// installation cannot supply a helper that only a newer source has, which is exactly the
+		// upgrade case, so each file is resolved on its own instead of pinning one root.
+		const helperRoots = [
+			fileURLToPath(new URL('../../../', import.meta.url)),
+			config.code_root
+		].filter((root) => root && existsSync(root));
 		for (const file of [
 			'scripts/install.mjs',
 			'src/lib/distribution.js',
@@ -592,8 +596,11 @@ export async function queueOperation(
 			'src/lib/server/server-lifecycle.js',
 			'src/lib/server/process-leases.js',
 			'src/lib/server/installation-operations.js'
-		])
-			await fs.copyFile(join(helperRoot, file), join(worker, file));
+		]) {
+			const from = helperRoots.find((root) => existsSync(join(root, file)));
+			if (!from) throw new Error(`Missing maintenance helper: ${file}`);
+			await fs.copyFile(join(from, file), join(worker, file));
+		}
 		let node = existsSync(config.node_path) ? config.node_path : process.execPath;
 		if (process.platform === 'win32') {
 			node = join(worker, 'node.exe');
