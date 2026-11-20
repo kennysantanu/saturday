@@ -566,6 +566,7 @@ export const actions = {
 		}
 		redirect(303, '/settings?saved=restored');
 	},
+	// Database-only backup and download action (retained for compatibility and tests; no UI form submits here).
 	download: async () => {
 		let backup;
 		try {
@@ -574,6 +575,18 @@ export const actions = {
 			return actionFailure(error);
 		}
 		redirect(303, `/settings/backups/${backup.backup_id}`);
+	},
+	// One-click export: create a coordinated database + files backup, then stream the verified ZIP.
+	exportSnapshot: async () => {
+		let backup;
+		try {
+			backup = await createManualBackup({ contents: 'all' });
+		} catch (error) {
+			return actionFailure(error);
+		}
+		// createBackupPair identifies the set by its database artifact; the download route resolves
+		// that id together with contents=all into the three-entry ZIP.
+		redirect(303, `/settings/backups/${backup.database_backup_id}?contents=all`);
 	},
 	deleteBackup: async ({ request }) => {
 		try {

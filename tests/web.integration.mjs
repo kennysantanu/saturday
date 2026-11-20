@@ -2,13 +2,15 @@ import { listReminders } from '../src/lib/server/local/reminders.js';
 import * as networks from '../src/lib/server/local/people.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { parse } from 'devalue';
+import yauzl from 'yauzl';
 import { migrateDatabase } from '../src/lib/server/database.js';
+import { getInstallation } from '../src/lib/server/installation.js';
 import { createJob, getJob, setJobScore } from '../src/lib/server/local/jobs.js';
 import { listBackups } from '../src/lib/server/backups.js';
 import { readBuildInfo } from '../scripts/build-info.mjs';
@@ -54,15 +56,16 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		const settingsResponse = await fetch(`${base}/settings`);
 		assert.equal(settingsResponse.headers.get('x-saturday-build'), readBuildInfo().id);
 		const settings = await settingsResponse.text();
-		assert.ok(settings.includes('Back up now'));
+		assert.ok(settings.includes('Download database and files'));
 		assert.ok(settings.includes('Diagnostics'));
 		assert.ok(settings.includes('Database schema'));
 		assert.ok(settings.includes('saturday.database'));
 		assert.ok(settings.includes('saturday.files'));
 		assert.ok(settings.includes(join(scratch, 'backups', 'database')));
 		assert.ok(settings.includes(process.env.SATURDAY_DB_PATH + '.restore'));
+		const filesStateDir = getInstallation().files_state;
 		assert.ok(settings.includes(join(scratch, 'backups', 'files')));
-		assert.ok(settings.includes(process.env.SATURDAY_FILES_PATH + '.state'));
+		assert.ok(settings.includes(filesStateDir));
 		assert.ok(!settings.includes('Automatic backups'));
 		assert.equal(listBackups().backups.length, 0);
 		const created = await fetch(`${base}/settings?/download`, {
@@ -459,8 +462,14 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		);
 		assert.ok(savedSet);
 		const backupPage = await (await fetch(`${base}/settings`)).text();
+		assert.ok(backupPage.includes('Download database and files'));
+		assert.ok(backupPage.includes('Advanced backup options'));
+		assert.ok(backupPage.includes('action="?/backup"'));
+		assert.ok(backupPage.includes('name="contents"'));
+		assert.match(backupPage, /<option[^>]*value="all"[^>]*>Database and files<\/option>/);
+		assert.match(backupPage, /<option[^>]*value="files"[^>]*>Files only<\/option>/);
+		assert.match(backupPage, /<option[^>]*value="database"[^>]*>Database only<\/option>/);
 		assert.ok(backupPage.includes('Back up now'));
-		assert.ok(backupPage.includes('Files only'));
 		assert.ok(backupPage.includes('Delete'));
 		assert.ok(backupPage.includes('Import a combined backup ZIP'));
 		assert.ok(!backupPage.includes('Automatic file backups'));
@@ -485,6 +494,114 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		assert.equal((await post('deleteBackup', deletion)).type, 'failure');
 		deletion.set('confirm', 'true');
 		assert.equal((await post('deleteBackup', deletion)).type, 'redirect');
+		// One action exports both halves as one ZIP with exactly the three expected entries.
+		const exported = await post('exportSnapshot', new FormData());
+		assert.equal(exported.type, 'redirect');
+		const exportLocation = exported.location ?? exported.data?.location;
+		assert.ok(String(exportLocation).includes('contents=all'), 'export targets the combined ZIP');
+		const exportPath = String(exportLocation).replace(/^https?:\/\/[^/]+/, '');
+		const exportZip = await fetch(`${base}${exportPath}`);
+		assert.equal(exportZip.status, 200);
+		const exportBuffer = Buffer.from(await exportZip.arrayBuffer());
+		assert.equal(
+			exportBuffer.subarray(0, 2).toString(),
+			'PK',
+			'export is a ZIP, not a bare database'
+		);
+		const zipEntries = await new Promise((resolveEntries, rejectEntries) => {
+			yauzl.fromBuffer(exportBuffer, { lazyEntries: true }, (err, zipfile) => {
+				if (err) return rejectEntries(err);
+				const names = [];
+				zipfile.on('entry', (entry) => {
+					names.push(entry.fileName);
+					zipfile.readEntry();
+				});
+				zipfile.on('end', () => resolveEntries(names.sort()));
+				zipfile.on('error', rejectEntries);
+				zipfile.readEntry();
+			});
+		});
+		assert.deepEqual(
+			zipEntries,
+			['database.sqlite', 'files.zip', 'pair.json'],
+			'exported ZIP has exactly the three coordinated backup entries'
+		);
+
+		// Invalid / unknown file_backup_id sent to ?/filePairPrepare fails cleanly (400, no 500).
+		const badPairPrepare = new FormData();
+		badPairPrepare.set('file_backup_id', '00000000-0000-0000-0000-000000000000');
+		const badPairResult = await post('filePairPrepare', badPairPrepare);
+		assert.equal(badPairResult.type, 'failure');
+		assert.equal(badPairResult.status, 400);
+		assert.ok(badPairResult.data?.fileError, 'invalid file_backup_id reports a fileError');
+
+		// Regression for Fix 1: GET /settings (with or without ?restore_imported) never prepares a
+		// restore preview or writes pair-restore state, so an imported bundle can be deleted immediately.
+		const importedForDelete = await fetch(`${base}/settings/files/import?bundle=true`, {
+			method: 'POST',
+			headers: { origin: base, 'content-type': 'application/zip' },
+			body: bundle
+		});
+		assert.equal(importedForDelete.status, 200);
+		const deleteEntry = await importedForDelete.json();
+		const readRestoreStateFiles = () =>
+			existsSync(filesStateDir)
+				? readdirSync(filesStateDir)
+						.filter((name) => name.endsWith('.pair-restore.json') || name.endsWith('.restore.json'))
+						.sort()
+				: [];
+		assert.deepEqual(readRestoreStateFiles(), [], 'no restore preview state exists before GET');
+		const plainSettings = await fetch(`${base}/settings`);
+		assert.equal(plainSettings.status, 200);
+		assert.deepEqual(readRestoreStateFiles(), [], 'GET /settings writes no restore preview state');
+		const legacyParamSettings = await fetch(
+			`${base}/settings?restore_imported=${encodeURIComponent(deleteEntry.file_backup_id)}`
+		);
+		assert.equal(legacyParamSettings.status, 200);
+		assert.ok(
+			!(await legacyParamSettings.text()).includes('Restore the file you just imported'),
+			'GET /settings ignores ?restore_imported'
+		);
+		assert.deepEqual(
+			readRestoreStateFiles(),
+			[],
+			'GET /settings?restore_imported writes no restore preview state'
+		);
+		const immediateDelete = new FormData();
+		immediateDelete.set('backup_id', deleteEntry.database_backup_id);
+		immediateDelete.set('contents', 'all');
+		immediateDelete.set('confirm', 'true');
+		assert.equal(
+			(await post('deleteBackup', immediateDelete)).type,
+			'redirect',
+			'a freshly imported bundle can be deleted immediately'
+		);
+
+		// Post-import preview preparation goes through POST ?/filePairPrepare and does write state.
+		const importedForPreview = await fetch(`${base}/settings/files/import?bundle=true`, {
+			method: 'POST',
+			headers: { origin: base, 'content-type': 'application/zip' },
+			body: bundle
+		});
+		assert.equal(importedForPreview.status, 200);
+		const previewEntry = await importedForPreview.json();
+		const postImportPrep = new FormData();
+		postImportPrep.set('file_backup_id', previewEntry.file_backup_id);
+		const postImportPreview = await post('filePairPrepare', postImportPrep);
+		assert.equal(postImportPreview.type, 'success');
+		assert.ok(
+			postImportPreview.data?.filePairPreview?.restore_id,
+			'POST ?/filePairPrepare returns the coordinated restore preview'
+		);
+		const afterPostState = readRestoreStateFiles();
+		assert.ok(
+			afterPostState.length > 0 &&
+				afterPostState.includes(
+					`${postImportPreview.data.filePairPreview.restore_id}.pair-restore.json`
+				),
+			'POST ?/filePairPrepare writes restore preview state into files_state'
+		);
+
 		const selection = new FormData();
 		selection.set('backup_id', `all:${savedSet.backup_id}`);
 		const pairPreview = await post('prepare', selection);
