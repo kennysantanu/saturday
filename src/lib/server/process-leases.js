@@ -214,6 +214,61 @@ function assertSafeProcessesDirectory(dir) {
 		throw new Error('Unsafe process lease directory.');
 }
 
+/**
+ * Removes lease files whose process is provably gone.
+ *
+ * A runtime deletes its own lease on exit, so a crash, SIGKILL or power loss leaves the file
+ * behind with no owner. Nothing else may remove it: the readers deliberately never delete,
+ * because a read-compare-unlink race can unlink a file another process is publishing. The
+ * owning installation can, at startup, because it knows a dead PID cannot be its owner.
+ *
+ * Only ESRCH removes a file. A PID that is alive, or that cannot be probed, keeps its lease:
+ * that is the conservative-blocking case, and treating it as absent would hide a real client.
+ */
+export async function sweepDeadLeases(
+	config = getInstallation(),
+	{ probePid = defaultProbePid, processesDir: override } = {}
+) {
+	if (!override && typeof config?.extension_state !== 'string')
+		throw new Error('Extension state directory is required for lease sweeping.');
+	const dir = override || join(resolve(config.extension_state), 'processes');
+	let names;
+	try {
+		names = await fs.readdir(dir);
+	} catch (error) {
+		if (error.code === 'ENOENT') return { removed: [], kept: 0 };
+		throw error;
+	}
+	const removed = [];
+	let kept = 0;
+	for (const name of names) {
+		// Skip atomic publication temporaries and anything not a canonical lease.
+		if (ATOMIC_TEMP_NAME.test(name) || !CANONICAL_LEASE_NAME.test(name)) continue;
+		const pid = Number(name.slice(0, -5));
+		if (!Number.isSafeInteger(pid) || pid < 1 || pid === process.pid) {
+			kept++;
+			continue;
+		}
+		if (probePid(pid) !== 'dead') {
+			kept++;
+			continue;
+		}
+		const path = join(dir, name);
+		try {
+			const stat = await fs.lstat(path);
+			if (stat.isSymbolicLink() || !stat.isFile()) {
+				kept++;
+				continue;
+			}
+			await fs.rm(path, { force: true });
+			removed.push(name);
+		} catch (error) {
+			if (error.code !== 'ENOENT') kept++;
+		}
+	}
+	return { removed, kept };
+}
+
 export async function registerProcessLease(config = getInstallation(), role = 'mcp', options = {}) {
 	if (!VALID_ROLES.has(role)) throw new Error(`Unsupported process lease role: ${String(role)}.`);
 	if (!config?.extension_state || typeof config.extension_state !== 'string')
@@ -226,6 +281,20 @@ export async function registerProcessLease(config = getInstallation(), role = 'm
 	return serializeForStateDir(registry, stateDir, async () => {
 		installExitHook(registry);
 		assertSafeProcessesDirectory(processesDir);
+		// Once per state directory per process: leave crash debris from earlier runs behind and
+		// the folder fills with files that can never mean anything again.
+		if (!registry.swept?.has(stateDir)) {
+			registry.swept = registry.swept || new Set();
+			try {
+				await sweepDeadLeases(config, {
+					probePid: options.probePid,
+					processesDir: processesDir
+				});
+			} catch {
+				// A sweep is housekeeping: never let it stop a runtime from registering.
+			}
+			registry.swept.add(stateDir);
+		}
 
 		const existing = registry.entries.get(stateDir);
 		if (existing && !existing.closing) {
