@@ -8,6 +8,10 @@ Not yet released. Database schema 1 and file manifest 1 are unchanged.
 
 - Unlinking a job–person link that carries a saved relationship note now asks for confirmation and states that the note will be lost; links without a note unlink straight through, there is no Undo for unlinking yet, unlinking through the MCP assistant still removes a link and its note without prompting because MCP has no confirmation UI, and confirming an unlink in one tab after another tab edited the same note removes the link with the newer note rather than re-prompting.
 
+### Backups
+
+- Backups export as one ZIP that holds your database and every document, and importing that same file restores both. Importing a combined backup ZIP now takes you straight to the restore preview for the file you chose instead of asking you to find it again in the list. The primary control is a single **Download database and files** button (which also saves a local copy); creating a local database-only, files-only, or combined backup without downloading remains under **Advanced backup options**.
+
 ### Process leases and maintenance reliability
 
 - Web and MCP runtimes now publish version-2 process leases (`<pid>.json`) backed by a per-process 256-bit secret and an unreferenced loopback identity listener (`127.0.0.1`), and synchronously remove their own verified lease on clean exit, `SIGTERM`, `SIGINT`, or stdin EOF.
