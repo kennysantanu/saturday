@@ -6,6 +6,7 @@ import { getJob, searchJobs } from '$lib/server/application.js';
 import { ServiceError, ValidationError, localCalendarDate } from '$lib/server/validation.js';
 import { networkReturn, networkDetailUrl } from '$lib/network-navigation.js';
 import { recordDeletionAction } from '$lib/server/record-deletion-actions.js';
+import { confirmedUnlink } from '$lib/server/note-loss-confirmation.js';
 export async function load({ params, url }) {
 	let person;
 	try {
@@ -121,7 +122,10 @@ export const actions = {
 	deletePerson: recordDeletionAction('person', networks.deleteNetwork),
 	link: action(async (i) => await networks.linkJobNetwork(i), 'network-linked'),
 	note: action(networks.editJobNetwork, 'network-note'),
-	unlink: action(networks.unlinkJobNetwork, 'network-unlinked'),
+	unlink: confirmedUnlink('person', 'network-unlinked', {
+		redirectTo: ({ params, url, saved }) =>
+			networkDetailUrl(params.id, url.searchParams.get('return_to'), url.searchParams, saved)
+	}),
 	addInteraction: action(
 		async (i) => await networks.addNetworkUpdate({ ...i, ...optionalReminder(i) }),
 		'interaction'

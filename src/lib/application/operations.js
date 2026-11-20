@@ -31,6 +31,8 @@ const records = [
 	'linkJobNetwork',
 	'editJobNetwork',
 	'unlinkJobNetwork',
+	'unlinkJobNetworkConfirmed',
+	'jobLinkNote',
 	'networkLinkIds',
 	'listNetworkUpdates',
 	'addNetworkUpdate',

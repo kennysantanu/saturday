@@ -39,6 +39,7 @@
 	import { hostOf, formatDate } from '$lib/format';
 	import JobUpdateDialog from '$lib/components/app/job-update-dialog.svelte';
 	import JobPersonPicker from '$lib/components/app/job-person-picker.svelte';
+	import ConfirmDialog from '$lib/components/app/confirm-dialog.svelte';
 	import UnsavedDialog from '$lib/components/app/unsaved-dialog.svelte';
 	import { UnsavedChanges } from '$lib/unsaved.svelte';
 
@@ -100,6 +101,31 @@
 	let notePersonId = $state('');
 	let notePersonName = $state('');
 	let networkNote = $state('');
+	let unlinkOpen = $state(false);
+	let unlinkPerson = $state<{
+		id: number | string;
+		name: string;
+		note?: string | null;
+	} | null>(null);
+	function formatPersonLabel(person: { id: number | string; name?: string | null }) {
+		return person.name ? `${person.name} (#${person.id})` : `person #${person.id}`;
+	}
+	const noteLossPerson = $derived(
+		form?.noteLoss
+			? data.people.networks.find(
+					(person: { id: number | string; name: string }) =>
+						String(person.id) === String(form.noteLoss.network_id)
+				)
+			: null
+	);
+	const noteLossLabel = $derived(
+		form?.noteLoss
+			? formatPersonLabel({
+					id: form.noteLoss.network_id,
+					name: form.noteLoss.network_name ?? noteLossPerson?.name
+				})
+			: ''
+	);
 	const networkErrors = $derived(
 		form?.action?.startsWith('network-') ? errors : data.networkErrors
 	);
@@ -134,6 +160,7 @@
 				if (result.type === 'redirect' || result.type === 'success') {
 					if (guarded) noteGuard.dirty = false;
 					networkNoteOpen = false;
+					unlinkOpen = false;
 				}
 				await update({ reset: false });
 				if (guarded) noteGuard.saving = false;
@@ -143,6 +170,7 @@
 		},
 		() => {
 			noteGuard.saving = false;
+			unlinkOpen = false;
 		}
 	);
 </script>
@@ -243,7 +271,7 @@
 							documents: data.documentsError ? null : data.documentCount
 						}}
 						action={formAction('deleteJob')}
-						disabled={!!editor || networkNoteOpen || !!data.personPicker || scoreOpen}
+						disabled={!!editor || networkNoteOpen || unlinkOpen || !!data.personPicker || scoreOpen}
 					/>
 				{/key}
 			{/snippet}
@@ -258,6 +286,31 @@
 			>{/if}
 		{#if pageError}
 			<Notice tone="error" title="The change was not saved">{pageError}</Notice>
+		{/if}
+		{#if form?.action === 'network-unlinked' && form?.noteLoss}
+			<Notice tone="error" title="Unlink and lose the note?">
+				<p>
+					Unlink {noteLossLabel}? The note saved on this link will be deleted with it.
+				</p>
+				{#if form.noteLoss.note}
+					<p
+						class="mt-2 line-clamp-3 rounded-[var(--r-group)] border border-border/70 bg-background/70 px-3 py-2 text-sm break-words whitespace-pre-wrap text-foreground"
+					>
+						{form.noteLoss.note}
+					</p>
+				{/if}
+				<form
+					method="POST"
+					action={formAction('networkUnlink')}
+					use:enhance={enhanceNetwork}
+					class="mt-3 flex flex-wrap items-center gap-2"
+				>
+					<input type="hidden" name="network_id" value={form.noteLoss.network_id} />
+					<input type="hidden" name="confirm_note_loss" value="1" />
+					<Button type="submit" variant="destructive" size="sm">Unlink</Button>
+					<Button href={networkHref({})} variant="ghost" size="sm">Cancel</Button>
+				</form>
+			</Notice>
 		{/if}
 
 		<div class="grid min-w-0 gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
@@ -454,15 +507,32 @@
 									}}><Pencil data-icon="inline-start" />Edit link note</Button
 								>
 								<form
+									id={`unlink-person-${person.id}`}
 									method="POST"
 									action={formAction('networkUnlink')}
 									use:enhance={enhanceNetwork}
 								>
-									<input type="hidden" name="network_id" value={person.id} /><Button
+									<input
+										type="hidden"
+										name="network_id"
+										value={person.id}
+									/>{#if unlinkOpen && unlinkPerson?.id === person.id}<input
+											type="hidden"
+											name="confirm_note_loss"
+											value="1"
+										/>{/if}<Button
 										type="submit"
 										size="sm"
 										variant="ghost"
-										aria-label={`Unlink ${person.name}`}>Unlink</Button
+										aria-label={`Unlink ${person.name}`}
+										onclick={(event) => {
+											const savedNote = person.job_link.notes?.trim();
+											if (savedNote) {
+												event.preventDefault();
+												unlinkPerson = { id: person.id, name: person.name, note: savedNote };
+												unlinkOpen = true;
+											}
+										}}>Unlink</Button
 									>
 								</form>
 							{/snippet}
@@ -547,3 +617,20 @@
 		/>
 	{/key}
 {/if}
+
+<ConfirmDialog
+	bind:open={unlinkOpen}
+	title="Unlink and lose the note?"
+	description={`Unlink ${unlinkPerson ? formatPersonLabel(unlinkPerson) : 'this person'}? The note saved on this link will be deleted with it.`}
+	confirmLabel="Unlink"
+	formId={unlinkPerson ? `unlink-person-${unlinkPerson.id}` : 'unlink-person'}
+	destructive
+>
+	{#if unlinkPerson?.note}
+		<p
+			class="line-clamp-3 rounded-[var(--r-group)] border bg-muted/40 px-3 py-2 text-sm break-words whitespace-pre-wrap text-foreground"
+		>
+			{unlinkPerson.note}
+		</p>
+	{/if}
+</ConfirmDialog>
