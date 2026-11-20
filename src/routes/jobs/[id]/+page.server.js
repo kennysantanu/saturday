@@ -18,6 +18,7 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { ServiceError, ValidationError } from '$lib/domain/validation.js';
 import { todayIso } from '$lib/format.js';
 import { recordDeletionAction } from '$lib/server/record-deletion-actions.js';
+import { confirmedUnlink } from '$lib/server/note-loss-confirmation.js';
 function formValues(formData) {
 	return Object.fromEntries(
 		Array.from(formData.entries(), ([key, value]) => [key, typeof value === 'string' ? value : ''])
@@ -119,6 +120,19 @@ export async function load({ params, url }) {
 		linkedPersonIds: personPicker ? await networks.networkLinkIds({ job_id: params.id }) : []
 	};
 }
+function networkRedirectUrl({ url, saved }) {
+	const query = new URLSearchParams(url.searchParams);
+	for (const key of [...query.keys()])
+		if (
+			key.startsWith('/') ||
+			key === 'person' ||
+			key.startsWith('person_') ||
+			key === 'link_person'
+		)
+			query.delete(key);
+	query.set('saved', saved);
+	return `${url.pathname}?${query}`;
+}
 function networkAction(operation, saved) {
 	return async ({ params, request, url }) => {
 		const values = formValues(await request.formData());
@@ -127,17 +141,7 @@ function networkAction(operation, saved) {
 		} catch (e) {
 			return actionError(e, values, saved);
 		}
-		const query = new URLSearchParams(url.searchParams);
-		for (const key of [...query.keys()])
-			if (
-				key.startsWith('/') ||
-				key === 'person' ||
-				key.startsWith('person_') ||
-				key === 'link_person'
-			)
-				query.delete(key);
-		query.set('saved', saved);
-		redirect(303, `${url.pathname}?${query}`);
+		redirect(303, networkRedirectUrl({ url, saved }));
 	};
 }
 function historyAction(mode) {
@@ -187,7 +191,10 @@ export const actions = {
 	deleteHistory: historyAction('deleteHistory'),
 	networkLink: networkAction(async (i) => await networks.linkJobNetwork(i), 'network-linked'),
 	networkNote: networkAction(networks.editJobNetwork, 'network-note'),
-	networkUnlink: networkAction(networks.unlinkJobNetwork, 'network-unlinked'),
+	networkUnlink: confirmedUnlink('job', 'network-unlinked', {
+		redirectTo: networkRedirectUrl,
+		onError: actionError
+	}),
 	star: async ({ params, request, url }) => {
 		const values = formValues(await request.formData());
 		try {

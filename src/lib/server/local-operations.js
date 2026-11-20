@@ -54,6 +54,9 @@ export const localOperations = {
 	linkJobNetwork: (context, input) => people.linkJobNetwork(input, context.actor),
 	editJobNetwork: (context, input) => people.editJobNetwork(input),
 	unlinkJobNetwork: (context, input) => people.unlinkJobNetwork(input),
+	unlinkJobNetworkConfirmed: (context, input, options) =>
+		people.unlinkJobNetworkConfirmed(input, options),
+	jobLinkNote: (context, input) => people.jobLinkNote(input),
 	networkLinkIds: (context, input) => people.networkLinkIds(input),
 	listNetworkUpdates: (context, input) => people.listNetworkUpdates(input),
 	addNetworkUpdate: (context, input) => people.addNetworkUpdate(input, context.actor),

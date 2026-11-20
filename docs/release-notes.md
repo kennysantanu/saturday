@@ -4,6 +4,10 @@
 
 Not yet released. Database schema 1 and file manifest 1 are unchanged.
 
+### Network
+
+- Unlinking a job–person link that carries a saved relationship note now asks for confirmation and states that the note will be lost; links without a note unlink straight through, there is no Undo for unlinking yet, unlinking through the MCP assistant still removes a link and its note without prompting because MCP has no confirmation UI, and confirming an unlink in one tab after another tab edited the same note removes the link with the newer note rather than re-prompting.
+
 ### Process leases and maintenance reliability
 
 - Web and MCP runtimes now publish version-2 process leases (`<pid>.json`) backed by a per-process 256-bit secret and an unreferenced loopback identity listener (`127.0.0.1`), and synchronously remove their own verified lease on clean exit, `SIGTERM`, `SIGINT`, or stdin EOF.

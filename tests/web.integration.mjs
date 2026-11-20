@@ -234,8 +234,22 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 			'redirect'
 		);
 		assert.ok((await (await fetch(`${base}/jobs/${job.id}`)).text()).includes('Hiring manager'));
+		const unconfirmedUnlink = await postJob(`/jobs/${job.id}?/networkUnlink`, {
+			network_id: personId
+		});
+		assert.equal(unconfirmedUnlink.type, 'failure');
+		assert.equal(unconfirmedUnlink.status, 409);
 		assert.equal(
-			(await postJob(`/jobs/${job.id}?/networkUnlink`, { network_id: personId })).type,
+			networks.jobLinkNote({ job_id: job.id, network_id: personId }).note,
+			'Hiring manager'
+		);
+		assert.equal(
+			(
+				await postJob(`/jobs/${job.id}?/networkUnlink`, {
+					network_id: personId,
+					confirm_note_loss: '1'
+				})
+			).type,
 			'redirect'
 		);
 		const contextual = await postJob(`/networks/new?job_id=${job.id}`, { name: 'Context person' });

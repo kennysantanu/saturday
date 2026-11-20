@@ -232,6 +232,157 @@ test('many-to-many links are retry safe, scoped notes never change parents, inac
 	assert.equal(n.listNetworkJobs({ network_id: a.id }).jobs[0].is_active, 0);
 });
 
+test('jobLinkNote reports non-empty trimmed notes, ignores whitespace-only or missing links, and leaves unlinkJobNetwork unchanged', () => {
+	const person = n.createNetwork({ name: 'Dana' });
+	const withNote = job();
+	const withoutNote = job();
+	const whitespaceNote = job();
+	const unlinked = job();
+	n.linkJobNetwork({ job_id: withNote.id, network_id: person.id, notes: 'Met at PMI chapter' });
+	n.linkJobNetwork({ job_id: withoutNote.id, network_id: person.id });
+	n.linkJobNetwork({ job_id: whitespaceNote.id, network_id: person.id });
+	withDatabase((db) => {
+		db.prepare('UPDATE job_networks SET notes=? WHERE job_id=? AND network_id=?').run(
+			'   \t\n  ',
+			whitespaceNote.id,
+			person.id
+		);
+	});
+	assert.deepEqual(n.jobLinkNote({ job_id: withNote.id, network_id: person.id }), {
+		job_id: withNote.id,
+		network_id: person.id,
+		note: 'Met at PMI chapter'
+	});
+	assert.deepEqual(n.jobLinkNote({ job_id: withoutNote.id, network_id: person.id }), {
+		job_id: withoutNote.id,
+		network_id: person.id,
+		note: null
+	});
+	assert.deepEqual(n.jobLinkNote({ job_id: whitespaceNote.id, network_id: person.id }), {
+		job_id: whitespaceNote.id,
+		network_id: person.id,
+		note: null
+	});
+	assert.deepEqual(n.jobLinkNote({ job_id: unlinked.id, network_id: person.id }), {
+		job_id: unlinked.id,
+		network_id: person.id,
+		note: null
+	});
+	assert.deepEqual(n.unlinkJobNetwork({ job_id: withNote.id, network_id: person.id }), {
+		job_id: withNote.id,
+		network_id: person.id,
+		linked: false,
+		removed: true
+	});
+	assert.deepEqual(n.unlinkJobNetwork({ job_id: withNote.id, network_id: person.id }), {
+		job_id: withNote.id,
+		network_id: person.id,
+		linked: false,
+		removed: false
+	});
+});
+
+test('unlinkJobNetworkConfirmed atomically guards saved notes, blocks late-written notes, and preserves unlink return shape', () => {
+	const person = n.createNetwork({ name: 'Jordan' });
+	const withNote = job();
+	const raceJob = job();
+	const withoutNote = job();
+	const whitespaceNote = job();
+	n.linkJobNetwork({ job_id: withNote.id, network_id: person.id, notes: 'Met at PMI chapter' });
+	n.linkJobNetwork({ job_id: raceJob.id, network_id: person.id });
+	n.linkJobNetwork({ job_id: withoutNote.id, network_id: person.id });
+	n.linkJobNetwork({ job_id: whitespaceNote.id, network_id: person.id });
+	withDatabase((db) => {
+		db.prepare('UPDATE job_networks SET notes=? WHERE job_id=? AND network_id=?').run(
+			'   \t\n  ',
+			whitespaceNote.id,
+			person.id
+		);
+	});
+
+	assert.deepEqual(
+		n.unlinkJobNetworkConfirmed(
+			{ job_id: withNote.id, network_id: person.id },
+			{ confirmed: false }
+		),
+		{
+			job_id: withNote.id,
+			network_id: person.id,
+			job_title: withNote.title,
+			company_name: withNote.company,
+			network_name: person.name,
+			linked: false,
+			removed: false,
+			note_confirmation_required: true,
+			note: 'Met at PMI chapter'
+		}
+	);
+	assert.equal(
+		n.jobLinkNote({ job_id: withNote.id, network_id: person.id }).note,
+		'Met at PMI chapter'
+	);
+	assert.equal(n.networkLinkIds({ network_id: person.id }).includes(withNote.id), true);
+
+	assert.deepEqual(
+		n.unlinkJobNetworkConfirmed(
+			{ job_id: withNote.id, network_id: person.id },
+			{ confirmed: true }
+		),
+		{
+			job_id: withNote.id,
+			network_id: person.id,
+			linked: false,
+			removed: true
+		}
+	);
+	assert.equal(n.jobLinkNote({ job_id: withNote.id, network_id: person.id }).note, null);
+	assert.equal(n.networkLinkIds({ network_id: person.id }).includes(withNote.id), false);
+
+	// A note written after a prior no-note read cannot be destroyed by an unconfirmed unlink.
+	assert.equal(n.jobLinkNote({ job_id: raceJob.id, network_id: person.id }).note, null);
+	n.editJobNetwork({ job_id: raceJob.id, network_id: person.id, notes: 'Added concurrently' });
+	assert.deepEqual(n.unlinkJobNetworkConfirmed({ job_id: raceJob.id, network_id: person.id }), {
+		job_id: raceJob.id,
+		network_id: person.id,
+		job_title: raceJob.title,
+		company_name: raceJob.company,
+		network_name: person.name,
+		linked: false,
+		removed: false,
+		note_confirmation_required: true,
+		note: 'Added concurrently'
+	});
+	assert.equal(
+		n.jobLinkNote({ job_id: raceJob.id, network_id: person.id }).note,
+		'Added concurrently'
+	);
+	assert.equal(n.networkLinkIds({ network_id: person.id }).includes(raceJob.id), true);
+
+	// No-note and whitespace-only links unlink directly with no extra keys.
+	assert.deepEqual(n.unlinkJobNetworkConfirmed({ job_id: withoutNote.id, network_id: person.id }), {
+		job_id: withoutNote.id,
+		network_id: person.id,
+		linked: false,
+		removed: true
+	});
+	assert.deepEqual(
+		n.unlinkJobNetworkConfirmed({ job_id: whitespaceNote.id, network_id: person.id }),
+		{
+			job_id: whitespaceNote.id,
+			network_id: person.id,
+			linked: false,
+			removed: true
+		}
+	);
+	assert.deepEqual(n.unlinkJobNetworkConfirmed({ job_id: withoutNote.id, network_id: person.id }), {
+		job_id: withoutNote.id,
+		network_id: person.id,
+		linked: false,
+		removed: false
+	});
+	notFound(() => n.unlinkJobNetworkConfirmed({ job_id: 99999, network_id: person.id }));
+});
+
 test('optional interactions use actual date and insertion ties, support corrections and scoped confirmed deletion', () => {
 	const a = n.createNetwork({ name: 'Alex' }),
 		c = n.createNetwork({ name: 'Casey' });

@@ -57,6 +57,40 @@
 	let noteJob = $state('');
 	let noteJobTitle = $state('');
 	let noteText = $state('');
+	let unlinkOpen = $state(false);
+	let unlinkJob = $state<{
+		id: number | string;
+		title: string;
+		company?: string | null;
+		note?: string | null;
+	} | null>(null);
+	function formatJobLabel(job: {
+		id: number | string;
+		title?: string | null;
+		company?: string | null;
+	}) {
+		if (!job.title) return `job #${job.id}`;
+		return job.company
+			? `${job.title} at ${job.company} (#${job.id})`
+			: `${job.title} (#${job.id})`;
+	}
+	const noteLossJob = $derived(
+		form?.noteLoss
+			? data.linkedJobs.jobs.find(
+					(job: { id: number | string; job_title: string; company_name?: string | null }) =>
+						String(job.id) === String(form.noteLoss.job_id)
+				)
+			: null
+	);
+	const noteLossLabel = $derived(
+		form?.noteLoss
+			? formatJobLabel({
+					id: form.noteLoss.job_id,
+					title: form.noteLoss.job_title ?? noteLossJob?.job_title,
+					company: form.noteLoss.company_name ?? noteLossJob?.company_name
+				})
+			: ''
+	);
 	$effect(() => {
 		if (!form?.errors) return;
 		if (
@@ -115,6 +149,7 @@
 					interactionOpen = false;
 					deleteOpen = false;
 					noteOpen = false;
+					unlinkOpen = false;
 				}
 				await update({ reset: false });
 				if (guard) guard.saving = false;
@@ -125,6 +160,7 @@
 		() => {
 			for (const guard of Object.values(dialogGuards)) guard.saving = false;
 			deleteOpen = false;
+			unlinkOpen = false;
 		}
 	);
 </script>
@@ -155,7 +191,7 @@
 					name={person.name}
 					counts={{ history: data.history.total, relationships: data.linkedJobs.total }}
 					action={formAction('deletePerson')}
-					disabled={interactionOpen || noteOpen || !!data.picker}
+					disabled={interactionOpen || noteOpen || unlinkOpen || !!data.picker}
 				/>
 			{/key}
 		{/snippet}
@@ -171,6 +207,31 @@
 			tone="error"
 			title="Could not save change">{errors.form}</Notice
 		>{/if}
+	{#if form?.action === 'network-unlinked' && form?.noteLoss}
+		<Notice tone="error" title="Unlink and lose the note?">
+			<p>
+				Unlink {noteLossLabel}? The note saved on this link will be deleted with it.
+			</p>
+			{#if form.noteLoss.note}
+				<p
+					class="mt-2 line-clamp-3 rounded-[var(--r-group)] border border-border/70 bg-background/70 px-3 py-2 text-sm break-words whitespace-pre-wrap text-foreground"
+				>
+					{form.noteLoss.note}
+				</p>
+			{/if}
+			<form
+				method="POST"
+				action={formAction('unlink')}
+				use:enhance={enhanceNetwork}
+				class="mt-3 flex flex-wrap items-center gap-2"
+			>
+				<input type="hidden" name="job_id" value={form.noteLoss.job_id} />
+				<input type="hidden" name="confirm_note_loss" value="1" />
+				<Button type="submit" variant="destructive" size="sm">Unlink</Button>
+				<Button href={href({})} variant="ghost" size="sm">Cancel</Button>
+			</form>
+		</Notice>
+	{/if}
 	<div class="grid gap-6 lg:grid-cols-2">
 		<SectionCard title="Details">
 			<dl class="space-y-4 text-sm">
@@ -244,12 +305,38 @@
 							noteOpen = true;
 						}}><Pencil data-icon="inline-start" />Edit link note</Button
 					>
-					<form method="POST" action={formAction('unlink')} use:enhance={enhanceNetwork}>
-						<input type="hidden" name="job_id" value={job.id} /><Button
+					<form
+						id={`unlink-job-${job.id}`}
+						method="POST"
+						action={formAction('unlink')}
+						use:enhance={enhanceNetwork}
+					>
+						<input
+							type="hidden"
+							name="job_id"
+							value={job.id}
+						/>{#if unlinkOpen && unlinkJob?.id === job.id}<input
+								type="hidden"
+								name="confirm_note_loss"
+								value="1"
+							/>{/if}<Button
 							type="submit"
 							variant="ghost"
 							size="sm"
-							aria-label={`Unlink ${job.job_title}`}>Unlink</Button
+							aria-label={`Unlink ${job.job_title}`}
+							onclick={(event) => {
+								const savedNote = job.job_link.notes?.trim();
+								if (savedNote) {
+									event.preventDefault();
+									unlinkJob = {
+										id: job.id,
+										title: job.job_title,
+										company: job.company_name,
+										note: savedNote
+									};
+									unlinkOpen = true;
+								}
+							}}>Unlink</Button
 						>
 					</form>
 				{/snippet}
@@ -432,3 +519,20 @@
 {#if data.picker}
 	{#key person.id}<NetworkJobPicker {data} {form} />{/key}
 {/if}
+
+<ConfirmDialog
+	bind:open={unlinkOpen}
+	title="Unlink and lose the note?"
+	description={`Unlink ${unlinkJob ? formatJobLabel(unlinkJob) : 'this job'}? The note saved on this link will be deleted with it.`}
+	confirmLabel="Unlink"
+	formId={unlinkJob ? `unlink-job-${unlinkJob.id}` : 'unlink-job'}
+	destructive
+>
+	{#if unlinkJob?.note}
+		<p
+			class="line-clamp-3 rounded-[var(--r-group)] border bg-muted/40 px-3 py-2 text-sm break-words whitespace-pre-wrap text-foreground"
+		>
+			{unlinkJob.note}
+		</p>
+	{/if}
+</ConfirmDialog>

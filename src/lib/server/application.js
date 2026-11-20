@@ -48,6 +48,8 @@ export const {
 	linkJobNetwork,
 	editJobNetwork,
 	unlinkJobNetwork,
+	unlinkJobNetworkConfirmed,
+	jobLinkNote,
 	networkLinkIds,
 	listNetworkUpdates,
 	addNetworkUpdate,
