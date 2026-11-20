@@ -7,7 +7,7 @@
 	import { tick } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { toast } from '$lib/toast.svelte';
-	import { applyAction, enhance } from '$app/forms';
+	import { applyAction, deserialize, enhance } from '$app/forms';
 	import { withPending, enhanceWithFocus, focusFirstError, trackChanges } from '$lib/forms';
 	import { page } from '$app/state';
 	import { formatBytes, formatDateTime } from '$lib/format';
@@ -184,10 +184,37 @@
 			checkAuthResponse(r, { label: file.name, run: () => uploadArchive(file, bundle) });
 			const body = await r.json();
 			if (!r.ok) throw new Error(body.error);
+			if (bundle && body?.file_backup_id) {
+				// Prepare the coordinated restore preview via POST so GET /settings stays read-only.
+				const formData = new FormData();
+				formData.set('file_backup_id', body.file_backup_id);
+				const prep = await fetch('?/filePairPrepare', { method: 'POST', body: formData });
+				checkAuthResponse(prep, { label: file.name, run: () => uploadArchive(file, bundle) });
+				const result = deserialize(await prep.text());
+				await invalidateAll();
+				if (result.type === 'success') {
+					await applyAction(result);
+					toast.show('Backup imported. Review the restore preview to continue.');
+				} else if (result.type === 'failure') {
+					const detail = result.data?.fileError;
+					uploadError = detail
+						? `Backup imported and saved in Saved backups, but preview preparation failed: ${detail}`
+						: 'Backup imported and saved in Saved backups, but coordinated preview preparation failed. Choose it in Saved backups to try again.';
+					await tick();
+					focusFirstError();
+				} else {
+					throw new Error(
+						'Backup imported and saved in Saved backups, but coordinated preview preparation failed. Choose it in Saved backups to try again.'
+					);
+				}
+				return;
+			}
 			toast.show('Backup imported. Choose it in Saved backup to preview restore.');
 			await invalidateAll();
 		} catch (e) {
 			uploadError = (e as Error).message;
+			await tick();
+			focusFirstError();
 		} finally {
 			uploading = false;
 		}
@@ -602,23 +629,55 @@
 							recovery.
 						</Notice>
 					{/if}
-					<h3 class="text-sm font-semibold">Create a backup</h3>
-					<form method="POST" action="?/backup" use:enhance={enhanceWithFocus} class="space-y-4">
-						<Field id="backup_contents" label="Include">
-							{#snippet control(attrs)}<NativeSelect {...attrs} name="contents">
-									<option value="all">Database and files</option><option value="files"
-										>Files only</option
-									><option value="database">Database only</option>
-								</NativeSelect>{/snippet}
-						</Field>
-						<div class="form-actions">
-							<Button type="submit"><Archive data-icon="inline-start" />Back up now</Button>
-						</div>
+					<h3 class="text-sm font-semibold">Export a backup</h3>
+					<form
+						method="POST"
+						action="?/exportSnapshot"
+						use:enhance={withPending(() => async ({ result, update }) => {
+							if (result.type === 'redirect') {
+								window.location.assign(result.location);
+								await invalidateAll();
+								return;
+							}
+							await update();
+							await tick();
+							focusFirstError();
+						})}
+						class="form-actions"
+					>
+						<Button type="submit"
+							><Archive data-icon="inline-start" />Download database and files</Button
+						>
 					</form>
 					<p class="meta-text text-muted-foreground">
-						Backups are saved locally and kept until you delete them. Download a copy to another
-						drive to protect against disk failure.
+						One ZIP holds your database and every document. Keep it somewhere other than this
+						machine: importing that same file restores both. Each download also saves a local copy
+						in Saved backups below until you delete it.
 					</p>
+					<details class="disclosure disclosure-quiet">
+						<summary>Advanced backup options</summary>
+						<div class="disclosure-body">
+							<form
+								method="POST"
+								action="?/backup"
+								use:enhance={enhanceWithFocus}
+								class="space-y-4"
+							>
+								<Field id="backup_contents" label="Include">
+									{#snippet control(attrs)}<NativeSelect {...attrs} name="contents">
+											<option value="all">Database and files</option><option value="files"
+												>Files only</option
+											><option value="database">Database only</option>
+										</NativeSelect>{/snippet}
+								</Field>
+								<div class="form-actions">
+									<Button type="submit" variant="outline"
+										><Archive data-icon="inline-start" />Back up now</Button
+									>
+								</div>
+							</form>
+						</div>
+					</details>
 					{#if form?.preview}
 						<RestorePreview
 							title="Restore preview"
@@ -686,7 +745,7 @@
 								/><input type="hidden" name="confirm" value="true" /><Button
 									type="button"
 									variant="outline"
-									onclick={() => (confirmPair = true)}>Restore database and files</Button
+									onclick={() => (confirmPair = true)}>Restore everything</Button
 								>
 							</form>
 						</RestorePreview>
@@ -694,7 +753,7 @@
 							bind:open={confirmPair}
 							title="Replace database and files?"
 							description="Apply both previewed snapshots. Recovery copies will be kept."
-							confirmLabel="Restore both"
+							confirmLabel="Restore everything"
 							formId="restore-file-pair"
 							destructive
 						/>
