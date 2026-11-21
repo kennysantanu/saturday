@@ -59,6 +59,299 @@
 		uninstallDialog = $state(false),
 		deleteUserData = $state(false);
 	let installationProgress = $state<any>(null);
+	let advancedOpen = $state(false);
+	let advancedTouched = $state(false);
+	let branchList = $state<any>(null);
+	let branchListFetched = $state(false);
+	let branchListLoading = $state(false);
+	let branchListError = $state('');
+	let selectedRef = $state('');
+	let selectedRefTouched = $state(false);
+	let branchReview = $state<any>(null);
+	let reviewTouched = $state(false);
+	let branchReviewExpired = $state(false);
+	let reviewLoading = $state(false);
+	let reviewError = $state('');
+	let reviewGeneration = 0;
+	let switchExport = $state<any>(null);
+	let exportTouched = $state(false);
+	let switchDownloadPending = $state(false);
+	let switchDownloadError = $state('');
+	let switchDialog = $state(false);
+	let switchConfirmText = $state('');
+	let moveButtonRef = $state<HTMLButtonElement | null>(null);
+	let pageDestroyed = false;
+	$effect(() => {
+		return () => {
+			pageDestroyed = true;
+		};
+	});
+	const effectiveAdvancedOpen = $derived(
+		advancedTouched
+			? advancedOpen
+			: Boolean(form?.branches || form?.branchReview || form?.downloadUrl || form?.switchExport)
+	);
+	const effectiveBranchList = $derived(branchList ?? form?.branches ?? null);
+	const effectiveReview = $derived(
+		reviewTouched ? branchReview : (form?.branchReview ?? data.branchSwitch?.review ?? null)
+	);
+	const effectiveExport = $derived(
+		exportTouched ? switchExport : (form?.switchExport ?? data.branchSwitch?.export ?? null)
+	);
+	const effectiveSelectedRef = $derived(
+		selectedRefTouched
+			? selectedRef
+			: (form?.branchReview?.target?.ref ?? data.branchSwitch?.review?.target?.ref ?? '')
+	);
+	const activeOperation = $derived(installationProgress || data.installationOperation);
+	// The controller refuses updates until Repair finishes an interrupted publication.
+	const repairPending = $derived(
+		['recovery_required', 'interrupted'].includes(activeOperation?.status)
+	);
+	const operationActive = $derived(
+		Boolean(
+			activeOperation &&
+			activeInstallationStates.includes(activeOperation.status) &&
+			!activeOperation.error
+		)
+	);
+	const branchCurrentRef = $derived(
+		effectiveBranchList?.current_ref ??
+			data.branchSwitch?.currentRef ??
+			data.installation.tracking_ref ??
+			(data.installation.release ? null : 'main')
+	);
+	const branchCurrentLabel = $derived(
+		branchCurrentRef ??
+			(data.installation.release ? `release ${data.installation.release}` : 'main')
+	);
+	const currentShortSha = $derived(
+		typeof data.installation.build?.commit === 'string' &&
+			/^[a-f0-9]{40}$/.test(data.installation.build.commit)
+			? data.installation.build.commit.slice(0, 12)
+			: 'unknown'
+	);
+	const branchOptions = $derived(
+		effectiveBranchList?.branches ?? [
+			{ ref: 'main', commit: null, missing: false },
+			{ ref: 'dev', commit: null, missing: false }
+		]
+	);
+	const missingBranches = $derived(
+		(effectiveBranchList?.branches ?? []).filter((row: any) => row.missing)
+	);
+	const reviewExpiredNow = $derived(
+		Boolean(
+			branchReviewExpired ||
+			(!reviewTouched && data.branchSwitch?.reviewExpired) ||
+			(effectiveReview?.checked_at &&
+				Date.now() - Date.parse(effectiveReview.checked_at) > 15 * 60 * 1000)
+		)
+	);
+	const activeReview = $derived(
+		effectiveReview &&
+			!reviewExpiredNow &&
+			(!effectiveSelectedRef || effectiveReview.target?.ref === effectiveSelectedRef)
+			? effectiveReview
+			: null
+	);
+	const completedSwitchExport = $derived(
+		effectiveExport &&
+			activeReview &&
+			effectiveExport.status === 'complete' &&
+			effectiveExport.check_id === activeReview.id &&
+			effectiveExport.ref === activeReview.target?.ref &&
+			effectiveExport.commit === activeReview.target?.commit &&
+			Date.now() <= Date.parse(effectiveExport.expires_at)
+			? effectiveExport
+			: null
+	);
+	const switchRequiresTypedMove = $derived(
+		Boolean(activeReview && activeReview.compatibility?.verdict !== 'compatible')
+	);
+	const canMoveBranch = $derived(
+		Boolean(
+			activeReview &&
+			completedSwitchExport &&
+			!reviewLoading &&
+			!switchDownloadPending &&
+			!repairPending &&
+			!operationActive
+		)
+	);
+	async function loadBranchList(force = false) {
+		if ((!force && branchListFetched) || branchListLoading) return;
+		branchListLoading = true;
+		branchListError = '';
+		try {
+			const response = await fetch('?/branches', {
+				method: 'POST',
+				headers: { accept: 'application/json', 'x-sveltekit-action': 'true' },
+				body: new FormData()
+			});
+			checkAuthResponse(response, { label: 'Load branches', run: () => loadBranchList(true) });
+			const result = deserialize(await response.text());
+			if (result.type === 'success' && result.data?.branches) {
+				branchList = result.data.branches;
+				branchListFetched = true;
+				branchListError = '';
+			} else if (result.type === 'failure') {
+				branchListError =
+					String(result.data?.installationError || '') ||
+					'Branches could not be loaded. Check your connection or GitHub rate limit and retry.';
+			} else {
+				branchListError =
+					'Branches could not be loaded. Check your connection or GitHub rate limit and retry.';
+			}
+		} catch {
+			branchListError =
+				'Branches could not be loaded. Check your connection or GitHub rate limit and retry.';
+		} finally {
+			branchListLoading = false;
+		}
+	}
+	function handleAdvancedToggle(event: Event) {
+		const el = event.currentTarget as HTMLDetailsElement;
+		advancedTouched = true;
+		advancedOpen = el.open;
+		if (el.open && data.branchSwitch && !branchListFetched) {
+			void loadBranchList(false);
+		}
+	}
+	async function reviewSelectedBranch(ref: string) {
+		const generation = ++reviewGeneration;
+		selectedRefTouched = true;
+		selectedRef = ref;
+		reviewTouched = true;
+		branchReview = null;
+		branchReviewExpired = false;
+		reviewError = '';
+		exportTouched = true;
+		switchExport = null;
+		switchDownloadError = '';
+		switchDownloadPending = false;
+		switchDialog = false;
+		switchConfirmText = '';
+		if (!ref) {
+			reviewLoading = false;
+			return;
+		}
+		reviewLoading = true;
+		try {
+			const body = new FormData();
+			body.set('ref', ref);
+			const response = await fetch('?/branchCompatibility', {
+				method: 'POST',
+				headers: { accept: 'application/json', 'x-sveltekit-action': 'true' },
+				body
+			});
+			checkAuthResponse(response, {
+				label: `Review ${ref}`,
+				run: () => reviewSelectedBranch(ref)
+			});
+			const result = deserialize(await response.text());
+			if (pageDestroyed || generation !== reviewGeneration) return;
+			if (result.type === 'success' && result.data?.branchReview) {
+				branchReview = result.data.branchReview;
+				branchReviewExpired = false;
+				switchExport = null;
+				reviewError = '';
+			} else if (result.type === 'failure') {
+				reviewError =
+					String(result.data?.installationError || '') ||
+					'Branch compatibility could not be checked.';
+				await tick();
+				focusFirstError();
+			} else {
+				reviewError = 'Branch compatibility could not be checked.';
+				await tick();
+				focusFirstError();
+			}
+		} catch {
+			if (pageDestroyed || generation !== reviewGeneration) return;
+			reviewError = 'Branch compatibility could not be checked.';
+			await tick();
+			focusFirstError();
+		} finally {
+			if (!pageDestroyed && generation === reviewGeneration) reviewLoading = false;
+		}
+	}
+	async function pollSwitchExportCompletion(exportId: string, generation: number) {
+		for (let attempt = 0; attempt < 20; attempt++) {
+			if (pageDestroyed || generation !== reviewGeneration) return null;
+			const body = new FormData();
+			body.set('export_id', exportId);
+			try {
+				const response = await fetch('?/switchExportStatus', {
+					method: 'POST',
+					headers: { accept: 'application/json', 'x-sveltekit-action': 'true' },
+					body
+				});
+				checkAuthResponse(response);
+				const result = deserialize(await response.text());
+				if (pageDestroyed || generation !== reviewGeneration) return null;
+				const exportData = result.type === 'success' ? (result.data?.switchExport as any) : null;
+				if (exportData?.status === 'complete') {
+					return exportData;
+				}
+			} catch {
+				// Retry within bounded attempts.
+			}
+			await new Promise((resolve) => setTimeout(resolve, 500));
+		}
+		return null;
+	}
+	async function streamSwitchBackup(downloadUrl: string, pendingExport: any, generation: number) {
+		switchDownloadPending = true;
+		switchDownloadError = '';
+		exportTouched = true;
+		switchExport = pendingExport;
+		try {
+			const response = await fetch(downloadUrl, {
+				credentials: 'include',
+				cache: 'no-store'
+			});
+			checkAuthResponse(response);
+			if (!response.ok) throw new Error('Backup download failed.');
+			const blob = await response.blob();
+			if (pageDestroyed || generation !== reviewGeneration) return;
+			const disposition = response.headers.get('content-disposition') ?? '';
+			const match = /filename="([^"]+)"/.exec(disposition);
+			const filename = match?.[1] || `saturday-backup-${pendingExport.backup_id}.zip`;
+			const objectUrl = URL.createObjectURL(blob);
+			try {
+				const link = document.createElement('a');
+				link.href = objectUrl;
+				link.download = filename;
+				document.body.appendChild(link);
+				link.click();
+				link.remove();
+			} finally {
+				setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+			}
+			const completed = await pollSwitchExportCompletion(pendingExport.id, generation);
+			if (pageDestroyed || generation !== reviewGeneration) return;
+			if (!completed) {
+				switchExport = null;
+				switchDownloadError =
+					'The backup download did not complete. Download it again before moving.';
+				await tick();
+				focusFirstError();
+				return;
+			}
+			switchExport = completed;
+			switchDownloadError = '';
+		} catch {
+			if (pageDestroyed || generation !== reviewGeneration) return;
+			switchExport = null;
+			switchDownloadError =
+				'The backup download did not complete. Download it again before moving.';
+			await tick();
+			focusFirstError();
+		} finally {
+			if (!pageDestroyed && generation === reviewGeneration) switchDownloadPending = false;
+		}
+	}
 	let deleteOpen = $state(false);
 	let confirmDelete = $state<{ id: string; contents: string } | null>(null);
 	let stopDialog = $state(false),
@@ -253,17 +546,12 @@
 	$effect(() => {
 		if (form?.serverOperation) void reconnectServer(form.serverOperation);
 	});
-	// The controller refuses updates until Repair finishes an interrupted publication.
-	const repairPending = $derived(
-		['recovery_required', 'interrupted'].includes(
-			(installationProgress || data.installationOperation)?.status
-		)
-	);
-	// Main builds show their package version with the commit for exact identity.
+	// Branch builds show their package version with ref and commit for exact identity.
 	const targetLabel = (target: any) => {
 		const commit = target?.commit?.slice(0, 12);
 		if (target?.release) return target.release;
-		return target?.version ? `${target.version} (${commit})` : commit;
+		const refCommit = target?.ref && commit ? `${target.ref}@${commit}` : commit;
+		return target?.version ? `${target.version} (${refCommit})` : refCommit;
 	};
 	$effect(() => {
 		const operation = form?.installationOperation || data.installationOperation;
@@ -1117,7 +1405,7 @@
 				<SectionCard
 					id="updates"
 					title="Updates"
-					description="Check manually. Updates preserve your workspace; reconnect your assistant afterward."
+					description="Check manually. Ordinary updates preserve your workspace; Advanced branch moves clear it. Reconnect your assistant afterward."
 				>
 					<div class="status-row">
 						<p class="status-label">Installed</p>
@@ -1146,8 +1434,14 @@
 										: 'Installation status'}
 						>
 							{#if repairPending}<p class="mb-2">
-									The operation stopped partway. Your data is retained, and recovery snapshots are
-									kept. Run Repair to finish safely; it never resets records.
+									{#if operation.reset_data}
+										The branch move stopped partway. Installation data may already have been
+										cleared. Keep your downloaded backup. Run Repair to finish preparing the
+										selected branch; Repair will not restore the downloaded backup automatically.
+									{:else}
+										The operation stopped partway. Your data is retained, and recovery snapshots are
+										kept. Run Repair to finish safely; it never resets records.
+									{/if}
 								</p>{/if}
 							{operation.step}{#if operation.error && operation.error !== operation.step}<p
 									class="mt-2"
@@ -1167,21 +1461,40 @@
 					{/if}
 					{#if data.updateCheck?.target}
 						{@const target = data.updateCheck.target}
+						{@const trackedRef = target.ref || 'main'}
 						<p class="text-sm">
-							{#if target.available}
-								{target.kind === 'release' ? 'Release available' : 'Latest main available'}:
+							{#if target.available === true}
+								{target.kind === 'release'
+									? 'Release available'
+									: `Latest ${trackedRef} available`}:
 								{data.applicationVersion} →
 								<a class="link" href={target.url} target="_blank" rel="noreferrer"
 									>{targetLabel(target)}</a
 								>
-							{:else}
-								{target.held_back ? 'Latest release' : 'You’re up to date'}:
+							{:else if target.available === null}
+								Cannot compare this build with {trackedRef}:
+								<a class="link" href={target.url} target="_blank" rel="noreferrer"
+									>{targetLabel(target)}</a
+								>
+							{:else if target.held_back}
+								Latest release:
 								<a class="link" href={target.url} target="_blank" rel="noreferrer"
 									>{target.release || target.commit?.slice(0, 12)}</a
 								>
+							{:else}
+								{target.kind === 'development'
+									? `You’re up to date on ${trackedRef}`
+									: 'You’re up to date'}:
+								<a class="link" href={target.url} target="_blank" rel="noreferrer"
+									>{target.release || targetLabel(target)}</a
+								>
 							{/if}
 						</p>
-						{#if target.available && target.compare_url}<p class="text-sm">
+						{#if target.available === null}<p class="text-sm text-muted-foreground">
+								The installed commit is unknown. Repair its build identity or use Advanced to move
+								with a downloaded backup.
+							</p>{/if}
+						{#if target.available === true && target.compare_url}<p class="text-sm">
 								<a class="link" href={target.compare_url} target="_blank" rel="noreferrer"
 									>See changes since your build</a
 								>
@@ -1189,9 +1502,9 @@
 						{#if data.updateCheck.checked_at}<p class="text-sm text-muted-foreground">
 								Last checked {formatDateTime(data.updateCheck.checked_at)}
 							</p>{/if}
-						{#if target.available && data.updateCheckExpired}<Notice title="Check expired"
+						{#if target.available === true && data.updateCheckExpired}<Notice title="Check expired"
 								>This check is more than 15 minutes old. Check again before updating.</Notice
-							>{:else if target.available && data.assistantConnected}<Notice
+							>{:else if target.available === true && data.assistantConnected}<Notice
 								title={data.assistantNotice?.title || 'Assistant connected'}
 								>{data.assistantNotice?.message ||
 									'An assistant is connected to Saturday. Quit the assistant app or disconnect Saturday before the update finishes building. Saturday waits up to two minutes, then stops without changing anything.'}</Notice
@@ -1207,7 +1520,7 @@
 							>{/if}
 						{#if target.notes && !target.held_back}<details
 								class="disclosure"
-								open={target.kind === 'release' && target.available}
+								open={target.kind === 'release' && target.available === true}
 							>
 								<summary>{target.kind === 'release' ? 'What’s new' : 'Update notes'}</summary>
 								<div class="disclosure-body gap-2 text-sm">
@@ -1245,7 +1558,7 @@
 									>Check for updates</Button
 								>
 							</form>
-							{#if data.updateCheck?.target?.available && !data.updateCheck.local?.dirty && !data.updateCheckExpired && !repairPending}<Button
+							{#if data.updateCheck?.target?.available === true && !data.updateCheck.local?.dirty && !data.updateCheckExpired && !repairPending}<Button
 									variant="outline"
 									disabled={!data.server.controlsAvailable}
 									onclick={() => (updateDialog = true)}>Update Saturday</Button
@@ -1300,6 +1613,376 @@
 						confirmLabel="Update Saturday"
 						formId="update-saturday"
 					/>
+					{#if data.installation.mode === 'managed'}
+						<details
+							class="disclosure disclosure-quiet"
+							open={effectiveAdvancedOpen}
+							ontoggle={handleAdvancedToggle}
+						>
+							<summary>Advanced</summary>
+							<div class="disclosure-body space-y-4">
+								{#if !data.branchSwitch}
+									<p class="text-sm text-muted-foreground">
+										{setupRequired
+											? 'Finish Saturday setup and reload Settings to switch branches.'
+											: 'Branch switching is available from the Saturday shortcut on the server computer.'}
+									</p>
+								{:else}
+									{#if data.branchSwitch.exportError}
+										<Notice tone="error" title="Branch export state invalid"
+											>{data.branchSwitch.exportError}</Notice
+										>
+									{/if}
+									{#if branchListError}
+										<Notice tone="error" title="Branches unavailable">
+											<p>
+												Branches could not be loaded. You can retry or review main or dev directly;
+												Saturday will verify the branch on GitHub before moving.
+											</p>
+											<form
+												method="POST"
+												action="?/branches"
+												class="mt-3"
+												use:enhance={withPending(() => async () => {
+													await loadBranchList(true);
+												})}
+											>
+												<Button
+													type="submit"
+													variant="outline"
+													size="sm"
+													disabled={branchListLoading}>Retry loading branches</Button
+												>
+											</form>
+										</Notice>
+									{/if}
+									{#if branchListLoading}
+										<p class="text-sm text-muted-foreground" role="status">Loading branches…</p>
+									{/if}
+									<form
+										method="POST"
+										action="?/branchCompatibility"
+										class="space-y-3"
+										use:enhance={withPending(() => async ({ formData }) => {
+											const ref = String(formData.get('ref') ?? '');
+											selectedRef = ref;
+											await reviewSelectedBranch(ref);
+										})}
+									>
+										<Field id="branch_switch_ref" label="Move installation to branch">
+											{#snippet control(attrs)}
+												<NativeSelect
+													{...attrs}
+													name="ref"
+													value={effectiveSelectedRef}
+													disabled={branchListLoading}
+													onchange={(event) => {
+														const next = (event.currentTarget as HTMLSelectElement).value;
+														void reviewSelectedBranch(next);
+													}}
+												>
+													<option value="">Choose a branch</option>
+													{#each branchOptions as option (option.ref)}
+														<option value={option.ref} disabled={option.missing}>
+															{#if option.missing}
+																{option.ref} (missing)
+															{:else if branchCurrentRef === option.ref}
+																{option.ref} (current)
+															{:else}
+																{option.ref}
+															{/if}
+														</option>
+													{/each}
+												</NativeSelect>
+											{/snippet}
+										</Field>
+										<noscript>
+											<div class="form-actions">
+												<Button type="submit" variant="outline">Review branch</Button>
+											</div>
+										</noscript>
+									</form>
+									{#each missingBranches as missingRow (missingRow.ref)}
+										<p class="text-sm text-muted-foreground">
+											Branch {missingRow.ref} is missing on GitHub. Choose another available branch.
+										</p>
+									{/each}
+									{#if reviewLoading}
+										<p class="text-sm text-muted-foreground" role="status">Reviewing branch…</p>
+									{/if}
+									{#if reviewError}
+										<Notice tone="error" title="Branch review failed">{reviewError}</Notice>
+									{/if}
+									{#if reviewExpiredNow}
+										<Notice title="Branch review expired">
+											This branch review has expired. Review the branch and download a new backup.
+										</Notice>
+									{/if}
+									{#if activeReview}
+										{@const chosen = activeReview.target.ref}
+										{@const shortSha = activeReview.target.commit.slice(0, 12)}
+										{@const verdict = activeReview.compatibility.verdict}
+										<div class="space-y-3" aria-live="polite">
+											{#if verdict === 'compatible'}
+												<p class="text-sm">
+													This branch supports your current database and file formats. Moving still
+													clears all installation data.
+												</p>
+											{:else if verdict === 'data_newer'}
+												<Notice tone="error" title="Current data is newer">
+													This branch cannot read your current data formats. Moving clears the data
+													and starts empty. To use your backup again, install a build that supports
+													the backup’s formats.
+												</Notice>
+											{:else}
+												<Notice title="This branch uses newer data formats">
+													Moving starts an empty workspace using this branch’s formats. Older builds
+													may not read backups made afterward.
+												</Notice>
+											{/if}
+											<p class="meta-text text-muted-foreground">
+												Current formats: database v{activeReview.compatibility.live.database
+													.version}
+												({activeReview.compatibility.live.database.format}), files v{activeReview
+													.compatibility.live.manifest.version} ({activeReview.compatibility.live
+													.manifest.format}). Target formats: database v{activeReview.compatibility
+													.candidate.database.minimumVersion}–v{activeReview.compatibility.candidate
+													.database.currentVersion}, files v{activeReview.compatibility.candidate
+													.manifest.minimumVersion}–v{activeReview.compatibility.candidate.manifest
+													.version}.
+											</p>
+											<Notice tone="error" title="Moving clears this installation">
+												<div class="space-y-2">
+													<p>
+														You are moving this installation from {branchCurrentLabel}@{currentShortSha}
+														to {chosen}@{shortSha}. Moving replaces the running code and clears all
+														installation data, even when the formats are compatible. Download your
+														database and files backup first. Move stays unavailable until Saturday
+														finishes streaming the ZIP. Keep the downloaded file; Saturday cannot
+														verify that your browser saved it to disk.
+													</p>
+													<p>
+														Jobs, network, documents, Profile designations, settings, local backups,
+														extension code and extension data will be removed. Password and LAN
+														settings must be set again. The ZIP restores your database and
+														documents; it does not include extensions, password or LAN settings.
+													</p>
+													<p>
+														Quit your assistant app or disconnect Saturday, and leave it
+														disconnected until Saturday is ready. To return, install a compatible
+														build fresh and import the ZIP under Settings → Backups → Import a
+														backup.
+													</p>
+													{#if activeReview.target.comparison === 'same'}
+														<p>
+															This branch points to your installed commit. Moving still changes
+															branch tracking and clears all installation data.
+														</p>
+													{/if}
+												</div>
+											</Notice>
+											{#if switchDownloadError}
+												<Notice tone="error" title="Backup download failed">
+													{switchDownloadError}
+												</Notice>
+											{/if}
+											{#if completedSwitchExport}
+												<p class="text-sm break-all text-muted-foreground" role="status">
+													Backup streamed: {completedSwitchExport.filename} · {formatBytes(
+														completedSwitchExport.bytes
+													)}. Check that the file is saved before moving.
+												</p>
+											{/if}
+											{#if form?.downloadUrl}
+												<noscript>
+													<p class="text-sm">
+														<a class="link" href={form.downloadUrl}>Download backup ZIP</a>. Reload
+														Settings after the download finishes to enable Move.
+													</p>
+												</noscript>
+											{/if}
+											<div class="flex flex-wrap items-center gap-2">
+												<form
+													method="POST"
+													action="?/backupForSwitch"
+													use:enhance={withPending(() => async ({ result, update }) => {
+														const generation = reviewGeneration;
+														if (
+															result.type === 'success' &&
+															result.data?.downloadUrl &&
+															result.data?.switchExport
+														) {
+															await streamSwitchBackup(
+																String(result.data.downloadUrl),
+																result.data.switchExport,
+																generation
+															);
+															return;
+														}
+														await update({ reset: false });
+														await tick();
+														focusFirstError();
+													})}
+												>
+													<input type="hidden" name="check_id" value={activeReview.id} />
+													<Button
+														type="submit"
+														variant="outline"
+														disabled={switchDownloadPending ||
+															reviewLoading ||
+															repairPending ||
+															operationActive}
+													>
+														{switchDownloadPending ? 'Downloading backup…' : 'Download backup'}
+													</Button>
+												</form>
+												<Button
+													bind:ref={moveButtonRef}
+													type="button"
+													variant="destructive"
+													disabled={!canMoveBranch}
+													onclick={() => {
+														switchConfirmText = '';
+														switchDialog = true;
+													}}
+												>
+													Move to this branch
+												</Button>
+											</div>
+											{#if completedSwitchExport}
+												<form
+													id="branch-switch"
+													method="POST"
+													action="?/switchBranch"
+													use:enhance={withPending(() => async ({ result }) => {
+														switchDialog = false;
+														switchConfirmText = '';
+														installationProgress = null;
+														if (result.type === 'success') {
+															exportTouched = true;
+															switchExport = null;
+														}
+														await applyAction(result);
+														await tick();
+														focusFirstError();
+													})}
+												>
+													<input type="hidden" name="ref" value={chosen} />
+													<input type="hidden" name="commit" value={activeReview.target.commit} />
+													<input type="hidden" name="check_id" value={activeReview.id} />
+													<input type="hidden" name="export_id" value={completedSwitchExport.id} />
+													<input
+														type="hidden"
+														name="backup_id"
+														value={completedSwitchExport.backup_id}
+													/>
+													<input type="hidden" name="confirm" value="true" />
+													<noscript>
+														<div
+															class="mt-4 space-y-3 rounded-[var(--r-group)] border border-destructive/30 p-4"
+														>
+															<p class="text-sm font-medium">
+																Move to {chosen}@{shortSha}?
+															</p>
+															<p class="text-sm text-muted-foreground">
+																This removes the database, documents, Profile designations,
+																settings, local backups, extension code and extension data. Password
+																and LAN settings must be set again. Your downloaded backup
+																{completedSwitchExport.filename} ({formatBytes(
+																	completedSwitchExport.bytes
+																)}) is not affected. The ZIP restores database and documents only.
+																Keep it somewhere you can find it.
+															</p>
+															{#if switchRequiresTypedMove}
+																<Notice tone="error" title="Data formats differ">
+																	This move starts empty and may cross data-format boundaries. The
+																	selected branch may not read your backup, and older builds may not
+																	read backups created on this branch. Install a build compatible
+																	with the backup when restoring. Type MOVE to confirm clearing this
+																	installation.
+																</Notice>
+																<Field
+																	id="branch_switch_confirmation_noscript"
+																	label="Type MOVE to confirm"
+																	required
+																>
+																	{#snippet control(attrs)}
+																		<Input
+																			{...attrs}
+																			name="confirmation"
+																			required
+																			autocomplete="off"
+																		/>
+																	{/snippet}
+																</Field>
+															{/if}
+															<div class="form-actions">
+																<Button type="submit" variant="destructive">Move</Button>
+															</div>
+														</div>
+													</noscript>
+												</form>
+												<ConfirmDialog
+													bind:open={switchDialog}
+													title={`Move to ${chosen}@${shortSha}?`}
+													description={`Move from ${branchCurrentLabel}@${currentShortSha}, replace the code, clear this installation’s data and restart Saturday?`}
+													confirmLabel="Move"
+													formId="branch-switch"
+													destructive
+													focusCancel
+													disabled={switchRequiresTypedMove && switchConfirmText !== 'MOVE'}
+													returnFocus={() => moveButtonRef?.focus()}
+												>
+													<div class="space-y-3">
+														<p class="text-sm text-muted-foreground">
+															This removes the database, documents, Profile designations, settings,
+															local backups, extension code and extension data. Password and LAN
+															settings must be set again. Your downloaded backup
+															<span class="font-medium break-all text-foreground"
+																>{completedSwitchExport.filename}</span
+															>
+															({formatBytes(completedSwitchExport.bytes)}) is not affected. The ZIP
+															restores database and documents only. Keep it somewhere you can find
+															it.
+														</p>
+														{#if switchRequiresTypedMove}
+															<Notice tone="error" title="Data formats differ">
+																This move starts empty and may cross data-format boundaries. The
+																selected branch may not read your backup, and older builds may not
+																read backups created on this branch. Install a build compatible with
+																the backup when restoring. Type MOVE to confirm clearing this
+																installation.
+															</Notice>
+															<Field
+																id="branch_switch_confirmation"
+																label="Type MOVE to confirm"
+																required
+															>
+																{#snippet control(attrs)}
+																	<Input
+																		{...attrs}
+																		form="branch-switch"
+																		name="confirmation"
+																		required
+																		autocomplete="off"
+																		bind:value={switchConfirmText}
+																	/>
+																{/snippet}
+															</Field>
+														{/if}
+													</div>
+												</ConfirmDialog>
+											{/if}
+										</div>
+									{/if}
+								{/if}
+							</div>
+						</details>
+					{:else}
+						<p class="text-sm text-muted-foreground">
+							Branch switching is for installed copies; in a source checkout, use git.
+						</p>
+					{/if}
 				</SectionCard>
 				<SectionCard
 					id="server"

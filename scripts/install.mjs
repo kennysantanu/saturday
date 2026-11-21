@@ -737,7 +737,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
 				target = check.target,
 				label = target.release || target.version || target.commit?.slice(0, 12) || 'current build';
 			result = check;
-			if (!target.available) say(target.held_back || `Saturday is up to date (${label}).`);
+			if (target.available === null)
+				say(
+					target.notes || `The installed commit is unknown; cannot tell whether ${label} is newer.`
+				);
+			else if (!target.available) say(target.held_back || `Saturday is up to date (${label}).`);
 			else if (check.local?.dirty) {
 				// The controller refuses dirty sources; do not offer an install that cannot run.
 				say(

@@ -10,6 +10,7 @@ import {
 	ensureRecordedDirectories,
 	checkRecordedDirectories
 } from '../src/lib/server/installation.js';
+import { resetLiveData } from '../src/lib/server/installation-operations.js';
 import {
 	incompleteChromeDirectories,
 	quarantineIncomplete,
@@ -297,6 +298,139 @@ test('recovery refuses when the cache root was replaced after discovery', async 
 			/cache location changed/
 		);
 		assert.ok(existsSync(join(elsewhere, 'mac_arm-5.0.0')), 'nothing outside may be moved');
+	} finally {
+		await fs.rm(root, { recursive: true, force: true });
+	}
+});
+
+function managedDescriptor(root) {
+	return {
+		format: 'saturday.installation',
+		version: 1,
+		installation_id: '11111111-1111-4111-8111-111111111111',
+		mode: 'managed',
+		descriptor_path: join(root, 'installation.json'),
+		code_root: join(root, 'app'),
+		node_path: process.execPath,
+		runtime_root: join(root, 'runtime', 'node-v24.21.0-darwin-arm64'),
+		runtime_owned: false,
+		code_owned: true,
+		data_root: join(root, 'data'),
+		database: join(root, 'data', 'saturday.db'),
+		files: join(root, 'data', 'files'),
+		files_state: join(root, 'data', 'files.state'),
+		database_backups: join(root, 'data', 'backups', 'database'),
+		database_restore: join(root, 'data', 'saturday.db.restore'),
+		file_backups: join(root, 'data', 'backups', 'files'),
+		extension_state: join(root, 'data', 'extensions'),
+		extension_code: join(root, 'extensions'),
+		extension_backups: join(root, 'data', 'extensions.backups'),
+		logs: join(root, 'logs'),
+		port: 3000,
+		initialized: { database: true, files: true, extensions: true, access: true },
+		setup: {}
+	};
+}
+
+test('resetLiveData deletes data_root and extension_code, recreates empty data_root, and preserves outside directories', async () => {
+	const root = await fs.realpath(await temp());
+	try {
+		const config = managedDescriptor(root);
+		await ensureRecordedDirectories(config);
+		await fs.mkdir(config.code_root, { recursive: true });
+		await fs.mkdir(join(root, 'installation.state'), { recursive: true });
+		await fs.mkdir(join(root, 'neighbor'), { recursive: true });
+		await fs.writeFile(config.descriptor_path, JSON.stringify(config));
+		const beforeDescriptor = await fs.readFile(config.descriptor_path);
+		await fs.writeFile(join(config.data_root, 'saturday.db'), 'db-sentinel');
+		await fs.writeFile(join(config.files, 'manifest.json'), '{}');
+		await fs.writeFile(join(config.extension_code, 'ext-sentinel.txt'), 'ext');
+		await fs.writeFile(join(config.logs, 'server.log'), 'log-keep');
+		await fs.writeFile(join(root, 'installation.state', 'operation.json'), 'state-keep');
+		await fs.writeFile(join(root, 'neighbor', 'keep.txt'), 'neighbor-keep');
+		// A child symlink inside data_root must be unlinked without traversing its target.
+		await fs.symlink(join(root, 'neighbor'), join(config.data_root, 'linked-child'), 'dir');
+
+		const result = await resetLiveData(config);
+		assert.deepEqual(result, { reset: true, removed: [config.data_root, config.extension_code] });
+		assert.deepEqual(await fs.readdir(config.data_root), []);
+		if (process.platform !== 'win32')
+			assert.equal((await fs.stat(config.data_root)).mode & 0o777, 0o700);
+		assert.equal(existsSync(config.extension_code), false);
+		assert.deepEqual(await fs.readFile(config.descriptor_path), beforeDescriptor);
+		assert.equal(await fs.readFile(join(config.logs, 'server.log'), 'utf8'), 'log-keep');
+		assert.equal(
+			await fs.readFile(join(root, 'installation.state', 'operation.json'), 'utf8'),
+			'state-keep'
+		);
+		assert.equal(await fs.readFile(join(root, 'neighbor', 'keep.txt'), 'utf8'), 'neighbor-keep');
+
+		// Idempotent when extension_code and data_root are missing.
+		await fs.rm(config.data_root, { recursive: true, force: true });
+		await resetLiveData(config);
+		assert.deepEqual(await fs.readdir(config.data_root), []);
+
+		// Setup's recorded directory creation recreates every recorded directory after reset.
+		await ensureRecordedDirectories(config);
+		assert.deepEqual(checkRecordedDirectories(config), []);
+	} finally {
+		await fs.rm(root, { recursive: true, force: true });
+	}
+});
+
+test('resetLiveData refuses source mode, custom/shared paths, and symlinked roots/ancestors without changing files', async () => {
+	const root = await fs.realpath(await temp());
+	try {
+		const config = managedDescriptor(root);
+		await ensureRecordedDirectories(config);
+		await fs.writeFile(config.descriptor_path, JSON.stringify(config));
+		const beforeDescriptor = await fs.readFile(config.descriptor_path);
+		await fs.writeFile(join(config.data_root, 'keep.txt'), 'keep');
+		await fs.writeFile(join(config.extension_code, 'keep.txt'), 'keep-ext');
+
+		await assert.rejects(resetLiveData({ ...config, mode: 'source' }), { code: 'BRANCH_MODE' });
+		await assert.rejects(resetLiveData({ ...config, code_owned: false }), {
+			code: 'RESET_OWNERSHIP'
+		});
+		await assert.rejects(resetLiveData({ ...config, database: join(root, 'shared.db') }), {
+			code: 'RESET_OWNERSHIP'
+		});
+		await assert.rejects(
+			resetLiveData({ ...config, descriptor_path: join(config.data_root, 'installation.json') }),
+			{ code: 'RESET_OWNERSHIP' }
+		);
+		assert.equal(await fs.readFile(join(config.data_root, 'keep.txt'), 'utf8'), 'keep');
+		assert.equal(await fs.readFile(join(config.extension_code, 'keep.txt'), 'utf8'), 'keep-ext');
+		assert.deepEqual(await fs.readFile(config.descriptor_path), beforeDescriptor);
+
+		// Symlinked data_root refused before either deletion.
+		const outside = join(root, 'outside');
+		await fs.mkdir(outside);
+		await fs.writeFile(join(outside, 'precious.txt'), 'precious');
+		await fs.rm(config.data_root, { recursive: true, force: true });
+		await fs.symlink(outside, config.data_root, 'dir');
+		await assert.rejects(resetLiveData(config), { code: 'RESET_UNSAFE' });
+		assert.equal(await fs.readFile(join(outside, 'precious.txt'), 'utf8'), 'precious');
+		assert.equal(await fs.readFile(join(config.extension_code, 'keep.txt'), 'utf8'), 'keep-ext');
+		assert.deepEqual(await fs.readFile(config.descriptor_path), beforeDescriptor);
+
+		// Restore regular data_root, symlink extension_code -> refused before either deletion.
+		await fs.rm(config.data_root, { force: true });
+		await fs.mkdir(config.data_root);
+		await fs.writeFile(join(config.data_root, 'keep.txt'), 'keep');
+		await fs.rm(config.extension_code, { recursive: true, force: true });
+		await fs.symlink(outside, config.extension_code, 'dir');
+		await assert.rejects(resetLiveData(config), { code: 'RESET_UNSAFE' });
+		assert.equal(await fs.readFile(join(config.data_root, 'keep.txt'), 'utf8'), 'keep');
+		assert.equal(await fs.readFile(join(outside, 'precious.txt'), 'utf8'), 'precious');
+
+		// Linked ancestor directory refused.
+		const linkedParent = join(root, 'linked-root');
+		const realInstall = join(root, 'real-install');
+		await fs.mkdir(join(realInstall, 'data'), { recursive: true });
+		await fs.mkdir(join(realInstall, 'extensions'), { recursive: true });
+		await fs.symlink(realInstall, linkedParent, 'dir');
+		await assert.rejects(resetLiveData(managedDescriptor(linkedParent)), { code: 'RESET_UNSAFE' });
 	} finally {
 		await fs.rm(root, { recursive: true, force: true });
 	}

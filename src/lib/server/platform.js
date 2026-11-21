@@ -3,7 +3,15 @@ import {
 	checkUpdates,
 	queueOperation,
 	operationStatus,
-	installedCheck
+	installedCheck,
+	listBranches,
+	branchCompatibility,
+	queueBranchSwitch,
+	validateSwitchCheckForExport,
+	beginSwitchExport,
+	readSwitchExport,
+	completeSwitchExport,
+	clearSwitchExport
 } from './installation-operations.js';
 import { loginStartupStatus, setLoginStartup, getInstallation } from './installation.js';
 import { controlServer, serverSummary } from './server-lifecycle.js';
@@ -31,6 +39,14 @@ export const localPlatform = Object.freeze({
 	queueOperation: local('host.installation', queueOperation),
 	operationStatus: local('host.installation', operationStatus),
 	installedCheck: local('host.installation', installedCheck),
+	listBranches: local('host.installation', listBranches),
+	branchCompatibility: local('host.installation', branchCompatibility),
+	queueBranchSwitch: local('host.installation', queueBranchSwitch),
+	validateSwitchCheckForExport: local('host.installation', validateSwitchCheckForExport),
+	beginSwitchExport: local('host.installation', beginSwitchExport),
+	readSwitchExport: local('host.installation', readSwitchExport),
+	completeSwitchExport: local('host.installation', completeSwitchExport),
+	clearSwitchExport: local('host.installation', clearSwitchExport),
 	loginStartupStatus: local('host.controls', loginStartupStatus),
 	setLoginStartup: local('host.controls', setLoginStartup),
 	controlServer: local('host.controls', controlServer),

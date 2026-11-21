@@ -1,4 +1,5 @@
 export const installationApiVersion = 1;
+export const BRANCH_REFS = Object.freeze(['main', 'dev']);
 
 // Installation identity and paths shared by scripts, web, CLI and MCP. No store initialization on read.
 import { existsSync, readFileSync, lstatSync, statSync } from 'node:fs';
@@ -215,6 +216,13 @@ export function validateInstallation(value) {
 			resolve(value.pdf_cache) !== value.pdf_cache)
 	)
 		throw new Error('PDF cache must be an absolute resolved path.');
+	if (
+		value.tracking_ref !== undefined &&
+		(typeof value.tracking_ref !== 'string' || !BRANCH_REFS.includes(value.tracking_ref))
+	)
+		throw Object.assign(new Error('Installation tracking_ref must be main or dev.'), {
+			code: 'BRANCH_REF'
+		});
 	return value;
 }
 export function getInstallation() {

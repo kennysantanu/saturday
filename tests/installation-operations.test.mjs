@@ -9,12 +9,22 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
+	BRANCH_REFS,
 	compareVersions,
 	selectTarget,
 	validateRelease,
 	ownedRemovalTargets,
 	assertSafeRemoval,
 	queueOperation,
+	queueBranchSwitch,
+	listBranches,
+	branchCompatibility,
+	beginSwitchExport,
+	readSwitchExport,
+	completeSwitchExport,
+	clearSwitchExport,
+	resetLiveData,
+	checkUpdates,
 	operationStatus,
 	operationPaths,
 	executeOperation,
@@ -27,7 +37,11 @@ import {
 	PREVIOUS_BUILDS_RETAINED
 } from '../src/lib/server/installation-operations.js';
 import { copySource, install, run as installerRun } from '../scripts/install.mjs';
-import { getInstallation, createDesktopShortcut } from '../src/lib/server/installation.js';
+import {
+	getInstallation,
+	validateInstallation,
+	createDesktopShortcut
+} from '../src/lib/server/installation.js';
 import { readBuildInfo } from '../scripts/build-info.mjs';
 import { serverSummary } from '../src/lib/server/server-lifecycle.js';
 const run = promisify(execFile);
@@ -891,6 +905,1318 @@ test('assistantConnectionNotice distinguishes verified MCP leases from unverifie
 			sleeper.kill('SIGKILL');
 			await new Promise((r) => sleeper.once('exit', r));
 		}
+		for (const k of Object.keys(process.env)) if (!(k in prior)) delete process.env[k];
+		Object.assign(process.env, prior);
+		await fs.rm(f.root, { recursive: true, force: true });
+	}
+});
+
+function packageResponse(overrides = {}) {
+	const merged = {
+		...pkg,
+		...overrides,
+		saturday: {
+			...pkg.saturday,
+			...(overrides.saturday || {}),
+			storage: {
+				database: {
+					...pkg.saturday.storage.database,
+					...(overrides.saturday?.storage?.database || {})
+				},
+				manifest: {
+					...pkg.saturday.storage.manifest,
+					...(overrides.saturday?.storage?.manifest || {})
+				}
+			}
+		}
+	};
+	return {
+		encoding: 'base64',
+		content: Buffer.from(JSON.stringify(merged)).toString('base64')
+	};
+}
+
+function makeStubBuildRun(f) {
+	return async (cmd, args, options, defaultRun) => {
+		if (args[1] === 'ci') {
+			const targetModules = join(options.cwd, 'node_modules');
+			if (!existsSync(targetModules))
+				await fs.symlink(resolve('node_modules'), targetModules, 'dir');
+			return;
+		}
+		if (args[1] === 'run' && args[2] === 'build') {
+			const targetBuild = join(options.cwd, 'build');
+			if (!existsSync(targetBuild)) await fs.cp(resolve('build'), targetBuild, { recursive: true });
+			return;
+		}
+		return defaultRun(cmd, args, options);
+	};
+}
+
+test('branch allowlist, descriptor tracking_ref validation, and source-mode refusal', async () => {
+	assert.deepEqual([...BRANCH_REFS], ['main', 'dev']);
+	const f = await fixture(),
+		prior = { ...process.env };
+	Object.assign(process.env, f.env);
+	try {
+		const validBase = JSON.parse(await fs.readFile(f.descriptor, 'utf8'));
+		assert.equal(validateInstallation(validBase).tracking_ref, undefined);
+		assert.equal(validateInstallation({ ...validBase, tracking_ref: 'main' }).tracking_ref, 'main');
+		assert.equal(validateInstallation({ ...validBase, tracking_ref: 'dev' }).tracking_ref, 'dev');
+		for (const bad of [
+			'',
+			'feat/x-1',
+			'../etc',
+			'-x',
+			' main',
+			'dev ',
+			'a'.repeat(101),
+			null,
+			123
+		]) {
+			assert.throws(() => validateInstallation({ ...validBase, tracking_ref: bad }), {
+				code: 'BRANCH_REF'
+			});
+		}
+
+		// Source-mode refusal leaves descriptor and journal bytes intact.
+		const sourceDescriptor = { ...validBase, mode: 'source', code_owned: false };
+		await fs.writeFile(f.descriptor, JSON.stringify(sourceDescriptor));
+		const beforeDesc = await fs.readFile(f.descriptor);
+		const paths = operationPaths(getInstallation());
+		await fs.mkdir(paths.root, { recursive: true });
+		await fs.writeFile(paths.journal, '{"sentinel":true}');
+		const beforeJournal = await fs.readFile(paths.journal);
+		await assert.rejects(listBranches({ config: getInstallation() }), { code: 'BRANCH_MODE' });
+		await assert.rejects(branchCompatibility({ ref: 'dev', config: getInstallation() }), {
+			code: 'BRANCH_MODE'
+		});
+		await assert.rejects(
+			queueBranchSwitch(
+				{
+					ref: 'dev',
+					commit: sha,
+					check_id: randomUUID(),
+					export_id: randomUUID(),
+					backup_id: 'b1',
+					confirm: true
+				},
+				{ config: getInstallation() }
+			),
+			{ code: 'BRANCH_MODE' }
+		);
+		await assert.rejects(resetLiveData(getInstallation()), { code: 'BRANCH_MODE' });
+		assert.deepEqual(await fs.readFile(f.descriptor), beforeDesc);
+		assert.deepEqual(await fs.readFile(paths.journal), beforeJournal);
+		assert.equal(existsSync(paths.switch_export), false);
+	} finally {
+		for (const k of Object.keys(process.env)) if (!(k in prior)) delete process.env[k];
+		Object.assign(process.env, prior);
+		await fs.rm(f.root, { recursive: true, force: true });
+	}
+});
+
+test('listBranches filters allowlist across pages, reports missing refs, and distinguishes invalid/network/404 failures', async () => {
+	const managedConfig = { mode: 'managed', tracking_ref: 'dev', release: null };
+	const page1 = [
+		{ name: 'main', commit: { sha } },
+		...Array.from({ length: 99 }, (_, i) => ({ name: `feat/x-${i}`, commit: { sha: other } }))
+	];
+	const page2 = [
+		{ name: 'dev', commit: { sha: other } },
+		{ name: 'backup/2026', commit: { sha } }
+	];
+	const listed = await listBranches({
+		config: managedConfig,
+		request: async (path) => {
+			if (path === '/branches?per_page=100&page=1') return page1;
+			if (path === '/branches?per_page=100&page=2') return page2;
+			throw new Error(`unexpected ${path}`);
+		}
+	});
+	assert.equal(listed.current_ref, 'dev');
+	assert.deepEqual(listed.branches, [
+		{ ref: 'main', commit: sha, missing: false },
+		{ ref: 'dev', commit: other, missing: false }
+	]);
+
+	// Missing/renamed dev appears as disabled missing row rather than substituting another branch.
+	const missingDev = await listBranches({
+		config: managedConfig,
+		request: async () => [
+			{ name: 'main', commit: { sha } },
+			{ name: 'dev-renamed', commit: { sha: other } }
+		]
+	});
+	assert.deepEqual(missingDev.branches, [
+		{ ref: 'main', commit: sha, missing: false },
+		{ ref: 'dev', commit: null, missing: true }
+	]);
+
+	// Invalid shape, bad SHA, duplicate allowlisted name, and >10 pages -> BRANCH_RESPONSE.
+	await assert.rejects(
+		listBranches({ config: managedConfig, request: async () => ({ not: 'array' }) }),
+		{ code: 'BRANCH_RESPONSE' }
+	);
+	await assert.rejects(
+		listBranches({
+			config: managedConfig,
+			request: async () => [{ name: 'main', commit: { sha: 'bad-sha' } }]
+		}),
+		{ code: 'BRANCH_RESPONSE' }
+	);
+	await assert.rejects(
+		listBranches({
+			config: managedConfig,
+			request: async () => [
+				{ name: 'main', commit: { sha } },
+				{ name: 'main', commit: { sha: other } }
+			]
+		}),
+		{ code: 'BRANCH_RESPONSE' }
+	);
+	await assert.rejects(
+		listBranches({
+			config: managedConfig,
+			request: async () =>
+				Array.from({ length: 100 }, (_, i) => ({ name: `f-${i}`, commit: { sha } }))
+		}),
+		{ code: 'BRANCH_RESPONSE' }
+	);
+
+	// Network/rate-limit failure -> BRANCH_LOOKUP.
+	await assert.rejects(
+		listBranches({
+			config: managedConfig,
+			request: async () => {
+				throw Object.assign(new Error('GitHub update check failed (403).'), { status: 403 });
+			}
+		}),
+		{ code: 'BRANCH_LOOKUP' }
+	);
+
+	// 404 branch resolution -> BRANCH_MISSING; non-404 preserves error.
+	await assert.rejects(
+		selectTarget({ mode: 'managed', tracking_ref: 'dev', build: { commit: sha } }, async () => {
+			throw Object.assign(new Error('GitHub update check failed (404).'), { status: 404 });
+		}),
+		{ code: 'BRANCH_MISSING' }
+	);
+});
+
+test('selectTarget honors tracking_ref before release discovery and reports three-state commit comparison', async () => {
+	const seen = [];
+	const tracked = await selectTarget(
+		{ tracking_ref: 'dev', build: { commit: sha } },
+		async (path) => {
+			seen.push(path);
+			if (path === '/commits/dev') return { sha: other };
+			throw new Error(`unexpected ${path}`);
+		}
+	);
+	assert.deepEqual(seen, ['/commits/dev'], 'explicit tracking_ref bypasses release discovery');
+	assert.equal(tracked.ref, 'dev');
+	assert.equal(tracked.commit, other);
+	assert.equal(tracked.available, true);
+	assert.equal(tracked.comparison, 'different');
+	assert.match(tracked.notes, /^dev changed;/);
+
+	const same = await selectTarget({ tracking_ref: 'dev', build: { commit: sha } }, async () => ({
+		sha
+	}));
+	assert.equal(same.available, false);
+	assert.equal(same.comparison, 'same');
+
+	for (const badCommit of [null, undefined, '', 'not-a-sha']) {
+		const unknown = await selectTarget(
+			{ tracking_ref: 'main', build: { commit: badCommit } },
+			async () => ({ sha })
+		);
+		assert.equal(unknown.available, null);
+		assert.equal(unknown.comparison, 'unknown');
+		assert.match(unknown.notes, /installed commit is unknown.*main/);
+	}
+
+	// Unknown installed commit persisted by checkUpdates cannot queue an ordinary update.
+	const f = await fixture(),
+		prior = { ...process.env };
+	Object.assign(process.env, f.env);
+	try {
+		const config = JSON.parse(await fs.readFile(f.descriptor, 'utf8'));
+		config.build = { id: 'local.0123456789ab', commit: null, dirty: null };
+		config.tracking_ref = 'dev';
+		await fs.writeFile(f.descriptor, JSON.stringify(config));
+		const checked = await checkUpdates({
+			request: async (path) => {
+				if (path === '/commits/dev') return { sha };
+				throw new Error(`unexpected ${path}`);
+			}
+		});
+		assert.equal(checked.purpose, 'update');
+		assert.equal(checked.target.available, null);
+		assert.equal(checked.target.comparison, 'unknown');
+		await assert.rejects(
+			queueOperation('update', { check_id: checked.id, confirm: true }),
+			/No checked update is available/
+		);
+		// CLI update check must NOT claim "up to date" when the installed commit is unknown.
+		const cliFixturePath = join(f.root, 'branch-cli-fixture.json');
+		await fs.writeFile(
+			cliFixturePath,
+			JSON.stringify({
+				refs: { dev: sha, main: sha },
+				packages: { [sha]: JSON.parse(await fs.readFile(resolve('package.json'), 'utf8')) }
+			})
+		);
+		const cliOut = await run(
+			process.execPath,
+			[
+				'--import',
+				resolve('tests/helpers/branch-fetch-fixture.mjs'),
+				resolve('scripts/install.mjs'),
+				'update',
+				'--installation',
+				f.descriptor
+			],
+			{ env: { ...f.env, SATURDAY_TEST_BRANCH_FIXTURE: cliFixturePath } }
+		);
+		assert.match(cliOut.stderr, /installed commit is unknown/i);
+		assert.doesNotMatch(cliOut.stderr, /up to date/i);
+		// Matching commit still prints "Saturday is up to date".
+		config.build = { id: `dev.${sha.slice(0, 12)}`, commit: sha, dirty: false };
+		await fs.writeFile(f.descriptor, JSON.stringify(config));
+		const cliUpToDate = await run(
+			process.execPath,
+			[
+				'--import',
+				resolve('tests/helpers/branch-fetch-fixture.mjs'),
+				resolve('scripts/install.mjs'),
+				'update',
+				'--installation',
+				f.descriptor
+			],
+			{ env: { ...f.env, SATURDAY_TEST_BRANCH_FIXTURE: cliFixturePath } }
+		);
+		assert.match(cliUpToDate.stderr, /Saturday is up to date/i);
+	} finally {
+		for (const k of Object.keys(process.env)) if (!(k in prior)) delete process.env[k];
+		Object.assign(process.env, prior);
+		await fs.rm(f.root, { recursive: true, force: true });
+	}
+});
+
+test('local build identity captures Git commit and dirty state and preserves them through local-source repair', async () => {
+	const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'saturday-local-id-')));
+	const prior = { ...process.env };
+	const cleanEnv = () => {
+		for (const k of ['SATURDAY_BUILD_ID', 'SATURDAY_BUILD_COMMIT', 'SATURDAY_BUILD_DIRTY'])
+			delete process.env[k];
+	};
+	try {
+		const repoDir = join(root, 'repo');
+		const archiveDir = join(root, 'archive');
+		await fs.mkdir(repoDir);
+		await fs.mkdir(archiveDir);
+		await run('git', ['init', '--quiet'], { cwd: repoDir });
+		await run(
+			'git',
+			[
+				'-c',
+				'user.name=Test',
+				'-c',
+				'user.email=test@example.invalid',
+				'-c',
+				'commit.gpgsign=false',
+				'commit',
+				'--allow-empty',
+				'-m',
+				'fixture'
+			],
+			{ cwd: repoDir }
+		);
+		const head = (await run('git', ['rev-parse', 'HEAD'], { cwd: repoDir })).stdout.trim();
+		const localId = 'local.abcdef012345';
+
+		// Clean Git fixture with local ID retains ID and captures commit + dirty:false.
+		cleanEnv();
+		process.env.SATURDAY_BUILD_ID = localId;
+		assert.deepEqual(readBuildInfo(repoDir), { id: localId, commit: head, dirty: false });
+
+		// Dirty Git fixture retains ID and captures commit + dirty:true.
+		await fs.writeFile(join(repoDir, 'dirty.txt'), 'change');
+		assert.deepEqual(readBuildInfo(repoDir), { id: localId, commit: head, dirty: true });
+
+		// Non-Git archive yields unknown (commit:null, dirty:null), never invents dirty:true.
+		assert.deepEqual(readBuildInfo(archiveDir), { id: localId, commit: null, dirty: null });
+
+		// Non-Git subdirectory inside an enclosing Git repo must NOT inherit the parent repo's commit.
+		const nestedNonRepo = join(repoDir, 'nested-non-repo');
+		await fs.mkdir(nestedNonRepo);
+		assert.deepEqual(readBuildInfo(nestedNonRepo), { id: localId, commit: null, dirty: null });
+
+		// Explicit invalid commit still fails even when SATURDAY_BUILD_ID is set.
+		process.env.SATURDAY_BUILD_COMMIT = 'bad';
+		assert.throws(() => readBuildInfo(repoDir), /full commit SHA/);
+
+		// Explicit malformed dirty state throws BUILD_IDENTITY.
+		process.env.SATURDAY_BUILD_COMMIT = head;
+		process.env.SATURDAY_BUILD_DIRTY = 'maybe';
+		assert.throws(() => readBuildInfo(repoDir), { code: 'BUILD_IDENTITY' });
+
+		// Explicit valid commit + dirty pair works without Git.
+		process.env.SATURDAY_BUILD_DIRTY = '0';
+		assert.deepEqual(readBuildInfo(archiveDir), { id: localId, commit: head, dirty: false });
+		process.env.SATURDAY_BUILD_DIRTY = '1';
+		assert.deepEqual(readBuildInfo(archiveDir), { id: localId, commit: head, dirty: true });
+
+		// Local-source repair captures Git SHA/dirty before copySource strips .git.
+		cleanEnv();
+		const f = await fixture();
+		try {
+			Object.assign(process.env, f.env);
+			const sourceGit = join(f.root, 'source-git');
+			await copySource(resolve('.'), sourceGit);
+			await run('git', ['init', '--quiet'], { cwd: sourceGit });
+			await run('git', ['add', '.'], { cwd: sourceGit });
+			await run(
+				'git',
+				[
+					'-c',
+					'user.name=Test',
+					'-c',
+					'user.email=test@example.invalid',
+					'-c',
+					'commit.gpgsign=false',
+					'commit',
+					'--quiet',
+					'-m',
+					'local repair fixture'
+				],
+				{ cwd: sourceGit }
+			);
+			const repairHead = (
+				await run('git', ['rev-parse', 'HEAD'], { cwd: sourceGit })
+			).stdout.trim();
+			await fs.writeFile(join(sourceGit, 'local-dirty.txt'), 'untracked');
+			const config = getInstallation();
+			const paths = operationPaths(config);
+			const repairId = randomUUID();
+			await fs.mkdir(paths.root, { recursive: true });
+			await fs.writeFile(
+				paths.status,
+				JSON.stringify({
+					format: 'saturday.operation',
+					version: 1,
+					id: repairId,
+					installation_id: config.installation_id,
+					pid: process.pid,
+					operation: 'repair',
+					status: 'queued',
+					config,
+					source: sourceGit,
+					started_at: new Date().toISOString(),
+					log: join(paths.root, `${repairId}.log`)
+				})
+			);
+			const seenBuildEnv = [];
+			await executeOperation(repairId, {
+				copySource,
+				onRun: async (cmd, args, options, defaultRun) => {
+					if (args[1] === 'run' && args[2] === 'build') {
+						seenBuildEnv.push({
+							id: options.env.SATURDAY_BUILD_ID,
+							commit: options.env.SATURDAY_BUILD_COMMIT,
+							dirty: options.env.SATURDAY_BUILD_DIRTY
+						});
+					}
+					return makeStubBuildRun(f)(cmd, args, options, defaultRun);
+				}
+			});
+			assert.equal(operationStatus().status, 'complete', JSON.stringify(operationStatus()));
+			const repairedConfig = getInstallation();
+			assert.match(repairedConfig.build.id, /^local\.[a-f0-9]{12}$/);
+			assert.equal(repairedConfig.build.commit, repairHead);
+			assert.equal(repairedConfig.build.dirty, true);
+			assert.equal(existsSync(join(repairedConfig.code_root, '.git')), false);
+			assert.equal(seenBuildEnv[0].commit, repairHead);
+			assert.equal(seenBuildEnv[0].dirty, '1');
+			// Known candidate commit matching tracked head reports up-to-date (regression for 65c121a1).
+			const upToDate = await selectTarget({ ...repairedConfig, tracking_ref: 'dev' }, async () => ({
+				sha: repairHead
+			}));
+			assert.equal(upToDate.available, false);
+			assert.equal(upToDate.comparison, 'same');
+		} finally {
+			await fs.rm(f.root, { recursive: true, force: true });
+		}
+	} finally {
+		for (const k of Object.keys(process.env)) if (!(k in prior)) delete process.env[k];
+		Object.assign(process.env, prior);
+		await fs.rm(root, { recursive: true, force: true });
+	}
+});
+
+test('branchCompatibility computes all verdicts, bypasses password/LAN guards on switch, and keeps them on ordinary updates', async () => {
+	const f = await fixture(),
+		prior = { ...process.env };
+	Object.assign(process.env, f.env);
+	try {
+		const config = getInstallation();
+		const { DatabaseSync } = await import('node:sqlite');
+		const checkVerdict = async (pkgOverrides) =>
+			branchCompatibility({
+				ref: 'dev',
+				config,
+				request: async (path) => {
+					if (path === '/commits/dev') return { sha };
+					if (path === `/contents/package.json?ref=${sha}`) return packageResponse(pkgOverrides);
+					throw new Error(`unexpected ${path}`);
+				}
+			});
+
+		// 1. Equal -> compatible.
+		const compat = await checkVerdict({});
+		assert.equal(compat.purpose, 'branch-switch');
+		assert.equal(compat.compatibility.verdict, 'compatible');
+		assert.equal(compat.compatibility.live.database.version, 1);
+		assert.equal(compat.compatibility.live.manifest.version, 1);
+
+		// 2. Target current higher -> candidate_newer.
+		assert.equal(
+			(
+				await checkVerdict({
+					saturday: { storage: { database: { minimumVersion: 1, currentVersion: 2 } } }
+				})
+			).compatibility.verdict,
+			'candidate_newer'
+		);
+
+		// 3. Target minimum higher -> candidate_newer.
+		assert.equal(
+			(
+				await checkVerdict({
+					saturday: { storage: { manifest: { minimumVersion: 2, version: 2 } } }
+				})
+			).compatibility.verdict,
+			'candidate_newer'
+		);
+
+		// 4. Live higher -> data_newer, and mixed dimensions choose data_newer.
+		const db = new DatabaseSync(config.database);
+		db.prepare(
+			"INSERT INTO schema_migrations(version, name, applied_at) VALUES (2, 'test', ?)"
+		).run(new Date().toISOString());
+		db.close();
+		assert.equal((await checkVerdict({})).compatibility.verdict, 'data_newer');
+		assert.equal(
+			(
+				await checkVerdict({
+					saturday: { storage: { manifest: { minimumVersion: 1, version: 2 } } }
+				})
+			).compatibility.verdict,
+			'data_newer',
+			'mixed older/newer dimensions choose data_newer'
+		);
+
+		// Restore live DB version to 1; test format mismatch (via manifest format) -> data_newer.
+		const dbRestore = new DatabaseSync(config.database);
+		dbRestore.prepare('DELETE FROM schema_migrations WHERE version = 2').run();
+		dbRestore.close();
+		const manifestPath = join(config.files, 'manifest.json');
+		const originalManifest = await fs.readFile(manifestPath, 'utf8');
+		await fs.writeFile(
+			manifestPath,
+			JSON.stringify({ ...JSON.parse(originalManifest), format: 'other.files' })
+		);
+		assert.equal((await checkVerdict({})).compatibility.verdict, 'data_newer');
+		await fs.writeFile(manifestPath, originalManifest);
+
+		// 5. Invalid candidate package/runtime -> CANDIDATE_METADATA.
+		await assert.rejects(checkVerdict({ name: 'not-saturday' }), { code: 'CANDIDATE_METADATA' });
+		await assert.rejects(
+			checkVerdict({ engines: { node: '>=99.0.0' }, saturday: { node_minimum: '99.0.0' } }),
+			{ code: 'CANDIDATE_METADATA' }
+		);
+
+		// 6. Password & LAN guards bypassed for branchCompatibility, preserved for ordinary checkUpdates.
+		await fs.writeFile(
+			join(config.data_root, 'access.json'),
+			JSON.stringify({
+				format: 'saturday.access',
+				version: 1,
+				allow_lan: true,
+				idle_timeout_seconds: 3600,
+				password: {
+					algorithm: 'scrypt',
+					N: 131072,
+					r: 8,
+					p: 1,
+					salt: 'a'.repeat(32),
+					hash: 'b'.repeat(128)
+				}
+			})
+		);
+		const bypass = await checkVerdict({ saturday: { access_api: 0, lan_api: 0 } });
+		assert.equal(bypass.compatibility.verdict, 'compatible');
+		await assert.rejects(
+			checkUpdates({
+				request: async (path) => {
+					if (path.startsWith('/releases')) return [];
+					if (path === '/commits/main') return { sha };
+					if (path === `/contents/package.json?ref=${sha}`)
+						return packageResponse({ saturday: { access_api: 0, lan_api: 0 } });
+					throw new Error(`unexpected ${path}`);
+				}
+			}),
+			/LAN preferences/
+		);
+
+		// 7. Unreadable/missing live manifest -> STORAGE_UNAVAILABLE.
+		await fs.rm(join(config.files, 'manifest.json'));
+		await assert.rejects(checkVerdict({}), { code: 'STORAGE_UNAVAILABLE' });
+	} finally {
+		for (const k of Object.keys(process.env)) if (!(k in prior)) delete process.env[k];
+		Object.assign(process.env, prior);
+		await fs.rm(f.root, { recursive: true, force: true });
+	}
+});
+
+test('switch export receipt lifecycle survives restart, enforces bindings, prevents stale overwrites, and blocks ordinary bypass', async () => {
+	const f = await fixture(),
+		prior = { ...process.env };
+	Object.assign(process.env, f.env);
+	try {
+		const config = getInstallation();
+		const paths = operationPaths(config);
+		const compatReq = async (path) => {
+			if (path === '/commits/dev') return { sha };
+			if (path === `/contents/package.json?ref=${sha}`) return packageResponse();
+			throw new Error(`unexpected ${path}`);
+		};
+		const review = await branchCompatibility({ ref: 'dev', config, request: compatReq });
+
+		// Direct ordinary queueOperation cannot use a branch-switch check.
+		await assert.rejects(queueOperation('update', { check_id: review.id, confirm: true }), {
+			code: 'CHECK_PURPOSE'
+		});
+
+		// Absent export refuses.
+		await assert.rejects(
+			queueBranchSwitch(
+				{
+					ref: 'dev',
+					commit: sha,
+					check_id: review.id,
+					export_id: randomUUID(),
+					backup_id: 'b1',
+					confirm: true
+				},
+				{ config, request: compatReq, spawnWorker: async () => process.pid }
+			),
+			{ code: 'EXPORT_REQUIRED' }
+		);
+
+		// Pending export refuses; supersede old export so delayed old completion/clear cannot touch new one.
+		const oldPending = await beginSwitchExport({ check_id: review.id, backup_id: 'b-old' }, config);
+		const newPending = await beginSwitchExport({ check_id: review.id, backup_id: 'b-new' }, config);
+		assert.equal(
+			await completeSwitchExport(
+				{
+					export_id: oldPending.id,
+					backup_id: 'b-old',
+					filename: 'old.zip',
+					bytes: 100,
+					sha256: '1'.repeat(64)
+				},
+				config
+			),
+			null,
+			'superseded export cannot complete'
+		);
+		assert.deepEqual(await clearSwitchExport({ export_id: oldPending.id }, config), {
+			cleared: false
+		});
+		assert.equal(readSwitchExport(config)?.id, newPending.id);
+
+		// Pending marker still refuses queueBranchSwitch.
+		await assert.rejects(
+			queueBranchSwitch(
+				{
+					ref: 'dev',
+					commit: sha,
+					check_id: review.id,
+					export_id: newPending.id,
+					backup_id: 'b-new',
+					confirm: true
+				},
+				{ config, request: compatReq, spawnWorker: async () => process.pid }
+			),
+			{ code: 'EXPORT_REQUIRED' }
+		);
+
+		// Complete export; verify a fresh child Node process (simulating restart) reads the same receipt.
+		const completed = await completeSwitchExport(
+			{
+				export_id: newPending.id,
+				backup_id: 'b-new',
+				filename: 'saturday-test.zip',
+				bytes: 4096,
+				sha256: '2'.repeat(64)
+			},
+			config
+		);
+		assert.equal(completed.status, 'complete');
+		// Cancelled duplicate stream must not clear an already-completed receipt.
+		assert.deepEqual(await clearSwitchExport({ export_id: completed.id }, config), {
+			cleared: false
+		});
+		assert.equal(readSwitchExport(config)?.status, 'complete');
+		const freshRead = await run(
+			process.execPath,
+			[
+				'--input-type=module',
+				'-e',
+				`import { readSwitchExport } from ${JSON.stringify(new URL('../src/lib/server/installation-operations.js', import.meta.url).href)}; console.log(JSON.stringify(readSwitchExport()));`
+			],
+			{ env: f.env }
+		);
+		assert.deepEqual(JSON.parse(freshRead.stdout), completed);
+
+		// Wrong backup_id refuses.
+		await assert.rejects(
+			queueBranchSwitch(
+				{
+					ref: 'dev',
+					commit: sha,
+					check_id: review.id,
+					export_id: completed.id,
+					backup_id: 'wrong-backup',
+					confirm: true
+				},
+				{ config, request: compatReq, spawnWorker: async () => process.pid }
+			),
+			{ code: 'EXPORT_REQUIRED' }
+		);
+
+		// Upstream branch changed after review refuses with BRANCH_CHANGED and keeps receipt untouched.
+		await assert.rejects(
+			queueBranchSwitch(
+				{
+					ref: 'dev',
+					commit: sha,
+					check_id: review.id,
+					export_id: completed.id,
+					backup_id: 'b-new',
+					confirm: true
+				},
+				{
+					config,
+					request: async () => ({ sha: other }),
+					spawnWorker: async () => process.pid
+				}
+			),
+			{ code: 'BRANCH_CHANGED' }
+		);
+
+		// Matching completed export queues once and consumes the receipt.
+		const queued = await queueBranchSwitch(
+			{
+				ref: 'dev',
+				commit: sha,
+				check_id: review.id,
+				export_id: completed.id,
+				backup_id: 'b-new',
+				confirm: true
+			},
+			{ config, request: compatReq, spawnWorker: async () => process.pid }
+		);
+		assert.equal(queued.operation, 'update');
+		assert.equal(queued.reset_data, true);
+		assert.equal(queued.branch_switch.filename, 'saturday-test.zip');
+		assert.equal(readSwitchExport(config), null, 'receipt is consumed on accepted queue');
+
+		// Competing active operation rejects without overwriting operation state.
+		await assert.rejects(
+			queueBranchSwitch(
+				{
+					ref: 'dev',
+					commit: sha,
+					check_id: review.id,
+					export_id: completed.id,
+					backup_id: 'b-new',
+					confirm: true
+				},
+				{ config, request: compatReq, spawnWorker: async () => process.pid }
+			),
+			{ code: 'OPERATION_BUSY' }
+		);
+		await assert.rejects(queueOperation('repair', {}), { code: 'OPERATION_BUSY' });
+
+		// Mark completed and test incompatible typed MOVE requirement.
+		await fs.rm(paths.status, { force: true });
+		const incompatReview = await branchCompatibility({
+			ref: 'dev',
+			config,
+			request: async (path) => {
+				if (path === '/commits/dev') return { sha };
+				if (path === `/contents/package.json?ref=${sha}`)
+					return packageResponse({
+						saturday: { storage: { database: { minimumVersion: 1, currentVersion: 2 } } }
+					});
+				throw new Error(`unexpected ${path}`);
+			}
+		});
+		const incompatPending = await beginSwitchExport(
+			{ check_id: incompatReview.id, backup_id: 'b-incompat' },
+			config
+		);
+		await completeSwitchExport(
+			{
+				export_id: incompatPending.id,
+				backup_id: 'b-incompat',
+				filename: 'saturday-incompat.zip',
+				bytes: 512,
+				sha256: '3'.repeat(64)
+			},
+			config
+		);
+		for (const wrong of ['', 'move', 'MOVE ', ' MOVE']) {
+			await assert.rejects(
+				queueBranchSwitch(
+					{
+						ref: 'dev',
+						commit: sha,
+						check_id: incompatReview.id,
+						export_id: incompatPending.id,
+						backup_id: 'b-incompat',
+						confirm: true,
+						confirmation: wrong
+					},
+					{ config, request: compatReq, spawnWorker: async () => process.pid }
+				),
+				{ code: 'SWITCH_TYPED_CONFIRM' }
+			);
+		}
+		const acceptedIncompat = await queueBranchSwitch(
+			{
+				ref: 'dev',
+				commit: sha,
+				check_id: incompatReview.id,
+				export_id: incompatPending.id,
+				backup_id: 'b-incompat',
+				confirm: true,
+				confirmation: 'MOVE'
+			},
+			{ config, request: compatReq, spawnWorker: async () => process.pid }
+		);
+		assert.equal(acceptedIncompat.reset_data, true);
+	} finally {
+		for (const k of Object.keys(process.env)) if (!(k in prior)) delete process.env[k];
+		Object.assign(process.env, prior);
+		await fs.rm(f.root, { recursive: true, force: true });
+	}
+});
+
+test('destructive branch switch enforces publish -> reset -> live setup ordering and blocks late leases', async () => {
+	const f = await fixture(),
+		prior = { ...process.env };
+	Object.assign(process.env, f.env);
+	try {
+		const config = getInstallation();
+		const paths = operationPaths(config);
+		// Seed recognizable populated DB, files, extension state/code, access password/LAN.
+		await run(
+			process.execPath,
+			[
+				'--input-type=module',
+				'-e',
+				`import {createJob} from ${JSON.stringify(join(f.app, 'src/lib/server/local/jobs.js'))};
+				import {createDocument} from ${JSON.stringify(join(f.app, 'src/lib/server/files/documents.js'))};
+				createJob({job_title:'PreSwitch Sentinel',company_name:'BeforeCorp'});
+				await createDocument({filename:'pre-switch.md',content:'old-doc-sentinel'});`
+			],
+			{ env: f.env }
+		);
+		await fs.mkdir(config.extension_code, { recursive: true });
+		await fs.writeFile(join(config.extension_code, 'old-ext.txt'), 'old-ext-code');
+		await fs.mkdir(join(config.extension_state, 'sample-ext'), { recursive: true });
+		await fs.writeFile(join(config.extension_state, 'sample-ext', 'state.txt'), 'old-ext-state');
+		await fs.writeFile(
+			join(config.data_root, 'access.json'),
+			JSON.stringify({
+				format: 'saturday.access',
+				version: 1,
+				allow_lan: true,
+				idle_timeout_seconds: 3600,
+				password: {
+					algorithm: 'scrypt',
+					N: 131072,
+					r: 8,
+					p: 1,
+					salt: 'a'.repeat(32),
+					hash: 'b'.repeat(128)
+				}
+			})
+		);
+		const { DatabaseSync } = await import('node:sqlite');
+		const beforeDb = new DatabaseSync(config.database, { readOnly: true });
+		const beforeDatasetId = beforeDb
+			.prepare('SELECT dataset_id FROM app_metadata WHERE id=1')
+			.get().dataset_id;
+		beforeDb.close();
+
+		// Create candidate source with a recognizable code marker.
+		const candidateSrc = join(f.root, 'candidate-dev');
+		await copySource(resolve('.'), candidateSrc);
+		await fs.writeFile(join(candidateSrc, 'branch-marker.txt'), 'dev-candidate-marker');
+
+		const devReq = async (path) => {
+			if (path === '/commits/dev') return { sha };
+			if (path === `/contents/package.json?ref=${sha}`) return packageResponse();
+			throw new Error(`unexpected ${path}`);
+		};
+
+		// Part 1: inject an unknown lease right before final guard -> must block with data intact and no publication.
+		const review1 = await branchCompatibility({ ref: 'dev', config, request: devReq });
+		const exp1 = await beginSwitchExport({ check_id: review1.id, backup_id: 'b-ord-1' }, config);
+		await completeSwitchExport(
+			{
+				export_id: exp1.id,
+				backup_id: 'b-ord-1',
+				filename: 'saturday-ord1.zip',
+				bytes: 2048,
+				sha256: '4'.repeat(64)
+			},
+			config
+		);
+		const queued1 = await queueBranchSwitch(
+			{
+				ref: 'dev',
+				commit: sha,
+				check_id: review1.id,
+				export_id: exp1.id,
+				backup_id: 'b-ord-1',
+				confirm: true
+			},
+			{ config, request: devReq, spawnWorker: async () => process.pid }
+		);
+		const processesDir = join(config.extension_state, 'processes');
+		const blockedLease = join(processesDir, 'unverified-late-lease.json');
+		await executeOperation(queued1.id, {
+			copySource,
+			downloadSource: async () => ({ source: candidateSrc }),
+			request: devReq,
+			onRun: makeStubBuildRun(f),
+			// Plant the unknown/unverified lease AFTER the staged-setup guard passes,
+			// right before the final assertClientsStopped guard ahead of publish().
+			getLoginStartupStatus: async () => {
+				await fs.mkdir(processesDir, { recursive: true });
+				await fs.writeFile(blockedLease, '{malformed-late-lease');
+				return { available: true, enabled: false };
+			}
+		});
+		const blockedStatus = operationStatus();
+		assert.equal(blockedStatus.status, 'failed');
+		assert.equal(blockedStatus.error_code, 'MCP_CONNECTED');
+		assert.equal(existsSync(join(config.code_root, 'branch-marker.txt')), false, 'not published');
+		assert.equal(getInstallation().tracking_ref, undefined, 'tracking_ref not written on failure');
+		assert.equal(
+			await fs.readFile(join(config.extension_code, 'old-ext.txt'), 'utf8'),
+			'old-ext-code',
+			'live data untouched'
+		);
+		await fs.rm(blockedLease, { force: true });
+
+		// Part 2: successful switch — assert live data intact AT publish, and reset ALREADY complete AT entry to live setup!
+		const review2 = await branchCompatibility({ ref: 'dev', config, request: devReq });
+		const exp2 = await beginSwitchExport({ check_id: review2.id, backup_id: 'b-ord-2' }, config);
+		await completeSwitchExport(
+			{
+				export_id: exp2.id,
+				backup_id: 'b-ord-2',
+				filename: 'saturday-ord2.zip',
+				bytes: 2048,
+				sha256: '5'.repeat(64)
+			},
+			config
+		);
+		const queued2 = await queueBranchSwitch(
+			{
+				ref: 'dev',
+				commit: sha,
+				check_id: review2.id,
+				export_id: exp2.id,
+				backup_id: 'b-ord-2',
+				confirm: true
+			},
+			{ config, request: devReq, spawnWorker: async () => process.pid }
+		);
+		let observedAtPublish = false;
+		let observedAtLiveSetupEntry = false;
+		await executeOperation(queued2.id, {
+			copySource,
+			downloadSource: async () => ({ source: candidateSrc }),
+			request: devReq,
+			onAfterPublish: async (journal) => {
+				// Immediately after publish (before reset): old data AND lease dir must STILL be intact!
+				// An early reset (before publish) fails these assertions!
+				observedAtPublish = true;
+				assert.equal(journal.phase, 'published');
+				assert.equal(journal.reset_phase, 'pending');
+				assert.equal(existsSync(join(config.code_root, 'branch-marker.txt')), true);
+				assert.equal(existsSync(config.database), true, 'old DB still intact at publish');
+				assert.equal(
+					existsSync(join(config.files, 'manifest.json')),
+					true,
+					'old files intact at publish'
+				);
+				assert.equal(existsSync(join(config.extension_code, 'old-ext.txt')), true);
+				assert.equal(existsSync(processesDir), true, 'lease directory still intact at publish');
+			},
+			onRun: async (cmd, args, options, defaultRun) => {
+				const isLiveSetup =
+					typeof args[0] === 'string' &&
+					args[0].endsWith('scripts/setup.mjs') &&
+					!args.includes('--managed') &&
+					options.cwd === config.code_root;
+				if (isLiveSetup) {
+					// At entry to LIVE setup: publish AND reset must ALREADY be complete!
+					// A late reset (after setup) fails these assertions!
+					observedAtLiveSetupEntry = true;
+					const desc = JSON.parse(await fs.readFile(f.descriptor, 'utf8'));
+					assert.equal(desc.tracking_ref, 'dev');
+					assert.deepEqual(desc.initialized, {
+						database: false,
+						files: false,
+						extensions: false,
+						access: false
+					});
+					assert.equal(existsSync(join(config.code_root, 'branch-marker.txt')), true);
+					assert.equal(
+						existsSync(config.database),
+						false,
+						'old DB must be deleted before live setup'
+					);
+					assert.equal(
+						existsSync(config.files),
+						false,
+						'old files must be deleted before live setup'
+					);
+					assert.equal(existsSync(config.extension_state), false);
+					assert.equal(existsSync(config.extension_code), false);
+					assert.deepEqual(await fs.readdir(config.data_root), ['server.state']);
+					assert.deepEqual(await fs.readdir(join(config.data_root, 'server.state')), [
+						'maintenance.json'
+					]);
+					// No recovery snapshot or staged user data copy anywhere in operation state.
+					const stateEntries = await fs.readdir(paths.root);
+					assert.equal(
+						stateEntries.some((n) => n.startsWith('retained-extension-')),
+						false
+					);
+				}
+				return makeStubBuildRun(f)(cmd, args, options, defaultRun);
+			}
+		});
+		assert.equal(observedAtPublish, true);
+		assert.equal(observedAtLiveSetupEntry, true);
+		const done = operationStatus();
+		assert.equal(done.status, 'complete', JSON.stringify(done));
+		assert.equal(done.recovery, null);
+		const afterConfig = getInstallation();
+		assert.equal(afterConfig.tracking_ref, 'dev');
+		assert.equal(afterConfig.build.commit, sha);
+		assert.equal(afterConfig.release, null);
+		assert.equal(afterConfig.distribution, 'development');
+		assert.deepEqual(afterConfig.initialized, {
+			database: true,
+			files: true,
+			extensions: true,
+			access: true
+		});
+		const afterDb = new DatabaseSync(afterConfig.database, { readOnly: true });
+		const afterDatasetId = afterDb
+			.prepare('SELECT dataset_id FROM app_metadata WHERE id=1')
+			.get().dataset_id;
+		const jobCount = afterDb.prepare('SELECT COUNT(*) AS n FROM jobs').get().n;
+		afterDb.close();
+		assert.notEqual(afterDatasetId, beforeDatasetId, 'fresh dataset identity after switch');
+		assert.equal(jobCount, 0, 'zero jobs after switch');
+		const afterAccess = JSON.parse(
+			await fs.readFile(join(afterConfig.data_root, 'access.json'), 'utf8')
+		);
+		assert.equal(afterAccess.password, null);
+		assert.equal(afterAccess.allow_lan, false);
+		const rootEntries = await fs.readdir(f.root);
+		assert.equal(
+			rootEntries.some((n) => n.startsWith('data.pre-')),
+			false,
+			'no data.pre-* retained'
+		);
+		assert.ok(existsSync(afterConfig.logs));
+		assert.ok(existsSync(f.descriptor));
+		assert.ok(existsSync(paths.root));
+		assert.ok((await fs.readdir(paths.root)).some((n) => n.startsWith('previous-')));
+	} finally {
+		for (const k of Object.keys(process.env)) if (!(k in prior)) delete process.env[k];
+		Object.assign(process.env, prior);
+		await fs.rm(f.root, { recursive: true, force: true });
+	}
+});
+
+test('branch switch crash recovery handles pre-publish failures, mid-reset faults, no-double-reset after setup, and corrupted journals', async () => {
+	const f = await fixture(),
+		prior = { ...process.env };
+	Object.assign(process.env, f.env);
+	try {
+		const config = getInstallation();
+		const paths = operationPaths(config);
+		const candidateSrc = join(f.root, 'candidate-rec');
+		await copySource(resolve('.'), candidateSrc);
+		await fs.writeFile(join(candidateSrc, 'recovered-branch.txt'), 'dev-rec');
+		await fs.writeFile(join(config.data_root, 'keep-before-publish.txt'), 'intact');
+		const devReq = async (path) => {
+			if (path === '/commits/dev') return { sha };
+			if (path === `/contents/package.json?ref=${sha}`) return packageResponse();
+			throw new Error(`unexpected ${path}`);
+		};
+
+		const queueSwitch = async (backupTag) => {
+			const rev = await branchCompatibility({
+				ref: 'dev',
+				config: getInstallation(),
+				request: devReq
+			});
+			const exp = await beginSwitchExport(
+				{ check_id: rev.id, backup_id: backupTag },
+				getInstallation()
+			);
+			await completeSwitchExport(
+				{
+					export_id: exp.id,
+					backup_id: backupTag,
+					filename: `saturday-${backupTag}.zip`,
+					bytes: 1024,
+					sha256: '6'.repeat(64)
+				},
+				getInstallation()
+			);
+			return queueBranchSwitch(
+				{
+					ref: 'dev',
+					commit: sha,
+					check_id: rev.id,
+					export_id: exp.id,
+					backup_id: backupTag,
+					confirm: true
+				},
+				{ config: getInstallation(), request: devReq, spawnWorker: async () => process.pid }
+			);
+		};
+
+		// 1. Build failure -> status failed, data & descriptor untouched.
+		const qBuild = await queueSwitch('b-build-fail');
+		await executeOperation(qBuild.id, {
+			copySource,
+			downloadSource: async () => ({ source: candidateSrc }),
+			request: devReq,
+			onRun: async (cmd, args) => {
+				if (args[1] === 'run' && args[2] === 'build') throw new Error('simulated build failure');
+			}
+		});
+		assert.equal(operationStatus().status, 'failed');
+		assert.equal(existsSync(paths.journal), false);
+		assert.equal(existsSync(join(config.data_root, 'keep-before-publish.txt')), true);
+		assert.equal(getInstallation().tracking_ref, undefined);
+
+		// 2. Failure during second removal (extension_code) -> recovery_required, journal retained; Repair completes reset + setup.
+		const maintenanceFile = join(config.data_root, 'server.state', 'maintenance.json');
+		let maintenancePresentBeforeExtRemoval = false;
+		const qMidReset = await queueSwitch('b-mid-reset');
+		await executeOperation(qMidReset.id, {
+			copySource,
+			downloadSource: async () => ({ source: candidateSrc }),
+			request: devReq,
+			onRun: makeStubBuildRun(f),
+			onRemoveRoot: async (_target, index) => {
+				if (index === 1) {
+					maintenancePresentBeforeExtRemoval = existsSync(maintenanceFile);
+					throw new Error('simulated second removal failure');
+				}
+			}
+		});
+		assert.equal(operationStatus().status, 'recovery_required');
+		assert.equal(operationStatus().reset_data, true);
+		assert.equal(
+			maintenancePresentBeforeExtRemoval,
+			true,
+			'maintenance record must be rebuilt immediately after data_root removal, before extension_code removal'
+		);
+		assert.equal(existsSync(paths.journal), true);
+		const midJournal = JSON.parse(await fs.readFile(paths.journal, 'utf8'));
+		assert.equal(midJournal.reset_phase, 'deleting');
+		assert.equal(midJournal.branch_switch.filename, 'saturday-b-mid-reset.zip');
+		assert.equal(existsSync(maintenanceFile), true);
+		const markCrashedController = async () => {
+			if (existsSync(maintenanceFile)) {
+				const m = JSON.parse(await fs.readFile(maintenanceFile, 'utf8'));
+				await fs.writeFile(maintenanceFile, JSON.stringify({ ...m, pid: 99999999 }));
+			}
+		};
+
+		// Corrupt journal check: migrating + incomplete reset_phase refuses without erasing data!
+		await markCrashedController();
+		const corruptPath = join(config.data_root, 'must-survive-corrupt.txt');
+		await fs.writeFile(corruptPath, 'keep');
+		await fs.writeFile(
+			paths.journal,
+			JSON.stringify({ ...midJournal, phase: 'migrating', reset_phase: 'deleting' })
+		);
+		const corruptRepairId = randomUUID();
+		await fs.writeFile(
+			paths.status,
+			JSON.stringify({
+				format: 'saturday.operation',
+				version: 1,
+				id: corruptRepairId,
+				installation_id: config.installation_id,
+				pid: process.pid,
+				operation: 'repair',
+				status: 'queued',
+				config: getInstallation(),
+				log: join(paths.root, `${corruptRepairId}.log`)
+			})
+		);
+		await executeOperation(corruptRepairId, { copySource, onRun: makeStubBuildRun(f) });
+		assert.equal(operationStatus().status, 'recovery_required');
+		assert.equal(
+			await fs.readFile(corruptPath, 'utf8'),
+			'keep',
+			'corrupt journal did not erase data'
+		);
+
+		// Restore legitimate mid-reset journal (published + deleting) and inject live setup failure AFTER reset completes.
+		await markCrashedController();
+		await fs.writeFile(paths.journal, JSON.stringify(midJournal));
+		const repairFailSetupId = randomUUID();
+		await fs.writeFile(
+			paths.status,
+			JSON.stringify({
+				format: 'saturday.operation',
+				version: 1,
+				id: repairFailSetupId,
+				installation_id: config.installation_id,
+				pid: process.pid,
+				operation: 'repair',
+				status: 'queued',
+				config: getInstallation(),
+				log: join(paths.root, `${repairFailSetupId}.log`)
+			})
+		);
+		await executeOperation(repairFailSetupId, {
+			copySource,
+			onRun: async (cmd, args, options, defaultRun) => {
+				if (typeof args[0] === 'string' && args[0].endsWith('scripts/setup.mjs')) {
+					// Simulate partial setup creating a sentinel before failing.
+					await fs.writeFile(join(config.data_root, 'setup-created-sentinel.txt'), 'keep-me');
+					throw new Error('simulated live setup failure');
+				}
+				return makeStubBuildRun(f)(cmd, args, options, defaultRun);
+			}
+		});
+		assert.equal(operationStatus().status, 'recovery_required');
+		const afterSetupFailJournal = JSON.parse(await fs.readFile(paths.journal, 'utf8'));
+		assert.equal(afterSetupFailJournal.reset_phase, 'complete');
+		assert.equal(afterSetupFailJournal.phase, 'migrating');
+
+		// Final repair retry: reset_phase is already 'complete', so setup-created-sentinel MUST survive (no second reset!).
+		await markCrashedController();
+		const finalRepairId = randomUUID();
+		await fs.writeFile(
+			paths.status,
+			JSON.stringify({
+				format: 'saturday.operation',
+				version: 1,
+				id: finalRepairId,
+				installation_id: config.installation_id,
+				pid: process.pid,
+				operation: 'repair',
+				status: 'queued',
+				config: getInstallation(),
+				log: join(paths.root, `${finalRepairId}.log`)
+			})
+		);
+		await executeOperation(finalRepairId, { copySource, onRun: makeStubBuildRun(f) });
+		assert.equal(operationStatus().status, 'complete', JSON.stringify(operationStatus()));
+		assert.equal(existsSync(paths.journal), false);
+		assert.equal(
+			await fs.readFile(join(config.data_root, 'setup-created-sentinel.txt'), 'utf8'),
+			'keep-me',
+			'completed reset is never repeated on repair'
+		);
+		assert.equal(getInstallation().tracking_ref, 'dev');
+		assert.equal(existsSync(join(config.code_root, 'recovered-branch.txt')), true);
+
+		// 3. Crash strictly between journal.phase='published' write and installation.json write:
+		// on-disk descriptor still says initialized.*=true, yet Repair must rewrite journal.next before reset and complete cleanly.
+		const qCrashBeforeDesc = await queueSwitch('b-crash-before-desc');
+		const descBeforeCrash = JSON.parse(await fs.readFile(f.descriptor, 'utf8'));
+		assert.deepEqual(descBeforeCrash.initialized, {
+			database: true,
+			files: true,
+			extensions: true,
+			access: true
+		});
+		await executeOperation(qCrashBeforeDesc.id, {
+			copySource,
+			downloadSource: async () => ({ source: candidateSrc }),
+			request: devReq,
+			onRun: makeStubBuildRun(f),
+			onJournalWrite: async (j) => {
+				if (j.phase === 'published' && j.reset_phase === 'pending')
+					throw new Error('simulated crash between published journal write and descriptor write');
+			}
+		});
+		assert.equal(operationStatus().status, 'recovery_required');
+		const preDescJournal = JSON.parse(await fs.readFile(paths.journal, 'utf8'));
+		assert.equal(preDescJournal.phase, 'published');
+		assert.equal(preDescJournal.reset_phase, 'pending');
+		// Confirm on-disk descriptor was NOT yet rewritten before the simulated crash.
+		const staleDesc = JSON.parse(await fs.readFile(f.descriptor, 'utf8'));
+		assert.deepEqual(staleDesc.initialized, {
+			database: true,
+			files: true,
+			extensions: true,
+			access: true
+		});
+		await markCrashedController();
+		const repairPreDescId = randomUUID();
+		await fs.writeFile(
+			paths.status,
+			JSON.stringify({
+				format: 'saturday.operation',
+				version: 1,
+				id: repairPreDescId,
+				installation_id: config.installation_id,
+				pid: process.pid,
+				operation: 'repair',
+				status: 'queued',
+				config: getInstallation(),
+				log: join(paths.root, `${repairPreDescId}.log`)
+			})
+		);
+		await executeOperation(repairPreDescId, { copySource, onRun: makeStubBuildRun(f) });
+		assert.equal(operationStatus().status, 'complete', JSON.stringify(operationStatus()));
+		assert.equal(existsSync(paths.journal), false);
+		const repairedAfterPreDesc = getInstallation();
+		assert.equal(repairedAfterPreDesc.tracking_ref, 'dev');
+		assert.deepEqual(repairedAfterPreDesc.initialized, {
+			database: true,
+			files: true,
+			extensions: true,
+			access: true
+		});
+	} finally {
 		for (const k of Object.keys(process.env)) if (!(k in prior)) delete process.env[k];
 		Object.assign(process.env, prior);
 		await fs.rm(f.root, { recursive: true, force: true });

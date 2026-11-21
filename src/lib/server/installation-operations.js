@@ -5,12 +5,13 @@ import { readAccessSettings, accessCookieName } from './access-settings.js';
 import { createServer } from 'node:http';
 import * as fs from 'node:fs/promises';
 import { existsSync, readFileSync, lstatSync } from 'node:fs';
-import { join, dirname, resolve, relative, sep } from 'node:path';
-import { tmpdir } from 'node:os';
+import { join, dirname, resolve, relative, sep, isAbsolute, basename } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { randomUUID, createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
+	BRANCH_REFS,
 	getInstallation,
 	installationEnvironment,
 	atomicJson,
@@ -22,6 +23,7 @@ import {
 	setLoginStartup,
 	removeDesktopShortcut
 } from './installation.js';
+export { BRANCH_REFS } from './installation.js';
 import {
 	serverSummary,
 	controlServer,
@@ -34,6 +36,65 @@ import { inspectProcessLeases, formatLeaseDiagnostic } from './process-leases.js
 const repository = 'kennysantanu/saturday';
 const api = `https://api.github.com/repos/${repository}`;
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+const SHA_RE = /^[a-f0-9]{40}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const SHA256_RE = /^[a-f0-9]{64}$/;
+const BACKUP_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
+const VERDICTS = new Set(['compatible', 'data_newer', 'candidate_newer']);
+const branchError = (code, message) => Object.assign(new Error(message), { code });
+const dirtyEnvValue = (dirty) => (dirty === true ? '1' : dirty === false ? '0' : '');
+function assertManagedMode(config) {
+	if (config?.mode !== 'managed')
+		throw branchError(
+			'BRANCH_MODE',
+			'Branch switching is only available for managed installations.'
+		);
+}
+function validateBranchRef(ref) {
+	if (typeof ref !== 'string' || !BRANCH_REFS.includes(ref))
+		throw branchError('BRANCH_REF', 'Choose main or dev.');
+	return ref;
+}
+function isSafeZipBasename(filename) {
+	return (
+		typeof filename === 'string' &&
+		filename.length > 4 &&
+		filename.length <= 200 &&
+		filename.endsWith('.zip') &&
+		basename(filename) === filename &&
+		!filename.includes('..') &&
+		!/[/\\\r\n\0]/.test(filename)
+	);
+}
+function currentTrackedRef(config) {
+	if (config?.tracking_ref !== undefined) return validateBranchRef(config.tracking_ref);
+	return config?.release ? null : 'main';
+}
+function compareCommit(installedCommit, targetCommit) {
+	if (typeof installedCommit !== 'string' || !SHA_RE.test(installedCommit)) {
+		return { available: null, comparison: 'unknown' };
+	}
+	if (installedCommit === targetCommit) {
+		return { available: false, comparison: 'same' };
+	}
+	return { available: true, comparison: 'different' };
+}
+function safeBranchSwitch(value) {
+	if (!value || typeof value !== 'object') return null;
+	return {
+		ref: value.ref,
+		commit: value.commit,
+		check_id: value.check_id,
+		export_id: value.export_id,
+		backup_id: value.backup_id,
+		filename: value.filename,
+		bytes: value.bytes,
+		sha256: value.sha256,
+		compatibility: value.compatibility,
+		from_ref: value.from_ref ?? null,
+		from_commit: value.from_commit ?? null
+	};
+}
 // A reviewed check stays valid for 15 minutes; Settings hides Update after that.
 export const CHECK_TTL_MS = 15 * 60 * 1000;
 // Older previous builds have no restore path; keep only the newest for manual review.
@@ -58,7 +119,9 @@ export function operationPaths(config = getInstallation()) {
 		status: join(root, 'operation.json'),
 		check: join(root, 'check.json'),
 		lock: join(root, 'lock'),
-		journal: join(root, 'publication.json')
+		journal: join(root, 'publication.json'),
+		switch_export: join(root, 'switch-export.json'),
+		switch_export_lock: join(root, 'switch-export.lock')
 	};
 }
 function readJson(path) {
@@ -75,13 +138,13 @@ const alive = (pid) => {
 		return e.code !== 'ESRCH';
 	}
 };
-export function operationStatus() {
-	const state = readJson(operationPaths().status);
+export function operationStatus(config = getInstallation()) {
+	const state = readJson(operationPaths(config).status);
 	if (!state) return null;
 	if (
 		state.format !== 'saturday.operation' ||
 		state.version !== 1 ||
-		state.installation_id !== getInstallation().installation_id
+		state.installation_id !== config.installation_id
 	)
 		throw new Error('Unsupported installation operation state.');
 	return {
@@ -104,11 +167,14 @@ export function operationStatus() {
 		warning: state.warning,
 		poll_url: state.poll_url,
 		retained_paths: state.retained_paths,
-		url: state.url
+		url: state.url,
+		...(state.reset_data === true
+			? { reset_data: true, branch_switch: safeBranchSwitch(state.branch_switch) }
+			: {})
 	};
 }
-export function installedCheck() {
-	return readJson(operationPaths().check);
+export function installedCheck(config = getInstallation()) {
+	return readJson(operationPaths(config).check);
 }
 
 async function github(path) {
@@ -117,8 +183,11 @@ async function github(path) {
 		signal: AbortSignal.timeout(15000)
 	});
 	if (!response.ok)
-		throw new Error(
-			`GitHub update check failed (${response.status}). Check your connection or rate limit and retry.`
+		throw Object.assign(
+			new Error(
+				`GitHub update check failed (${response.status}). Check your connection or rate limit and retry.`
+			),
+			{ status: response.status }
 		);
 	return response.json();
 }
@@ -194,36 +263,197 @@ export async function prepareRuntime(config, metadata, currentVersion = process.
 		]
 	};
 }
-async function candidateMetadata(commit, request, target) {
+async function candidateMetadata(commit, request, target, { reset_data = false } = {}) {
+	if (!SHA_RE.test(commit || ''))
+		throw branchError('CANDIDATE_METADATA', 'Candidate package metadata is unavailable.');
 	const content = await request(`/contents/package.json?ref=${commit}`);
-	if (content.encoding !== 'base64' || typeof content.content !== 'string')
-		throw new Error('Candidate package metadata is unavailable.');
-	const pkg = JSON.parse(Buffer.from(content.content, 'base64').toString('utf8'));
-	validateDistribution(pkg.saturday);
-	if (readAccessSettings().allow_lan && pkg.saturday.lan_api !== 1)
-		throw new Error(
-			'This candidate does not support saved LAN preferences. Disable LAN and restart before changing to this build.'
-		);
-	if (readAccessSettings().password && pkg.saturday.access_api !== 1)
-		throw new Error(
-			'This candidate does not support password login. Keep the current build or explicitly disable password login before changing to an older build.'
-		);
+	if (content?.encoding !== 'base64' || typeof content.content !== 'string')
+		throw branchError('CANDIDATE_METADATA', 'Candidate package metadata is unavailable.');
+	let pkg;
+	try {
+		pkg = JSON.parse(Buffer.from(content.content, 'base64').toString('utf8'));
+	} catch {
+		throw branchError('CANDIDATE_METADATA', 'Candidate package metadata is unavailable.');
+	}
+	try {
+		validateDistribution(pkg?.saturday);
+	} catch (e) {
+		throw branchError('CANDIDATE_METADATA', e.message);
+	}
+	if (!reset_data) {
+		if (readAccessSettings().allow_lan && pkg.saturday.lan_api !== 1)
+			throw branchError(
+				'CANDIDATE_METADATA',
+				'This candidate does not support saved LAN preferences. Disable LAN and restart before changing to this build.'
+			);
+		if (readAccessSettings().password && pkg.saturday.access_api !== 1)
+			throw branchError(
+				'CANDIDATE_METADATA',
+				'This candidate does not support password login. Keep the current build or explicitly disable password login before changing to an older build.'
+			);
+	}
 	if (
 		pkg.name !== 'saturday' ||
 		pkg.engines?.node !== `>=${pkg.saturday.node_minimum}` ||
 		(target?.kind === 'release' && pkg.version !== target.release)
 	)
-		throw new Error(
+		throw branchError(
+			'CANDIDATE_METADATA',
 			'Candidate package/version/runtime metadata does not match the selected Saturday build.'
 		);
 	if (
 		compareVersions(process.versions.node, pkg.saturday.node_minimum) < 0 &&
 		!pkg.saturday.runtime
 	)
-		throw new Error(
+		throw branchError(
+			'CANDIDATE_METADATA',
 			'This candidate needs a newer runtime. Use a compatible installer/runtime before updating.'
 		);
 	return { requirements: pkg.saturday, version: pkg.version };
+}
+async function resolveBranchCommit(ref, request = github) {
+	validateBranchRef(ref);
+	let commit;
+	try {
+		commit = await request(`/commits/${encodeURIComponent(ref)}`);
+	} catch (e) {
+		if (e?.status === 404)
+			throw branchError(
+				'BRANCH_MISSING',
+				`Branch ${ref} is missing on GitHub. Choose another available branch.`
+			);
+		throw e;
+	}
+	if (!commit || typeof commit !== 'object' || !SHA_RE.test(commit.sha || ''))
+		throw branchError('BRANCH_IDENTITY', `GitHub returned an invalid identity for ${ref}.`);
+	return commit.sha;
+}
+async function selectBranchTarget(ref, config, request = github) {
+	const commit = await resolveBranchCommit(ref, request);
+	const { available, comparison } = compareCommit(config?.build?.commit, commit);
+	return {
+		kind: 'development',
+		ref,
+		commit,
+		available,
+		comparison,
+		url: `https://github.com/${repository}/commit/${commit}`,
+		notes:
+			comparison === 'unknown'
+				? `The installed commit is unknown; Saturday cannot compare it with ${ref}.`
+				: `${ref} changed; a changed head is not proof of newer chronology.`
+	};
+}
+export async function listBranches({ config = getInstallation(), request = github } = {}) {
+	assertManagedMode(config);
+	const current_ref = currentTrackedRef(config);
+	const found = new Map();
+	for (let page = 1; ; page++) {
+		let result;
+		try {
+			result = await request(`/branches?per_page=100&page=${page}`);
+		} catch {
+			throw branchError(
+				'BRANCH_LOOKUP',
+				'Branches could not be loaded. Check your connection or GitHub rate limit and retry.'
+			);
+		}
+		if (!Array.isArray(result))
+			throw branchError(
+				'BRANCH_RESPONSE',
+				'GitHub returned an invalid branch list. Retry loading branches.'
+			);
+		for (const entry of result) {
+			if (!entry || typeof entry !== 'object' || typeof entry.name !== 'string')
+				throw branchError(
+					'BRANCH_RESPONSE',
+					'GitHub returned an invalid branch list. Retry loading branches.'
+				);
+			if (BRANCH_REFS.includes(entry.name)) {
+				if (found.has(entry.name) || !SHA_RE.test(entry.commit?.sha || ''))
+					throw branchError(
+						'BRANCH_RESPONSE',
+						'GitHub returned an invalid branch list. Retry loading branches.'
+					);
+				found.set(entry.name, entry.commit.sha);
+			}
+		}
+		if (result.length < 100) break;
+		if (page >= 10)
+			throw branchError(
+				'BRANCH_RESPONSE',
+				'GitHub returned an invalid branch list. Retry loading branches.'
+			);
+	}
+	return {
+		current_ref,
+		branches: BRANCH_REFS.map((ref) => ({
+			ref,
+			commit: found.get(ref) ?? null,
+			missing: !found.has(ref)
+		}))
+	};
+}
+async function readLiveStorageFormats(config) {
+	try {
+		if (!config?.database || !config?.files) throw new Error('Missing storage paths');
+		const dbStat = lstatSync(config.database);
+		if (!dbStat.isFile() || dbStat.isSymbolicLink()) throw new Error('Unsafe database');
+		const manifestPath = join(config.files, 'manifest.json');
+		const manifestStat = lstatSync(manifestPath);
+		if (!manifestStat.isFile() || manifestStat.isSymbolicLink()) throw new Error('Unsafe manifest');
+		const { DatabaseSync } = await import('node:sqlite');
+		const db = new DatabaseSync(config.database, { readOnly: true });
+		let dbVersion, dbFormat;
+		try {
+			dbVersion = db
+				.prepare('SELECT MAX(version) AS version FROM schema_migrations')
+				.get()?.version;
+			dbFormat = db.prepare('SELECT format FROM app_metadata WHERE id=1').get()?.format;
+		} finally {
+			db.close();
+		}
+		const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+		if (
+			typeof dbFormat !== 'string' ||
+			!dbFormat ||
+			!Number.isSafeInteger(dbVersion) ||
+			dbVersion < 1 ||
+			typeof manifest?.format !== 'string' ||
+			!manifest.format ||
+			!Number.isSafeInteger(manifest?.format_version) ||
+			manifest.format_version < 1
+		)
+			throw new Error('Malformed storage metadata');
+		return {
+			database: { format: dbFormat, version: dbVersion },
+			manifest: { format: manifest.format, version: manifest.format_version }
+		};
+	} catch {
+		throw branchError(
+			'STORAGE_UNAVAILABLE',
+			'Current storage formats could not be read. Repair storage before moving branches.'
+		);
+	}
+}
+function computeCompatibility(live, candidateStorage) {
+	const db = candidateStorage.database;
+	const manifest = candidateStorage.manifest;
+	if (
+		live.database.format !== db.format ||
+		live.manifest.format !== manifest.format ||
+		live.database.version > db.currentVersion ||
+		live.manifest.version > manifest.version
+	)
+		return 'data_newer';
+	if (
+		db.currentVersion > live.database.version ||
+		live.database.version < db.minimumVersion ||
+		manifest.version > live.manifest.version ||
+		live.manifest.version < manifest.minimumVersion
+	)
+		return 'candidate_newer';
+	return 'compatible';
 }
 function installedPackage(config) {
 	try {
@@ -257,6 +487,10 @@ export function developmentHold(config, metadata) {
 	return null;
 }
 export async function selectTarget(config, request = github, assetRequest = fetch) {
+	if (config?.tracking_ref !== undefined) {
+		const ref = validateBranchRef(config.tracking_ref);
+		return selectBranchTarget(ref, config, request);
+	}
 	let releases = [];
 	for (let page = 1; ; page++) {
 		const result = await request(`/releases?per_page=100&page=${page}`);
@@ -315,16 +549,7 @@ export async function selectTarget(config, request = github, assetRequest = fetc
 			available: false,
 			url: `https://github.com/${repository}/releases`
 		};
-	const commit = await request('/commits/main');
-	if (!/^[a-f0-9]{40}$/.test(commit.sha || ''))
-		throw new Error('GitHub returned an invalid main identity.');
-	return {
-		kind: 'development',
-		commit: commit.sha,
-		available: commit.sha !== config.build?.commit,
-		url: `https://github.com/${repository}/commit/${commit.sha}`,
-		notes: 'Main changed; a changed head is not proof of newer chronology.'
-	};
+	return selectBranchTarget('main', config, request);
 }
 async function command(command, args, options = {}) {
 	return new Promise((res, rej) =>
@@ -397,7 +622,7 @@ export async function checkUpdates({ request } = {}) {
 	try {
 		const local = await localCodeState(config),
 			target = await selectTarget(config, request);
-		if (target.available) {
+		if (target.available === true) {
 			const candidate = await candidateMetadata(target.commit, request || github, target);
 			target.requirements = candidate.requirements;
 			target.version = candidate.version;
@@ -407,6 +632,7 @@ export async function checkUpdates({ request } = {}) {
 		const result = {
 			format: 'saturday.update-check',
 			version: 1,
+			purpose: 'update',
 			id: randomUUID(),
 			installation_id: config.installation_id,
 			checked_at: new Date().toISOString(),
@@ -421,11 +647,311 @@ export async function checkUpdates({ request } = {}) {
 		await atomicJson(paths.check, {
 			format: 'saturday.update-check',
 			version: 1,
+			purpose: 'update',
 			installation_id: config.installation_id,
 			error: e.message,
 			checked_at: new Date().toISOString()
 		});
 		throw e;
+	} finally {
+		await release();
+	}
+}
+export async function branchCompatibility({
+	ref,
+	config = getInstallation(),
+	request = github
+} = {}) {
+	assertManagedMode(config);
+	validateBranchRef(ref);
+	const paths = operationPaths(config);
+	await fs.mkdir(paths.root, { recursive: true, mode: 0o700 });
+	const release = await acquireDirectoryLock(join(paths.root, 'check.lock'), { attempts: 0 });
+	if (!release) throw new Error('An update check is already running.');
+	try {
+		const live = await readLiveStorageFormats(config);
+		const local = await localCodeState(config);
+		const target = await selectBranchTarget(ref, config, request);
+		const candidate = await candidateMetadata(target.commit, request, target, { reset_data: true });
+		target.requirements = candidate.requirements;
+		target.version = candidate.version;
+		if (
+			typeof config.build?.commit === 'string' &&
+			SHA_RE.test(config.build.commit) &&
+			config.build.commit !== target.commit
+		)
+			target.compare_url = `https://github.com/${repository}/compare/${config.build.commit}...${target.commit}`;
+		const candidateStorage = candidate.requirements.storage;
+		const compatibility = {
+			verdict: computeCompatibility(live, candidateStorage),
+			live,
+			candidate: {
+				database: candidateStorage.database,
+				manifest: candidateStorage.manifest
+			}
+		};
+		const result = {
+			format: 'saturday.update-check',
+			version: 1,
+			purpose: 'branch-switch',
+			id: randomUUID(),
+			installation_id: config.installation_id,
+			checked_at: new Date().toISOString(),
+			installed: config.build ?? { id: 'development', commit: null, dirty: null },
+			installed_release: config.release || null,
+			local,
+			target,
+			compatibility
+		};
+		await atomicJson(paths.check, result);
+		await clearSwitchExport({}, config);
+		return result;
+	} finally {
+		await release();
+	}
+}
+function validateSwitchCheck(check, config, expected = {}) {
+	if (
+		!check ||
+		check.format !== 'saturday.update-check' ||
+		check.version !== 1 ||
+		check.purpose !== 'branch-switch' ||
+		check.error ||
+		!UUID_RE.test(check.id || '') ||
+		check.installation_id !== config.installation_id ||
+		!Number.isFinite(Date.parse(check.checked_at)) ||
+		Date.now() - Date.parse(check.checked_at) > CHECK_TTL_MS ||
+		check.target?.kind !== 'development' ||
+		!BRANCH_REFS.includes(check.target.ref) ||
+		!SHA_RE.test(check.target.commit || '') ||
+		!check.target?.requirements?.storage ||
+		!VERDICTS.has(check.compatibility?.verdict) ||
+		typeof check.local?.fingerprint !== 'string' ||
+		!check.local.fingerprint
+	)
+		throw branchError(
+			'SWITCH_CHECK',
+			'The branch review is stale or changed. Choose the branch again.'
+		);
+	if (expected.check_id !== undefined && check.id !== expected.check_id)
+		throw branchError(
+			'SWITCH_CHECK',
+			'The branch review is stale or changed. Choose the branch again.'
+		);
+	if (expected.ref !== undefined && check.target.ref !== expected.ref)
+		throw branchError(
+			'SWITCH_CHECK',
+			'The branch review is stale or changed. Choose the branch again.'
+		);
+	if (expected.commit !== undefined && check.target.commit !== expected.commit)
+		throw branchError(
+			'SWITCH_CHECK',
+			'The branch review is stale or changed. Choose the branch again.'
+		);
+	return check;
+}
+function validateExportRecord(raw, config) {
+	if (
+		!raw ||
+		typeof raw !== 'object' ||
+		Array.isArray(raw) ||
+		raw.format !== 'saturday.branch-export' ||
+		raw.version !== 1 ||
+		!UUID_RE.test(raw.id || '') ||
+		raw.installation_id !== config.installation_id ||
+		!UUID_RE.test(raw.check_id || '') ||
+		!BRANCH_REFS.includes(raw.ref) ||
+		!SHA_RE.test(raw.commit || '') ||
+		typeof raw.backup_id !== 'string' ||
+		!BACKUP_ID_RE.test(raw.backup_id) ||
+		raw.backup_id.includes('..') ||
+		raw.contents !== 'all' ||
+		!['pending', 'complete'].includes(raw.status) ||
+		!Number.isFinite(Date.parse(raw.created_at)) ||
+		!Number.isFinite(Date.parse(raw.expires_at))
+	)
+		throw branchError('EXPORT_STATE', 'Branch export state is invalid. Download a new backup.');
+	if (raw.status === 'pending') {
+		if (
+			raw.completed_at !== null ||
+			raw.filename !== null ||
+			raw.bytes !== null ||
+			raw.sha256 !== null
+		)
+			throw branchError('EXPORT_STATE', 'Branch export state is invalid. Download a new backup.');
+	} else {
+		if (
+			!Number.isFinite(Date.parse(raw.completed_at)) ||
+			!isSafeZipBasename(raw.filename) ||
+			!Number.isSafeInteger(raw.bytes) ||
+			raw.bytes < 1 ||
+			!SHA256_RE.test(raw.sha256 || '')
+		)
+			throw branchError('EXPORT_STATE', 'Branch export state is invalid. Download a new backup.');
+	}
+	return raw;
+}
+function readExportFile(paths, config) {
+	if (!existsSync(paths.switch_export)) return null;
+	let raw;
+	try {
+		const stat = lstatSync(paths.switch_export);
+		if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Unsafe switch export file');
+		raw = JSON.parse(readFileSync(paths.switch_export, 'utf8'));
+	} catch {
+		throw branchError('EXPORT_STATE', 'Branch export state is invalid. Download a new backup.');
+	}
+	return validateExportRecord(raw, config);
+}
+export function readSwitchExport(config = getInstallation()) {
+	const paths = operationPaths(config);
+	const record = readExportFile(paths, config);
+	if (!record) return null;
+	if (Date.now() > Date.parse(record.expires_at)) return null;
+	return {
+		format: record.format,
+		version: record.version,
+		id: record.id,
+		installation_id: record.installation_id,
+		check_id: record.check_id,
+		ref: record.ref,
+		commit: record.commit,
+		backup_id: record.backup_id,
+		contents: record.contents,
+		status: record.status,
+		created_at: record.created_at,
+		expires_at: record.expires_at,
+		completed_at: record.completed_at,
+		filename: record.filename,
+		bytes: record.bytes,
+		sha256: record.sha256
+	};
+}
+export async function validateSwitchCheckForExport(check_id, config = getInstallation()) {
+	assertManagedMode(config);
+	const paths = operationPaths(config);
+	const running = operationStatus(config);
+	if (running && activeStates.includes(running.status) && !running.error)
+		throw branchError('OPERATION_BUSY', 'An installation operation is already running.');
+	if (existsSync(paths.journal))
+		throw new Error('Repair the interrupted publication before another operation.');
+	const check = validateSwitchCheck(installedCheck(config), config, { check_id });
+	const local = await localCodeState(config);
+	if (local.dirty || local.fingerprint !== check.local.fingerprint)
+		throw branchError(
+			'SWITCH_CHECK',
+			'The branch review is stale or changed. Choose the branch again.'
+		);
+	return check;
+}
+export async function beginSwitchExport({ check_id, backup_id } = {}, config = getInstallation()) {
+	assertManagedMode(config);
+	if (typeof backup_id !== 'string' || !BACKUP_ID_RE.test(backup_id) || backup_id.includes('..'))
+		throw branchError(
+			'EXPORT_REQUIRED',
+			'Download a new database and files backup for this branch before moving.'
+		);
+	const paths = operationPaths(config);
+	await fs.mkdir(paths.root, { recursive: true, mode: 0o700 });
+	const release = await acquireDirectoryLock(paths.switch_export_lock);
+	try {
+		const check = await validateSwitchCheckForExport(check_id, config);
+		const created_at = new Date().toISOString();
+		const expires_at = new Date(Date.parse(check.checked_at) + CHECK_TTL_MS).toISOString();
+		const record = {
+			format: 'saturday.branch-export',
+			version: 1,
+			id: randomUUID(),
+			installation_id: config.installation_id,
+			check_id: check.id,
+			ref: check.target.ref,
+			commit: check.target.commit,
+			backup_id,
+			contents: 'all',
+			status: 'pending',
+			created_at,
+			expires_at,
+			completed_at: null,
+			filename: null,
+			bytes: null,
+			sha256: null
+		};
+		await atomicJson(paths.switch_export, record);
+		return record;
+	} finally {
+		await release();
+	}
+}
+export async function completeSwitchExport(
+	{ export_id, backup_id, filename, bytes, sha256 } = {},
+	config = getInstallation()
+) {
+	assertManagedMode(config);
+	if (
+		!UUID_RE.test(export_id || '') ||
+		typeof backup_id !== 'string' ||
+		!BACKUP_ID_RE.test(backup_id) ||
+		!isSafeZipBasename(filename) ||
+		!Number.isSafeInteger(bytes) ||
+		bytes < 1 ||
+		!SHA256_RE.test(sha256 || '')
+	)
+		throw branchError('EXPORT_STATE', 'Branch export state is invalid. Download a new backup.');
+	const paths = operationPaths(config);
+	await fs.mkdir(paths.root, { recursive: true, mode: 0o700 });
+	const release = await acquireDirectoryLock(paths.switch_export_lock);
+	try {
+		const existing = readExportFile(paths, config);
+		if (!existing || existing.id !== export_id || existing.status !== 'pending') return null;
+		if (existing.backup_id !== backup_id)
+			throw branchError(
+				'EXPORT_REQUIRED',
+				'Download a new database and files backup for this branch before moving.'
+			);
+		if (Date.now() > Date.parse(existing.expires_at)) return null;
+		let check;
+		try {
+			check = validateSwitchCheck(installedCheck(config), config, {
+				check_id: existing.check_id,
+				ref: existing.ref,
+				commit: existing.commit
+			});
+		} catch {
+			return null;
+		}
+		if (check.installation_id !== config.installation_id) return null;
+		const completed = {
+			...existing,
+			status: 'complete',
+			completed_at: new Date().toISOString(),
+			filename,
+			bytes,
+			sha256
+		};
+		await atomicJson(paths.switch_export, completed);
+		return completed;
+	} finally {
+		await release();
+	}
+}
+export async function clearSwitchExport({ export_id } = {}, config = getInstallation()) {
+	const paths = operationPaths(config);
+	if (!existsSync(paths.root)) return { cleared: false };
+	const release = await acquireDirectoryLock(paths.switch_export_lock);
+	try {
+		if (!existsSync(paths.switch_export)) return { cleared: false };
+		if (export_id !== undefined) {
+			try {
+				const stat = lstatSync(paths.switch_export);
+				if (!stat.isFile() || stat.isSymbolicLink()) return { cleared: false };
+				const raw = JSON.parse(readFileSync(paths.switch_export, 'utf8'));
+				if (raw?.id !== export_id || raw?.status !== 'pending') return { cleared: false };
+			} catch {
+				return { cleared: false };
+			}
+		}
+		await fs.rm(paths.switch_export, { force: true });
+		return { cleared: true };
 	} finally {
 		await release();
 	}
@@ -506,6 +1032,175 @@ export async function assertSafeRemoval(paths) {
 			throw new Error('Deletion root is a symlink/junction. Preserve it for manual cleanup.');
 	}
 }
+function isInsideDirectory(dir, candidate) {
+	const rel = relative(dir, candidate);
+	return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+function validateResetOwnership(config) {
+	assertManagedMode(config);
+	try {
+		validateInstallation(config);
+		if (
+			typeof config.descriptor_path !== 'string' ||
+			!isAbsolute(config.descriptor_path) ||
+			resolve(config.descriptor_path) !== config.descriptor_path
+		)
+			throw new Error('Installation descriptor path must be an absolute resolved path.');
+		if (
+			isInsideDirectory(config.data_root, config.descriptor_path) ||
+			isInsideDirectory(config.extension_code, config.descriptor_path)
+		)
+			throw new Error(
+				'Installation descriptor must remain outside data and extension directories.'
+			);
+		if (config.code_owned !== true)
+			throw new Error('Application ownership is uncertain; data reset is unavailable.');
+		// Validate canonical managed ownership layout; never use its full return list for reset.
+		ownedRemovalTargets(config, true);
+	} catch (e) {
+		if (e.code === 'BRANCH_MODE') throw e;
+		throw branchError('RESET_OWNERSHIP', e.message);
+	}
+}
+export async function resetLiveData(config, { onRemoveRoot, onAfterDataRootRemoved } = {}) {
+	validateResetOwnership(config);
+	const targets = [config.data_root, config.extension_code];
+	try {
+		await assertSafeRemoval(targets);
+	} catch (e) {
+		throw branchError('RESET_UNSAFE', e.message);
+	}
+	for (let index = 0; index < targets.length; index++) {
+		const target = targets[index];
+		try {
+			await assertSafeRemoval([target]);
+		} catch (e) {
+			throw branchError('RESET_UNSAFE', e.message);
+		}
+		if (onRemoveRoot) await onRemoveRoot(target, index);
+		try {
+			await fs.rm(target, { recursive: true, force: true });
+		} catch {
+			throw branchError(
+				'RESET_FAILED',
+				'Branch data reset failed. Keep your downloaded backup and run Repair to finish.'
+			);
+		}
+		if (index === 0) {
+			try {
+				await fs.mkdir(config.data_root, { recursive: true, mode: 0o700 });
+			} catch {
+				throw branchError(
+					'RESET_FAILED',
+					'Branch data reset failed. Keep your downloaded backup and run Repair to finish.'
+				);
+			}
+			if (onAfterDataRootRemoved) await onAfterDataRootRemoved();
+		}
+	}
+	return { reset: true, removed: targets };
+}
+async function enqueueWorkerOperation(
+	config,
+	paths,
+	{
+		operation,
+		selected,
+		delete_data = false,
+		reset_data = false,
+		branch_switch = null,
+		source = null,
+		retry_pdf = false,
+		wait_for_disconnect = false
+	},
+	{ spawnWorker } = {}
+) {
+	await pruneOperationArtifacts(paths);
+	const id = randomUUID(),
+		worker = join(paths.root, `controller-${id}`);
+	await fs.mkdir(worker, { recursive: true, mode: 0o700 });
+	await fs.mkdir(join(worker, 'scripts'), { recursive: true });
+	await fs.mkdir(join(worker, 'src/lib/server'), { recursive: true });
+	await fs.writeFile(join(worker, 'package.json'), '{"type":"module"}');
+	// Helpers come from the code doing this operation first, then the installed app. An older
+	// installation cannot supply a helper that only a newer source has, which is exactly the
+	// upgrade case, so each file is resolved on its own instead of pinning one root.
+	const helperRoots = [
+		fileURLToPath(new URL('../../../', import.meta.url)),
+		config.code_root
+	].filter((root) => root && existsSync(root));
+	for (const file of [
+		'scripts/install.mjs',
+		'src/lib/distribution.js',
+		'src/lib/server/installation.js',
+		'src/lib/server/access-settings.js',
+		'src/lib/server/access-network.js',
+		'src/lib/server/server-lifecycle.js',
+		'src/lib/server/process-leases.js',
+		'src/lib/server/installation-operations.js'
+	]) {
+		const from = helperRoots.find((root) => existsSync(join(root, file)));
+		if (!from) throw new Error(`Missing maintenance helper: ${file}`);
+		await fs.copyFile(join(from, file), join(worker, file));
+	}
+	let node = existsSync(config.node_path) ? config.node_path : process.execPath;
+	if (process.platform === 'win32') {
+		node = join(worker, 'node.exe');
+		await fs.copyFile(existsSync(config.node_path) ? config.node_path : process.execPath, node);
+	}
+	const state = {
+		format: 'saturday.operation',
+		version: 1,
+		id,
+		installation_id: config.installation_id,
+		operation,
+		status: 'queued',
+		step: 'Preparing operation',
+		started_at: new Date().toISOString(),
+		config,
+		selected,
+		delete_data,
+		...(reset_data ? { reset_data: true, branch_switch } : {}),
+		source: source ? resolve(source) : null,
+		retry_pdf,
+		wait_for_disconnect: operation === 'update' && wait_for_disconnect === true,
+		worker,
+		log: join(paths.root, `${id}.log`)
+	};
+	await atomicJson(paths.status, state);
+	if (spawnWorker) {
+		const pid = await spawnWorker({ node, worker, id, config, state });
+		state.pid = pid ?? process.pid;
+		await atomicJson(paths.status, state);
+		return operationStatus(config);
+	}
+	const child = spawn(
+		node,
+		[
+			join(worker, 'scripts/install.mjs'),
+			'execute',
+			'--operation-id',
+			id,
+			'--installation',
+			config.descriptor_path
+		],
+		{
+			cwd: worker,
+			env: installationEnvironment(config),
+			detached: true,
+			windowsHide: true,
+			stdio: 'ignore'
+		}
+	);
+	await new Promise((res, rej) => {
+		child.once('spawn', res);
+		child.once('error', rej);
+	});
+	child.unref();
+	state.pid = child.pid;
+	await atomicJson(paths.status, state);
+	return operationStatus(config);
+}
 export async function queueOperation(
 	operation,
 	{
@@ -525,20 +1220,29 @@ export async function queueOperation(
 		);
 	if (operation !== 'repair' && !confirm) throw new Error('Confirm the installation operation.');
 	const config = getInstallation(),
-		paths = operationPaths();
+		paths = operationPaths(config);
 	await fs.mkdir(paths.root, { recursive: true, mode: 0o700 });
-	const running = operationStatus();
-	if (running && activeStates.includes(running.status) && !running.error) return running;
+	const running = operationStatus(config);
+	if (running && activeStates.includes(running.status) && !running.error) {
+		if (running.operation === operation && !running.reset_data) return running;
+		throw branchError('OPERATION_BUSY', 'An installation operation is already running.');
+	}
 	const release = await acquireDirectoryLock(paths.lock, { attempts: 20 });
-	if (!release) throw new Error('An installation operation is already running.');
+	if (!release)
+		throw branchError('OPERATION_BUSY', 'An installation operation is already running.');
 	try {
-		const previous = operationStatus();
-		if (previous && activeStates.includes(previous.status) && !previous.error) return previous;
+		const previous = operationStatus(config);
+		if (previous && activeStates.includes(previous.status) && !previous.error) {
+			if (previous.operation === operation && !previous.reset_data) return previous;
+			throw branchError('OPERATION_BUSY', 'An installation operation is already running.');
+		}
 		if (operation !== 'repair' && existsSync(paths.journal))
 			throw new Error('Repair the interrupted publication before another operation.');
 		let selected;
 		if (operation === 'update') {
-			const check = installedCheck();
+			const check = installedCheck(config);
+			if (check?.purpose && check.purpose !== 'update')
+				throw branchError('CHECK_PURPOSE', 'Review a normal update check before updating.');
 			if (
 				!check?.id ||
 				check.id !== check_id ||
@@ -547,7 +1251,7 @@ export async function queueOperation(
 				Date.now() - Date.parse(check.checked_at) > CHECK_TTL_MS
 			)
 				throw new Error('The update check is stale. Check again.');
-			if (!check.target?.available) throw new Error('No checked update is available.');
+			if (check.target?.available !== true) throw new Error('No checked update is available.');
 			if (check.local.dirty)
 				throw new Error('Local source changes must be preserved/reviewed before updating.');
 			selected = check;
@@ -573,84 +1277,127 @@ export async function queueOperation(
 			const targets = ownedRemovalTargets(config, delete_data);
 			await assertSafeRemoval(targets);
 		}
-		await pruneOperationArtifacts(paths);
-		const id = randomUUID(),
-			worker = join(paths.root, `controller-${id}`);
-		await fs.mkdir(worker, { recursive: true, mode: 0o700 });
-		await fs.mkdir(join(worker, 'scripts'), { recursive: true });
-		await fs.mkdir(join(worker, 'src/lib/server'), { recursive: true });
-		await fs.writeFile(join(worker, 'package.json'), '{"type":"module"}');
-		// Helpers come from the code doing this operation first, then the installed app. An older
-		// installation cannot supply a helper that only a newer source has, which is exactly the
-		// upgrade case, so each file is resolved on its own instead of pinning one root.
-		const helperRoots = [
-			fileURLToPath(new URL('../../../', import.meta.url)),
-			config.code_root
-		].filter((root) => root && existsSync(root));
-		for (const file of [
-			'scripts/install.mjs',
-			'src/lib/distribution.js',
-			'src/lib/server/installation.js',
-			'src/lib/server/access-settings.js',
-			'src/lib/server/access-network.js',
-			'src/lib/server/server-lifecycle.js',
-			'src/lib/server/process-leases.js',
-			'src/lib/server/installation-operations.js'
-		]) {
-			const from = helperRoots.find((root) => existsSync(join(root, file)));
-			if (!from) throw new Error(`Missing maintenance helper: ${file}`);
-			await fs.copyFile(join(from, file), join(worker, file));
-		}
-		let node = existsSync(config.node_path) ? config.node_path : process.execPath;
-		if (process.platform === 'win32') {
-			node = join(worker, 'node.exe');
-			await fs.copyFile(existsSync(config.node_path) ? config.node_path : process.execPath, node);
-		}
-		const state = {
-			format: 'saturday.operation',
-			version: 1,
-			id,
-			installation_id: config.installation_id,
+		return await enqueueWorkerOperation(config, paths, {
 			operation,
-			status: 'queued',
-			step: 'Preparing operation',
-			started_at: new Date().toISOString(),
-			config,
 			selected,
 			delete_data,
-			source: source ? resolve(source) : null,
+			source,
 			retry_pdf,
-			wait_for_disconnect: operation === 'update' && wait_for_disconnect === true,
-			worker,
-			log: join(paths.root, `${id}.log`)
-		};
-		await atomicJson(paths.status, state);
-		const child = spawn(
-			node,
-			[
-				join(worker, 'scripts/install.mjs'),
-				'execute',
-				'--operation-id',
-				id,
-				'--installation',
-				config.descriptor_path
-			],
-			{
-				cwd: worker,
-				env: installationEnvironment(config),
-				detached: true,
-				windowsHide: true,
-				stdio: 'ignore'
-			}
-		);
-		await new Promise((res, rej) => {
-			child.once('spawn', res);
-			child.once('error', rej);
+			wait_for_disconnect
 		});
-		child.unref();
-		state.pid = child.pid;
-		await atomicJson(paths.status, state);
-		return operationStatus();
+	} finally {
+		await release();
+	}
+}
+export async function queueBranchSwitch(
+	{ ref, commit, check_id, export_id, backup_id, confirm = false, confirmation = '' } = {},
+	{ config = getInstallation(), request = github, spawnWorker } = {}
+) {
+	assertManagedMode(config);
+	validateBranchRef(ref);
+	if (typeof commit !== 'string' || !SHA_RE.test(commit))
+		throw branchError(
+			'SWITCH_CHECK',
+			'The branch review is stale or changed. Choose the branch again.'
+		);
+	if (confirm !== true)
+		throw branchError('SWITCH_CONFIRM', 'Confirm moving this installation and clearing its data.');
+	const paths = operationPaths(config);
+	await fs.mkdir(paths.root, { recursive: true, mode: 0o700 });
+	const release = await acquireDirectoryLock(paths.lock, { attempts: 20 });
+	if (!release)
+		throw branchError('OPERATION_BUSY', 'An installation operation is already running.');
+	try {
+		const previous = operationStatus(config);
+		if (previous && activeStates.includes(previous.status) && !previous.error)
+			throw branchError('OPERATION_BUSY', 'An installation operation is already running.');
+		if (existsSync(paths.journal))
+			throw new Error('Repair the interrupted publication before another operation.');
+		const check = validateSwitchCheck(installedCheck(config), config, { check_id, ref, commit });
+		const currentLocal = await localCodeState(config);
+		if (currentLocal.dirty || currentLocal.fingerprint !== check.local.fingerprint)
+			throw branchError(
+				'SWITCH_CHECK',
+				'The branch review is stale or changed. Choose the branch again.'
+			);
+		const liveFormats = await readLiveStorageFormats(config);
+		const verdict = computeCompatibility(liveFormats, check.target.requirements.storage);
+		if (verdict !== check.compatibility.verdict)
+			throw branchError(
+				'SWITCH_CHECK',
+				'The branch review is stale or changed. Choose the branch again.'
+			);
+		if (verdict !== 'compatible' && confirmation !== 'MOVE')
+			throw branchError('SWITCH_TYPED_CONFIRM', 'Type MOVE to confirm clearing incompatible data.');
+		validateResetOwnership(config);
+		try {
+			await assertSafeRemoval([config.data_root, config.extension_code]);
+		} catch (e) {
+			throw branchError('RESET_UNSAFE', e.message);
+		}
+		const liveCommit = await resolveBranchCommit(ref, request);
+		if (liveCommit !== commit)
+			throw branchError(
+				'BRANCH_CHANGED',
+				'The branch changed on GitHub. Review it and download a new backup; no substitute was installed.'
+			);
+		let audit;
+		const releaseExport = await acquireDirectoryLock(paths.switch_export_lock);
+		try {
+			const receipt = readExportFile(paths, config);
+			if (
+				!receipt ||
+				Date.now() > Date.parse(receipt.expires_at) ||
+				receipt.status !== 'complete' ||
+				receipt.id !== export_id ||
+				receipt.backup_id !== backup_id ||
+				receipt.check_id !== check.id ||
+				receipt.ref !== ref ||
+				receipt.commit !== commit ||
+				receipt.installation_id !== config.installation_id ||
+				receipt.contents !== 'all'
+			)
+				throw branchError(
+					'EXPORT_REQUIRED',
+					'Download a new database and files backup for this branch before moving.'
+				);
+			audit = {
+				filename: receipt.filename,
+				bytes: receipt.bytes,
+				sha256: receipt.sha256
+			};
+			await fs.rm(paths.switch_export, { force: true });
+		} finally {
+			await releaseExport();
+		}
+		const branch_switch = {
+			ref,
+			commit,
+			check_id: check.id,
+			export_id,
+			backup_id,
+			filename: audit.filename,
+			bytes: audit.bytes,
+			sha256: audit.sha256,
+			compatibility: check.compatibility,
+			from_ref: currentTrackedRef(config),
+			from_commit: config.build?.commit ?? null
+		};
+		return await enqueueWorkerOperation(
+			config,
+			paths,
+			{
+				operation: 'update',
+				selected: check,
+				delete_data: false,
+				reset_data: true,
+				branch_switch,
+				source: null,
+				retry_pdf: false,
+				wait_for_disconnect: true
+			},
+			{ spawnWorker }
+		);
 	} finally {
 		await release();
 	}
@@ -795,9 +1542,28 @@ function stageEnvironment(config, app, workspace, target) {
 		SATURDAY_EXTENSIONS_PATH: join(workspace, 'extensions'),
 		SATURDAY_BUILD_COMMIT: target?.commit || '',
 		SATURDAY_BUILD_ID: target?.local_id || '',
-		SATURDAY_BUILD_DIRTY: '',
+		SATURDAY_BUILD_DIRTY: target?.local_source
+			? dirtyEnvValue(target.dirty)
+			: target?.commit
+				? '0'
+				: '',
 		PATH: `${dirname(config.node_path)}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH || ''}`
 	};
+}
+async function captureGitIdentity(root) {
+	try {
+		const top = await command('git', ['rev-parse', '--show-toplevel'], { cwd: root });
+		if (!top || (await fs.realpath(top)) !== (await fs.realpath(root)))
+			return { commit: null, dirty: null };
+		const commit = await command('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root });
+		if (!SHA_RE.test(commit)) return { commit: null, dirty: null };
+		const status = await command('git', ['status', '--porcelain', '--untracked-files=normal'], {
+			cwd: root
+		});
+		return { commit, dirty: status !== '' };
+	} catch {
+		return { commit: null, dirty: null };
+	}
 }
 async function dataRecovery(config, libraryRoot = config.code_root) {
 	const pairs = await import(pathToFileURL(join(libraryRoot, 'src/lib/server/files/pairs.js')));
@@ -895,6 +1661,8 @@ async function assertSourcePublicationSafe(config, candidate) {
 	}
 }
 async function publish(config, app, previous, target, journal, writeJournal) {
+	const buildDirty = target.local_source ? (target.dirty ?? null) : target.commit ? false : null;
+	const clearsData = Boolean(config.data_deleted || journal.reset_data);
 	const next = {
 		...config,
 		...(journal.runtime
@@ -908,12 +1676,13 @@ async function publish(config, app, previous, target, journal, writeJournal) {
 		build: {
 			id: target.local_id || (target.commit ? `dev.${target.commit.slice(0, 12)}` : 'development'),
 			commit: target.commit || null,
-			dirty: target.commit ? false : null
+			dirty: buildDirty
 		},
-		release: target.kind === 'release' ? target.release : null,
-		distribution: target.kind,
+		release: journal.reset_data ? null : target.kind === 'release' ? target.release : null,
+		distribution: journal.reset_data ? 'development' : target.kind,
 		uninstalled: false,
-		...(config.data_deleted
+		...(journal.reset_data ? { tracking_ref: validateBranchRef(target.ref) } : {}),
+		...(clearsData
 			? { initialized: { database: false, files: false, extensions: false, access: false } }
 			: {})
 	};
@@ -965,11 +1734,58 @@ async function publish(config, app, previous, target, journal, writeJournal) {
 	await atomicJson(config.descriptor_path, next);
 	return next;
 }
+async function restoreMaintenanceRecord(config, maintenance) {
+	if (!maintenance || typeof maintenance !== 'object' || !maintenance.token)
+		throw branchError(
+			'RESET_FAILED',
+			'Branch data reset failed. Keep your downloaded backup and run Repair to finish.'
+		);
+	try {
+		await atomicJson(join(config.data_root, 'server.state', 'maintenance.json'), maintenance);
+	} catch {
+		throw branchError(
+			'RESET_FAILED',
+			'Branch data reset failed. Keep your downloaded backup and run Repair to finish.'
+		);
+	}
+}
+async function completePublicationReset(journal, writeJournal, hooks = {}) {
+	if (!journal?.reset_data) return;
+	const config = journal.next;
+	validateResetOwnership(config);
+	if (
+		!Array.isArray(journal.reset_roots) ||
+		journal.reset_roots.length !== 2 ||
+		journal.reset_roots[0] !== config.data_root ||
+		journal.reset_roots[1] !== config.extension_code
+	)
+		throw branchError(
+			'RESET_OWNERSHIP',
+			'Reset recovery paths do not match this installation. Preserve recovery for manual review.'
+		);
+	if (!['pending', 'deleting', 'complete'].includes(journal.reset_phase))
+		throw new Error('Update recovery reset state is invalid. Preserve recovery for manual review.');
+	if (journal.reset_phase === 'complete') {
+		await restoreMaintenanceRecord(config, journal.maintenance);
+		return;
+	}
+	await atomicJson(config.descriptor_path, config);
+	journal.reset_phase = 'deleting';
+	await writeJournal();
+	await resetLiveData(config, {
+		onRemoveRoot: hooks.onRemoveRoot,
+		onAfterDataRootRemoved: () => restoreMaintenanceRecord(config, journal.maintenance)
+	});
+	journal.reset_phase = 'complete';
+	await writeJournal();
+}
 async function finishPublication(journal, run, writeJournal, retryPdf = false) {
+	if (journal.reset_data && journal.reset_phase !== 'complete')
+		throw new Error('Update recovery reset state is invalid. Preserve recovery for manual review.');
 	const config = journal.next;
 	Object.assign(process.env, installationEnvironment(config), {
 		SATURDAY_BUILD_COMMIT: config.build.commit || '',
-		SATURDAY_BUILD_DIRTY: config.build.dirty ? '1' : '',
+		SATURDAY_BUILD_DIRTY: dirtyEnvValue(config.build.dirty),
 		SATURDAY_BUILD_ID: config.build.id?.startsWith('local.') ? config.build.id : ''
 	});
 	journal.phase = 'migrating';
@@ -987,6 +1803,8 @@ async function finishPublication(journal, run, writeJournal, retryPdf = false) {
 	const result = JSON.parse(await fs.readFile(config.descriptor_path, 'utf8'));
 	result.release = config.release;
 	result.distribution = config.distribution;
+	result.build = config.build;
+	if (config.tracking_ref !== undefined) result.tracking_ref = config.tracking_ref;
 	result.uninstalled = false;
 	result.data_deleted = false;
 	result.code_fingerprint = await codeFingerprint(result.code_root);
@@ -1002,7 +1820,19 @@ async function finishPublication(journal, run, writeJournal, retryPdf = false) {
 }
 export async function executeOperation(
 	id,
-	{ downloadSource, copySource, run, resolveTarget = selectTarget }
+	{
+		downloadSource,
+		copySource,
+		run,
+		resolveTarget = selectTarget,
+		request = github,
+		onRun,
+		onBeforePublish,
+		onAfterPublish,
+		onRemoveRoot,
+		onJournalWrite,
+		getLoginStartupStatus = loginStartupStatus
+	} = {}
 ) {
 	const paths = operationPaths();
 	const release = await acquireDirectoryLock(paths.lock);
@@ -1031,7 +1861,7 @@ export async function executeOperation(
 			.catch(() => {});
 	};
 	// Child setup logs are bounded and retained outside replaceable code.
-	const loggingRun = async (cmd, args, options = {}) => {
+	const spawnAndLog = async (cmd, args, options = {}) => {
 		const child = spawn(cmd, args, {
 			...options,
 			windowsHide: true,
@@ -1045,7 +1875,14 @@ export async function executeOperation(
 			);
 		});
 	};
-	const writeJournal = () => atomicJson(paths.journal, journal);
+	const loggingRun = async (cmd, args, options = {}) => {
+		if (onRun) return onRun(cmd, args, options, spawnAndLog);
+		return spawnAndLog(cmd, args, options);
+	};
+	const writeJournal = async () => {
+		await atomicJson(paths.journal, journal);
+		if (onJournalWrite) await onJournalWrite(journal);
+	};
 	let gateway;
 	const browserOrigin = readJson(serverPaths().record)?.url;
 	process.env.SATURDAY_SERVER_TOKEN ||= readJson(serverPaths().record)?.token || '';
@@ -1092,7 +1929,10 @@ export async function executeOperation(
 			await stopOwnedServer();
 			await assertClientsStopped(config);
 			admission = await claimInstallationMaintenance({ persistent: true, recover: true });
-			process.env.SATURDAY_MAINTENANCE_TOKEN = readJson(serverPaths().maintenance).token;
+			const repairMaintenance = readJson(serverPaths().maintenance);
+			process.env.SATURDAY_MAINTENANCE_TOKEN = repairMaintenance.token;
+			if (journal.reset_data && journal.reset_phase === 'pending')
+				await assertClientsStopped(config);
 			if (
 				journal.installation_id !== config.installation_id ||
 				journal.format !== 'saturday.update-publication' ||
@@ -1124,6 +1964,26 @@ export async function executeOperation(
 			])
 				if (journal.config[key] !== config[key] || journal.next[key] !== config[key])
 					throw new Error('Update recovery cannot relocate storage or change runtime ownership.');
+			validateInstallation(journal.next);
+			if (journal.reset_data) {
+				validateResetOwnership(journal.next);
+				if (
+					!Array.isArray(journal.reset_roots) ||
+					journal.reset_roots.length !== 2 ||
+					journal.reset_roots[0] !== config.data_root ||
+					journal.reset_roots[1] !== config.extension_code ||
+					!['pending', 'deleting', 'complete'].includes(journal.reset_phase)
+				)
+					throw new Error(
+						'Update recovery reset state is invalid. Preserve recovery for manual review.'
+					);
+				if (['migrating', 'complete'].includes(journal.phase) && journal.reset_phase !== 'complete')
+					throw new Error(
+						'Update recovery reset state is invalid. Preserve recovery for manual review.'
+					);
+				journal.maintenance = repairMaintenance;
+				await writeJournal();
+			}
 			if (journal.next.node_path !== journal.config.node_path) {
 				const runtime = journal.runtime;
 				if (
@@ -1152,6 +2012,8 @@ export async function executeOperation(
 					await fs.rename(config.code_root, journal.previous);
 					await fs.rename(journal.candidate, config.code_root);
 				}
+				journal.phase = 'published';
+				await writeJournal();
 				await atomicJson(config.descriptor_path, journal.next);
 			} else if (
 				config.mode === 'source' &&
@@ -1162,6 +2024,7 @@ export async function executeOperation(
 				throw new Error(
 					'Interrupted source publication needs reviewed Git/artifact recovery using the retained previous HEAD and build. Data is retained.'
 				);
+			await completePublicationReset(journal, writeJournal, { onRemoveRoot });
 			config = await finishPublication(journal, loggingRun, writeJournal, state.retry_pdf);
 			published = true;
 		} else if (state.operation === 'uninstall') {
@@ -1232,9 +2095,43 @@ export async function executeOperation(
 		} else {
 			if (state.operation === 'repair' && config.mode === 'source')
 				state.source ||= config.code_root;
+			const isBranchSwitch = state.operation === 'update' && state.reset_data === true;
+			const clearsData = Boolean(isBranchSwitch || config.data_deleted);
 			const selected = state.selected;
 			let target = selected?.target;
-			if (state.operation === 'update') {
+			if (isBranchSwitch) {
+				validateResetOwnership(config);
+				try {
+					await assertSafeRemoval([config.data_root, config.extension_code]);
+				} catch (e) {
+					throw branchError('RESET_UNSAFE', e.message);
+				}
+				const bs = state.branch_switch;
+				if (
+					!bs ||
+					!BRANCH_REFS.includes(bs.ref) ||
+					!SHA_RE.test(bs.commit || '') ||
+					selected?.purpose !== 'branch-switch' ||
+					selected.id !== bs.check_id ||
+					selected.target?.ref !== bs.ref ||
+					selected.target?.commit !== bs.commit ||
+					!selected.target?.requirements?.storage
+				)
+					throw branchError(
+						'SWITCH_CHECK',
+						'The branch review is stale or changed. Choose the branch again.'
+					);
+				const current = await localCodeState(config);
+				if (current.dirty || current.fingerprint !== selected.local.fingerprint)
+					throw new Error('Installed source changed after the check. Preserve it and check again.');
+				const liveCommit = await resolveBranchCommit(bs.ref, request);
+				if (liveCommit !== bs.commit)
+					throw branchError(
+						'BRANCH_CHANGED',
+						'The branch changed on GitHub. Review it and download a new backup; no substitute was installed.'
+					);
+				target = { ...selected.target, ref: bs.ref, commit: bs.commit };
+			} else if (state.operation === 'update') {
 				const current = await localCodeState(config);
 				if (current.dirty || current.fingerprint !== selected.local.fingerprint)
 					throw new Error('Installed source changed after the check. Preserve it and check again.');
@@ -1247,8 +2144,17 @@ export async function executeOperation(
 					throw new Error(
 						'The update check changed upstream. Check again; no substitute was installed.'
 					);
-			} else if (state.source) target = { kind: 'development', commit: null, local_source: true };
-			else if (config.build?.commit)
+			} else if (state.source) {
+				const sourceFingerprintBefore = await codeFingerprint(state.source);
+				const gitIdentity = await captureGitIdentity(state.source);
+				target = {
+					kind: 'development',
+					commit: gitIdentity.commit,
+					dirty: gitIdentity.dirty,
+					local_source: true,
+					source_fingerprint: sourceFingerprintBefore
+				};
+			} else if (config.build?.commit)
 				target = {
 					kind: config.release ? 'release' : 'development',
 					release: config.release,
@@ -1267,25 +2173,42 @@ export async function executeOperation(
 				? { source: state.source }
 				: await downloadSource(work, target.commit);
 			await copySource(source.source, app);
-			if (target.local_source)
-				target.local_id = `local.${(await codeFingerprint(app)).slice(0, 12)}`;
-			await stageExtensions(config, workspace);
+			if (target.local_source) {
+				const copiedFingerprint = await codeFingerprint(app);
+				if (
+					target.source_fingerprint &&
+					(await codeFingerprint(state.source)) !== target.source_fingerprint
+				)
+					throw new Error('Source changed while staging; publication stopped.');
+				target.local_id = `local.${copiedFingerprint.slice(0, 12)}`;
+			}
+			if (isBranchSwitch) {
+				await fs.mkdir(join(workspace, 'data'), { recursive: true });
+				await fs.mkdir(join(workspace, 'extensions'), { recursive: true });
+			} else {
+				await stageExtensions(config, workspace);
+			}
 			const pkg = JSON.parse(await fs.readFile(join(app, 'package.json'), 'utf8'));
 			validateDistribution(pkg.saturday);
-			if (readAccessSettings().allow_lan && pkg.saturday.lan_api !== 1)
-				throw new Error(
-					'This candidate does not support saved LAN preferences. Disable LAN and restart before changing to this build.'
-				);
-			if (readAccessSettings().password && pkg.saturday.access_api !== 1)
-				throw new Error(
-					'This candidate does not support password login. Keep the current build or explicitly disable password login before changing to an older build.'
-				);
+			if (!isBranchSwitch) {
+				if (readAccessSettings().allow_lan && pkg.saturday.lan_api !== 1)
+					throw new Error(
+						'This candidate does not support saved LAN preferences. Disable LAN and restart before changing to this build.'
+					);
+				if (readAccessSettings().password && pkg.saturday.access_api !== 1)
+					throw new Error(
+						'This candidate does not support password login. Keep the current build or explicitly disable password login before changing to an older build.'
+					);
+			}
 			if (
 				pkg.name !== 'saturday' ||
 				pkg.engines?.node !== `>=${pkg.saturday.node_minimum}` ||
-				(target.kind === 'release' && pkg.version !== target.release)
+				(target.kind === 'release' && pkg.version !== target.release) ||
+				(isBranchSwitch &&
+					!isDeepStrictEqual(pkg.saturday.storage, selected.target.requirements.storage))
 			)
-				throw new Error(
+				throw branchError(
+					'CANDIDATE_METADATA',
 					'Candidate package/version/runtime metadata differs from the checked build.'
 				);
 			if (pkg.saturday?.installation_api !== 1)
@@ -1297,16 +2220,17 @@ export async function executeOperation(
 				join(dirname(runtime.node_path), 'node_modules/npm/bin/npm-cli.js'),
 				join(dirname(runtime.node_path), '../lib/node_modules/npm/bin/npm-cli.js')
 			].find(existsSync);
-			if (!npm)
+			if (!npm && !onRun)
 				throw new Error(
 					'The installed runtime has no npm toolchain. Repair the runtime before updating.'
 				);
+			const npmBin = npm || 'npm';
 			const env = stageEnvironment(runtime, app, workspace, target);
-			await loggingRun(runtime.node_path, [npm, 'ci'], {
+			await loggingRun(runtime.node_path, [npmBin, 'ci'], {
 				cwd: app,
 				env: { ...env, PUPPETEER_SKIP_DOWNLOAD: 'true' }
 			});
-			await loggingRun(runtime.node_path, [npm, 'run', 'build'], { cwd: app, env });
+			await loggingRun(runtime.node_path, [npmBin, 'run', 'build'], { cwd: app, env });
 			if (
 				state.operation === 'update' &&
 				(await localCodeState(config)).fingerprint !== selected.local.fingerprint
@@ -1316,15 +2240,16 @@ export async function executeOperation(
 			wasRunning = await stopOwnedServer();
 			await waitForClientsStopped(config, state.wait_for_disconnect);
 			admission = await claimInstallationMaintenance({ persistent: true });
-			process.env.SATURDAY_MAINTENANCE_TOKEN = readJson(serverPaths().maintenance).token;
+			const controllerMaintenance = readJson(serverPaths().maintenance);
+			process.env.SATURDAY_MAINTENANCE_TOKEN = controllerMaintenance.token;
 			await assertClientsStopped(config);
 			await update('backing_up', 'Capturing verified database, files and extension recovery');
-			state.recovery = config.data_deleted
+			state.recovery = clearsData
 				? null
 				: await dataRecovery(config, existsSync(config.code_root) ? config.code_root : app);
 			await atomicJson(paths.status, state);
 			// Validate migrations/manifest upgrades on post-quiescence copies before touching live storage.
-			if (!config.data_deleted) {
+			if (!clearsData) {
 				await copyDatabase(config.database, join(workspace, 'data', 'saturday.db'));
 				await fs.cp(config.files, join(workspace, 'data', 'files'), { recursive: true });
 			}
@@ -1349,9 +2274,10 @@ export async function executeOperation(
 			);
 			await assertClientsStopped(config);
 			await update('publishing', 'Publishing verified code with retained previous build');
-			const login = await loginStartupStatus();
+			const login = await getLoginStartupStatus();
 			if (runtime.node_path !== config.node_path && !login.available)
 				throw new Error('Review the unavailable login registration before switching runtime.');
+			await assertClientsStopped(config);
 			journal = {
 				format: 'saturday.update-publication',
 				version: 1,
@@ -1362,11 +2288,23 @@ export async function executeOperation(
 				login,
 				source_repair: state.operation === 'repair' && config.mode === 'source',
 				config,
-				recovery: state.recovery
+				recovery: state.recovery,
+				...(isBranchSwitch
+					? {
+							reset_data: true,
+							reset_phase: 'pending',
+							reset_roots: [config.data_root, config.extension_code],
+							branch_switch: state.branch_switch,
+							maintenance: controllerMaintenance
+						}
+					: {})
 			};
+			if (onBeforePublish) await onBeforePublish(journal, config);
 			const previous = join(paths.root, `previous-${id}`);
 			config = await publish(config, app, previous, target, journal, writeJournal);
 			published = true;
+			if (onAfterPublish) await onAfterPublish(journal, config);
+			await completePublicationReset(journal, writeJournal, { onRemoveRoot });
 			await update('migrating', 'Preparing compatible live storage');
 			config = await finishPublication(journal, loggingRun, writeJournal, state.retry_pdf);
 		}
@@ -1400,6 +2338,15 @@ export async function executeOperation(
 		const recoveryRequired = existsSync(paths.journal);
 		let restartWarning;
 		// Before publication, the existing compatible app can resume. Afterwards, keep maintenance persistent for explicit repair.
+		if (recoveryRequired && journal?.reset_data && journal.maintenance) {
+			try {
+				if (!existsSync(serverPaths().maintenance)) {
+					await atomicJson(serverPaths().maintenance, journal.maintenance);
+				}
+			} catch {
+				/* Best-effort maintenance retention for interrupted reset recovery. */
+			}
+		}
 		if (!recoveryRequired) {
 			// Nothing was published, so the staged candidate is disposable.
 			try {
@@ -1424,7 +2371,8 @@ export async function executeOperation(
 		// Terminal states only: an error must never look like active work.
 		await update(recoveryRequired ? 'recovery_required' : 'failed', e.message, {
 			error: e.message,
-			error_code: e.code === 'MCP_CONNECTED' ? 'MCP_CONNECTED' : undefined,
+			error_code:
+				typeof e.code === 'string' && /^[A-Z][A-Z0-9_]*$/.test(e.code) ? e.code : undefined,
 			completed_at: new Date().toISOString(),
 			recovery: state.recovery,
 			...(restartWarning ? { warning: restartWarning } : {})
