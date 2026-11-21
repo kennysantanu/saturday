@@ -66,6 +66,7 @@ import { validServerSession, networkSummary } from '$lib/server/server-lifecycle
 import { assistantConfiguration, getInstallation } from '$lib/server/installation.js';
 import { extensionPaths, extensionError } from '$lib/server/extensions.js';
 import { fail, redirect } from '@sveltejs/kit';
+import { settled } from '$lib/server/settled.js';
 import { publicBackupError, MAX_BACKUP_BYTES, BackupError } from '$lib/server/backups.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -478,18 +479,18 @@ export const actions = {
 			return fail(400, { storageError: e.message });
 		}
 	},
-	extensions: async ({ request }) => {
+	extensions: async (event) => {
 		try {
-			const v = await request.formData();
+			const v = await event.request.formData();
 			await setExtensionsEnabled(v.get('enabled') === 'on');
 		} catch (e) {
 			return fail(400, { extensionError: extensionError(e).message });
 		}
-		redirect(303, '/settings?saved=extension');
+		return settled(event, { extensionsSaved: true }, '/settings?saved=extension#extensions');
 	},
-	backup: async ({ request }) => {
+	backup: async (event) => {
 		try {
-			const values = await request.formData();
+			const values = await event.request.formData();
 			const contents = values.get('contents') ?? 'all';
 			if (!['all', 'database', 'files'].includes(String(contents)))
 				return fail(400, {
@@ -499,7 +500,7 @@ export const actions = {
 		} catch (error) {
 			return actionFailure(error);
 		}
-		redirect(303, '/settings?saved=backup');
+		return settled(event, { backupSaved: true }, '/settings?saved=backup#backups');
 	},
 	filePairPrepare: async ({ request }) => {
 		try {
@@ -513,9 +514,9 @@ export const actions = {
 			return fail(400, { fileError: e.code ? e.message : 'Coordinated preview failed.' });
 		}
 	},
-	filePairRestore: async ({ request }) => {
+	filePairRestore: async (event) => {
 		try {
-			const v = await request.formData();
+			const v = await event.request.formData();
 			await restoreBackupPair({
 				restore_id: String(v.get('restore_id')),
 				confirm: v.get('confirm') === 'true'
@@ -527,15 +528,15 @@ export const actions = {
 					: 'Coordinated restore failed. Inspect recovery state before retrying.'
 			});
 		}
-		redirect(303, '/settings?saved=restored');
+		return settled(event, { restored: true }, '/settings?saved=restored#backups');
 	},
-	fileBackup: async () => {
+	fileBackup: async (event) => {
 		try {
 			await createManualBackup({ contents: 'files' });
 		} catch (e) {
 			return fail(400, { fileError: e.code ? e.message : 'File backup failed. Check disk space.' });
 		}
-		redirect(303, '/settings?saved=file-backup');
+		return settled(event, { fileBackupSaved: true }, '/settings?saved=file-backup#backups');
 	},
 	filePrepare: async ({ request }) => {
 		try {
@@ -550,9 +551,9 @@ export const actions = {
 			return fail(400, { fileError: e.code ? e.message : 'File restore preview failed.' });
 		}
 	},
-	fileRestore: async ({ request }) => {
+	fileRestore: async (event) => {
 		try {
-			const v = await request.formData();
+			const v = await event.request.formData();
 			await restoreFiles({
 				restore_id: String(v.get('restore_id')),
 				confirm: v.get('confirm') === 'true'
@@ -564,7 +565,7 @@ export const actions = {
 					: 'File restore failed. Inspect recovery state before retrying.'
 			});
 		}
-		redirect(303, '/settings?saved=restored');
+		return settled(event, { restored: true }, '/settings?saved=restored#backups');
 	},
 	// Database-only backup and download action (retained for compatibility and tests; no UI form submits here).
 	download: async () => {
@@ -588,9 +589,9 @@ export const actions = {
 		// that id together with contents=all into the three-entry ZIP.
 		redirect(303, `/settings/backups/${backup.database_backup_id}?contents=all`);
 	},
-	deleteBackup: async ({ request }) => {
+	deleteBackup: async (event) => {
 		try {
-			const values = await request.formData();
+			const values = await event.request.formData();
 			await deleteManualBackup({
 				backup_id: String(values.get('backup_id')),
 				contents: String(values.get('contents')),
@@ -599,7 +600,7 @@ export const actions = {
 		} catch (e) {
 			return actionFailure(e);
 		}
-		redirect(303, '/settings?saved=backup-deleted');
+		return settled(event, { backupDeleted: true }, '/settings?saved=backup-deleted#backups');
 	},
 	prepare: async ({ request }) => {
 		try {
@@ -641,10 +642,10 @@ export const actions = {
 			return actionFailure(error);
 		}
 	},
-	restore: async ({ request }) => {
+	restore: async (event) => {
 		let result;
 		try {
-			const values = await request.formData();
+			const values = await event.request.formData();
 			result = await restoreBackup(
 				String(values.get('restore_id') ?? ''),
 				values.get('confirm') === 'true'
@@ -652,6 +653,10 @@ export const actions = {
 		} catch (error) {
 			return actionFailure(error);
 		}
-		redirect(303, `/settings?recovery=${result.recovery_backup_id}&saved=restored`);
+		return settled(
+			event,
+			{ restored: true, recoveryBackupId: result.recovery_backup_id },
+			`/settings?recovery=${result.recovery_backup_id}&saved=restored#backups`
+		);
 	}
 };

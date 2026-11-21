@@ -1,6 +1,7 @@
-import { fail, redirect } from '@sveltejs/kit';
+import { fail } from '@sveltejs/kit';
 import { recoveryDocuments, recoverCopy } from '$lib/server/application.js';
 import { searchJobs } from '$lib/server/application.js';
+import { settled } from '$lib/server/settled.js';
 export async function load({ params, url }) {
 	return {
 		documents: await recoveryDocuments(params.jobId),
@@ -12,9 +13,11 @@ export async function load({ params, url }) {
 	};
 }
 export const actions = {
-	copy: async ({ params, request }) => {
+	copy: async (event) => {
+		const { params, request } = event;
+		let v;
 		try {
-			const v = Object.fromEntries(await request.formData());
+			v = Object.fromEntries(await request.formData());
 			await recoverCopy({
 				id: v.id,
 				token: v.token,
@@ -25,6 +28,10 @@ export const actions = {
 		} catch (e) {
 			return fail(400, { fileError: e.code ? e.message : 'Recovery copy failed.' });
 		}
-		redirect(303, `/settings/files/recovery/${params.jobId}?saved=document-copy`);
+		return settled(
+			event,
+			{ saved: 'document-copy' },
+			`/settings/files/recovery/${params.jobId}?saved=document-copy#recovery-${v.id}`
+		);
 	}
 };

@@ -14,11 +14,12 @@ import {
 	listWorkflowStages,
 	deleteJob
 } from '$lib/server/application.js';
-import { error, fail, redirect } from '@sveltejs/kit';
+import { error, fail } from '@sveltejs/kit';
 import { ServiceError, ValidationError } from '$lib/domain/validation.js';
 import { todayIso } from '$lib/format.js';
 import { recordDeletionAction } from '$lib/server/record-deletion-actions.js';
 import { confirmedUnlink } from '$lib/server/note-loss-confirmation.js';
+import { settled } from '$lib/server/settled.js';
 function formValues(formData) {
 	return Object.fromEntries(
 		Array.from(formData.entries(), ([key, value]) => [key, typeof value === 'string' ? value : ''])
@@ -131,21 +132,23 @@ function networkRedirectUrl({ url, saved }) {
 		)
 			query.delete(key);
 	query.set('saved', saved);
-	return `${url.pathname}?${query}`;
+	return `${url.pathname}?${query}#job-network`;
 }
 function networkAction(operation, saved) {
-	return async ({ params, request, url }) => {
+	return async (event) => {
+		const { params, request, url } = event;
 		const values = formValues(await request.formData());
 		try {
 			await operation({ ...values, job_id: params.id });
 		} catch (e) {
 			return actionError(e, values, saved);
 		}
-		redirect(303, networkRedirectUrl({ url, saved }));
+		return settled(event, { saved }, networkRedirectUrl({ url, saved }));
 	};
 }
 function historyAction(mode) {
-	return async ({ params, request, url }) => {
+	return async (event) => {
+		const { params, request, url } = event;
 		const values = formValues(await request.formData());
 		let saved =
 			mode === 'changeStage' ? 'stage-changed' : mode === 'addHistory' ? 'update' : 'correction';
@@ -179,7 +182,11 @@ function historyAction(mode) {
 		} catch (e) {
 			return actionError(e, values, mode);
 		}
-		redirect(303, jobDetailUrl(params.id, url.searchParams.get('return_to'), saved));
+		return settled(
+			event,
+			{ saved },
+			`${jobDetailUrl(params.id, url.searchParams.get('return_to'), saved)}#job-history`
+		);
 	};
 }
 export const actions = {
@@ -195,13 +202,18 @@ export const actions = {
 		redirectTo: networkRedirectUrl,
 		onError: actionError
 	}),
-	star: async ({ params, request, url }) => {
+	star: async (event) => {
+		const { params, request, url } = event;
 		const values = formValues(await request.formData());
 		try {
 			await setJobStarred(params.id, values.is_starred === '1');
 		} catch (error) {
 			return actionError(error, values, 'star');
 		}
-		redirect(303, jobDetailUrl(params.id, url.searchParams.get('return_to'), `starred`));
+		return settled(
+			event,
+			{ saved: 'starred' },
+			jobDetailUrl(params.id, url.searchParams.get('return_to'), 'starred')
+		);
 	}
 };

@@ -13,6 +13,7 @@
 	import PageShell from '$lib/components/app/page-shell.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
+	import { SAVED_MESSAGES, toast } from '$lib/toast.svelte';
 	let { data, form } = $props();
 </script>
 
@@ -31,7 +32,7 @@
 	</FilterBar>
 
 	{#each data.documents as doc (doc.id)}
-		<div class="inset-surface space-y-4 p-4">
+		<div id={`recovery-${doc.id}`} class="inset-surface space-y-4 p-4">
 			<div class="flex flex-wrap items-center justify-between gap-3">
 				<p class="min-w-0 font-medium break-all">{doc.filename}</p>
 				<Button variant="ghost" size="sm" href={`/settings/files/recovery/${data.jobId}/${doc.id}`}
@@ -40,7 +41,15 @@
 					></Button
 				>
 			</div>
-			<form method="POST" action="?/copy" use:enhance={withPending()} class="space-y-4">
+			<form
+				method="POST"
+				action="?/copy"
+				use:enhance={withPending(() => async ({ result, update }) => {
+					await update();
+					if (result.type === 'success') toast.show(SAVED_MESSAGES['document-copy']);
+				})}
+				class="space-y-4"
+			>
 				<input type="hidden" name="id" value={doc.id} /><input
 					type="hidden"
 					name="token"

@@ -6,7 +6,7 @@
 	import { checkAuthResponse } from '$lib/auth-notice.svelte';
 	import { tick } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
-	import { toast } from '$lib/toast.svelte';
+	import { SAVED_MESSAGES, toast } from '$lib/toast.svelte';
 	import { applyAction, deserialize, enhance } from '$app/forms';
 	import { withPending, enhanceWithFocus, focusFirstError, trackChanges } from '$lib/forms';
 	import { page } from '$app/state';
@@ -573,8 +573,9 @@
 					<form
 						method="POST"
 						action="?/extensions"
-						use:enhance={withPending(() => async ({ update }) => {
+						use:enhance={withPending(() => async ({ result, update }) => {
 							await update({ reset: false });
+							if (result.type === 'success') toast.show(SAVED_MESSAGES.extension);
 							await tick();
 							focusFirstError();
 						})}
@@ -609,12 +610,11 @@
 					{#if form?.backupError}<Notice tone="error" title="Backup operation failed"
 							>{form.backupError}</Notice
 						>{/if}
-					{#if page.url.searchParams.get('recovery')}
+					{@const recoveryId = form?.recoveryBackupId || page.url.searchParams.get('recovery')}
+					{#if recoveryId}
 						<Notice tone="success" title="Backup restored"
 							>Your previous records are saved in a recovery backup.
-							<a class="link" href={`/settings/backups/${page.url.searchParams.get('recovery')}`}
-								>Download recovery backup</a
-							>
+							<a class="link" href={`/settings/backups/${recoveryId}`}>Download recovery backup</a>
 						</Notice>
 					{/if}
 					{#if data.filesError || form?.fileError || uploadError}<Notice
@@ -660,7 +660,12 @@
 							<form
 								method="POST"
 								action="?/backup"
-								use:enhance={enhanceWithFocus}
+								use:enhance={withPending(() => async ({ result, update }) => {
+									await update();
+									if (result.type === 'success') toast.show(SAVED_MESSAGES.backup);
+									await tick();
+									focusFirstError();
+								})}
 								class="space-y-4"
 							>
 								<Field id="backup_contents" label="Include">
@@ -692,7 +697,19 @@
 								Expires {new Date(form.preview.expires_at).toLocaleTimeString()}. If records change,
 								preview again.
 							</p>
-							<form method="POST" action="?/restore" id="restore-backup-form" class="form-actions">
+							<form
+								method="POST"
+								action="?/restore"
+								id="restore-backup-form"
+								use:enhance={withPending(() => async ({ result, update }) => {
+									confirmRestore = false;
+									await update();
+									if (result.type === 'success') toast.show(SAVED_MESSAGES.restored);
+									await tick();
+									focusFirstError();
+								})}
+								class="form-actions"
+							>
 								<input type="hidden" name="restore_id" value={form.preview.restore_id} />
 								<input type="hidden" name="confirm" value="true" />
 								<Button type="button" variant="outline" onclick={() => (confirmRestore = true)}
@@ -736,6 +753,13 @@
 								method="POST"
 								action="?/filePairRestore"
 								id="restore-file-pair"
+								use:enhance={withPending(() => async ({ result, update }) => {
+									confirmPair = false;
+									await update();
+									if (result.type === 'success') toast.show(SAVED_MESSAGES.restored);
+									await tick();
+									focusFirstError();
+								})}
 								class="form-actions"
 							>
 								<input
@@ -780,7 +804,19 @@
 									.removed} will be removed.
 							</p>
 							<p class="text-sm">{form.filePreview.warning}</p>
-							<form method="POST" action="?/fileRestore" id="restore-files" class="form-actions">
+							<form
+								method="POST"
+								action="?/fileRestore"
+								id="restore-files"
+								use:enhance={withPending(() => async ({ result, update }) => {
+									confirmFiles = false;
+									await update();
+									if (result.type === 'success') toast.show(SAVED_MESSAGES.restored);
+									await tick();
+									focusFirstError();
+								})}
+								class="form-actions"
+							>
 								<input type="hidden" name="restore_id" value={form.filePreview.restore_id} /><input
 									type="hidden"
 									name="confirm"
@@ -837,9 +873,10 @@
 						method="POST"
 						action="?/deleteBackup"
 						id="delete-backup"
-						use:enhance={withPending(() => async ({ update }) => {
+						use:enhance={withPending(() => async ({ result, update }) => {
 							deleteOpen = false;
 							await update();
+							if (result.type === 'success') toast.show(SAVED_MESSAGES['backup-deleted']);
 							await tick();
 							focusFirstError();
 						})}

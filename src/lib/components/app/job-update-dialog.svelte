@@ -11,6 +11,7 @@
 	import UnsavedDialog from './unsaved-dialog.svelte';
 	import { UnsavedChanges } from '$lib/unsaved.svelte';
 	import { focusFirstError, withPending } from '$lib/forms';
+	import { SAVED_MESSAGES, toast } from '$lib/toast.svelte';
 	import type { ReminderDraft } from '$lib/reminders';
 	import { jobHistoryDraft, reminderDraft } from '$lib/activity-drafts.js';
 	let {
@@ -70,6 +71,10 @@
 				open = false;
 			}
 			await update({ reset: false });
+			if (result.type === 'success') {
+				const saved = typeof result.data?.saved === 'string' ? result.data.saved : '';
+				if (saved && SAVED_MESSAGES[saved]) toast.show(SAVED_MESSAGES[saved]);
+			}
 			guard.saving = false;
 			deleting = false;
 			await tick();

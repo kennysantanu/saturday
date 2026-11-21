@@ -25,7 +25,7 @@
 			errors: object;
 		};
 		form?: {
-			action: string;
+			action?: string;
 			errors?: Record<string, string>;
 			values?: Record<string, string>;
 		} | null;
