@@ -1,12 +1,13 @@
 import { tagPickerData } from '$lib/server/tag-forms.js';
 import { reminderActions, loadReminders, optionalReminder } from '$lib/server/reminder-actions.js';
-import { error, fail, redirect } from '@sveltejs/kit';
+import { error, fail } from '@sveltejs/kit';
 import * as networks from '$lib/server/application.js';
 import { getJob, searchJobs } from '$lib/server/application.js';
 import { ServiceError, ValidationError, localCalendarDate } from '$lib/server/validation.js';
 import { networkReturn, networkDetailUrl } from '$lib/network-navigation.js';
 import { recordDeletionAction } from '$lib/server/record-deletion-actions.js';
 import { confirmedUnlink } from '$lib/server/note-loss-confirmation.js';
+import { settled } from '$lib/server/settled.js';
 export async function load({ params, url }) {
 	let person;
 	try {
@@ -82,8 +83,9 @@ export async function load({ params, url }) {
 		missingJob
 	};
 }
-function action(operation, saved) {
-	return async ({ params, request, url }) => {
+function action(operation, saved, fragment) {
+	return async (event) => {
+		const { params, request, url } = event;
 		const values = Object.fromEntries(
 			Array.from((await request.formData()).entries(), ([key, value]) => [
 				key,
@@ -111,28 +113,39 @@ function action(operation, saved) {
 				values
 			});
 		}
-		redirect(
-			303,
-			networkDetailUrl(params.id, url.searchParams.get('return_to'), url.searchParams, saved)
+		return settled(
+			event,
+			{ saved },
+			`${networkDetailUrl(params.id, url.searchParams.get('return_to'), url.searchParams, saved)}${fragment}`
 		);
 	};
 }
 export const actions = {
 	...reminderActions('person'),
 	deletePerson: recordDeletionAction('person', networks.deleteNetwork),
-	link: action(async (i) => await networks.linkJobNetwork(i), 'network-linked'),
-	note: action(networks.editJobNetwork, 'network-note'),
+	link: action(
+		async (i) => await networks.linkJobNetwork(i),
+		'network-linked',
+		'#person-linked-jobs'
+	),
+	note: action(networks.editJobNetwork, 'network-note', '#person-linked-jobs'),
 	unlink: confirmedUnlink('person', 'network-unlinked', {
 		redirectTo: ({ params, url, saved }) =>
-			networkDetailUrl(params.id, url.searchParams.get('return_to'), url.searchParams, saved)
+			`${networkDetailUrl(params.id, url.searchParams.get('return_to'), url.searchParams, saved)}#person-linked-jobs`
 	}),
 	addInteraction: action(
 		async (i) => await networks.addNetworkUpdate({ ...i, ...optionalReminder(i) }),
-		'interaction'
+		'interaction',
+		'#person-interactions'
 	),
-	editInteraction: action(networks.editNetworkUpdate, 'interaction-corrected'),
+	editInteraction: action(
+		networks.editNetworkUpdate,
+		'interaction-corrected',
+		'#person-interactions'
+	),
 	deleteInteraction: action(
 		async (i) => await networks.deleteNetworkUpdate({ ...i, confirm: i.confirm === 'true' }),
-		'interaction-deleted'
+		'interaction-deleted',
+		'#person-interactions'
 	)
 };

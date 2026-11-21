@@ -7,6 +7,7 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import Upload from '@lucide/svelte/icons/upload';
 	import Plus from '@lucide/svelte/icons/plus';
+	import { SAVED_MESSAGES, toast } from '$lib/toast.svelte';
 
 	/**
 	 * The picker behind each Profile slot: `DocumentPickerDialog` with search and paging kept in the
@@ -74,8 +75,12 @@
 	const navigate = (address: string) => goto(address, { noScroll: true, keepFocus: true });
 	const submit: SubmitFunction =
 		() =>
-		async ({ update }) => {
+		async ({ result, update }) => {
 			await update({ reset: false });
+			if (result.type === 'success') {
+				toast.show(SAVED_MESSAGES.profile);
+				open = false;
+			}
 		};
 </script>
 

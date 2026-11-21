@@ -9,6 +9,7 @@
 	import { page } from '$app/state';
 	import { enhance } from '$app/forms';
 	import { focusFirstError, withPending } from '$lib/forms';
+	import { SAVED_MESSAGES, toast } from '$lib/toast.svelte';
 	import { networkDetailUrl } from '$lib/network-navigation.js';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Pencil from '@lucide/svelte/icons/pencil';
@@ -152,6 +153,10 @@
 					unlinkOpen = false;
 				}
 				await update({ reset: false });
+				if (result.type === 'success') {
+					const saved = typeof result.data?.saved === 'string' ? result.data.saved : '';
+					if (saved && SAVED_MESSAGES[saved]) toast.show(SAVED_MESSAGES[saved]);
+				}
 				if (guard) guard.saving = false;
 				await tick();
 				focusFirstError();
@@ -273,7 +278,7 @@
 		<RemindersSection data={data.reminderData} {form} today={data.today} />
 	</div>
 
-	<SectionCard title="Linked jobs" count={data.linkedJobs.total}>
+	<SectionCard id="person-linked-jobs" title="Linked jobs" count={data.linkedJobs.total}>
 		{#snippet action()}
 			<Button href={href({ link_job: '1', picker_page: null, job_query: null })} variant="outline"
 				><Link2 data-icon="inline-start" />Link to job</Button
@@ -352,6 +357,7 @@
 	</SectionCard>
 
 	<SectionCard
+		id="person-interactions"
 		title="Interactions"
 		description={person.latest_interaction_date
 			? `Last recorded: ${formatDate(person.latest_interaction_date)} · ${person.interaction_count} recorded`
