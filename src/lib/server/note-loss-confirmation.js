@@ -1,6 +1,7 @@
-import { fail, redirect } from '@sveltejs/kit';
+import { fail } from '@sveltejs/kit';
 import { unlinkJobNetworkConfirmed } from './application.js';
 import { ServiceError, ValidationError } from '../domain/validation.js';
+import { settled } from './settled.js';
 
 function formValues(formData) {
 	return Object.fromEntries(
@@ -27,7 +28,8 @@ export function confirmedUnlink(side, saved, { redirectTo, onError = defaultErro
 	if (side !== 'job' && side !== 'person') {
 		throw new Error(`Unsupported unlink side: ${side}`);
 	}
-	return async ({ params, request, url }) => {
+	return async (event) => {
+		const { params, request, url } = event;
 		const values = formValues(await request.formData());
 		const ids =
 			side === 'job'
@@ -54,6 +56,6 @@ export function confirmedUnlink(side, saved, { redirectTo, onError = defaultErro
 		} catch (error) {
 			return onError(error, values, saved);
 		}
-		redirect(303, redirectTo({ params, url, saved }));
+		return settled(event, { saved }, redirectTo({ params, url, saved }));
 	};
 }

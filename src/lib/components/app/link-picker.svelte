@@ -19,6 +19,7 @@
 	import { page as currentPage } from '$app/state';
 	import { enhance } from '$app/forms';
 	import { focusFirstError, skipKeyboardFocus, withPending } from '$lib/forms';
+	import { SAVED_MESSAGES, toast } from '$lib/toast.svelte';
 	import { UnsavedChanges } from '$lib/unsaved.svelte';
 	import { resultCount } from '$lib/filter-labels.js';
 	import UnsavedDialog from './unsaved-dialog.svelte';
@@ -100,7 +101,7 @@
 		failureAction: string;
 		actionName: string;
 		form?: {
-			action: string;
+			action?: string;
 			errors?: Record<string, string>;
 			values?: Record<string, string>;
 		} | null;
@@ -189,6 +190,11 @@
 		return async ({ result, update }) => {
 			if (result.type === 'redirect' || result.type === 'success') guard.dirty = false;
 			await update({ reset: false });
+			if (result.type === 'success') {
+				const saved = typeof result.data?.saved === 'string' ? result.data.saved : null;
+				if (saved && SAVED_MESSAGES[saved]) toast.show(SAVED_MESSAGES[saved]);
+				open = false;
+			}
 			guard.saving = false;
 			await tick();
 			focusFirstError();

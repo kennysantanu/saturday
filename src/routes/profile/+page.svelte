@@ -26,7 +26,7 @@
 	import Upload from '@lucide/svelte/icons/upload';
 	import Plus from '@lucide/svelte/icons/plus';
 	import X from '@lucide/svelte/icons/x';
-	import { toast } from '$lib/toast.svelte';
+	import { SAVED_MESSAGES, toast } from '$lib/toast.svelte';
 	let { data, form } = $props();
 
 	const slotIcons = {
@@ -290,8 +290,13 @@
 	action="?/select"
 	use:enhance={withPending(() => async ({ result, update }) => {
 		await update();
-		if (result.type === 'redirect') clearing = false;
-		else {
+		if (result.type === 'redirect' || result.type === 'success') {
+			clearing = false;
+			if (result.type === 'success') {
+				const saved = typeof result.data?.saved === 'string' ? result.data.saved : null;
+				if (saved && SAVED_MESSAGES[saved]) toast.show(SAVED_MESSAGES[saved]);
+			}
+		} else {
 			await tick();
 			focusFirstError();
 		}

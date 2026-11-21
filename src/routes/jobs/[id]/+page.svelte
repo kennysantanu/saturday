@@ -35,7 +35,8 @@
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
-	import { focusFirstError, enhanceWithFocus, withPending } from '$lib/forms';
+	import { focusFirstError, withPending } from '$lib/forms';
+	import { SAVED_MESSAGES, toast } from '$lib/toast.svelte';
 	import { hostOf, formatDate } from '$lib/format';
 	import JobUpdateDialog from '$lib/components/app/job-update-dialog.svelte';
 	import JobPersonPicker from '$lib/components/app/job-person-picker.svelte';
@@ -81,10 +82,16 @@
 	$effect(() => {
 		if (
 			!form?.errors ||
+			!form.action ||
 			!['changeStage', 'addHistory', 'editHistory', 'deleteHistory'].includes(form.action)
 		)
 			return;
-		editorFailure = { ...form, values: form.values ?? {}, errors: form.errors ?? {} };
+		editorFailure = {
+			...form,
+			action: form.action,
+			values: form.values ?? {},
+			errors: form.errors ?? {}
+		};
 		editor = {
 			mode: form.action === 'changeStage' ? 'move' : form.action === 'addHistory' ? 'add' : 'edit',
 			entry: updates.find((entry) => String(entry.id) === form.values?.update_id)
@@ -163,6 +170,10 @@
 					unlinkOpen = false;
 				}
 				await update({ reset: false });
+				if (result.type === 'success') {
+					const saved = typeof result.data?.saved === 'string' ? result.data.saved : '';
+					if (saved && SAVED_MESSAGES[saved]) toast.show(SAVED_MESSAGES[saved]);
+				}
 				if (guarded) noteGuard.saving = false;
 				await tick();
 				focusFirstError();
@@ -242,7 +253,16 @@
 				{/if}
 			{/snippet}
 			{#snippet actions()}
-				<form method="POST" action={formAction('star')} use:enhance={enhanceWithFocus}>
+				<form
+					method="POST"
+					action={formAction('star')}
+					use:enhance={withPending(() => async ({ result, update }) => {
+						await update();
+						if (result.type === 'success') toast.show(SAVED_MESSAGES.starred);
+						await tick();
+						focusFirstError();
+					})}
+				>
 					<input type="hidden" name="is_starred" value={job.isStarred ? '0' : '1'} />
 					<Button type="submit" variant="outline" aria-pressed={job.isStarred}>
 						<Star

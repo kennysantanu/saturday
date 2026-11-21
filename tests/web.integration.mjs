@@ -108,8 +108,8 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		assert.ok(getJob(extra.id));
 		confirmation.set('confirm', 'true');
 		const restored = await post('restore', confirmation);
-		assert.equal(restored.type, 'redirect');
-		assert.ok(restored.location.includes('recovery='));
+		assert.equal(restored.type, 'success');
+		assert.ok(restored.data?.recoveryBackupId);
 		assert.equal(getJob(extra.id), null);
 		assert.ok(getJob(job.id));
 		const invalid = new FormData();
@@ -174,10 +174,35 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 			reminder_note: 'Check in'
 		});
 		assert.equal(follow.type, 'redirect');
-		assert.equal(
-			(await postJob(`/networks/${personId}?/link`, { job_id: job.id, notes: 'Referrer' })).type,
-			'redirect'
-		);
+		const postNativePath = (path, values) =>
+			fetch(`${base}${path}`, {
+				method: 'POST',
+				headers: { origin: base, accept: 'text/html' },
+				body: new URLSearchParams(values),
+				redirect: 'manual'
+			});
+		const assertNativeAnchor = async (response, expectedFragment) => {
+			assert.equal(response.status, 303);
+			const location = response.headers.get('location') ?? '';
+			const resolved = new URL(location, base);
+			assert.equal(resolved.hash, expectedFragment ? `#${expectedFragment}` : '');
+			const page = await fetch(resolved);
+			assert.equal(page.status, 200);
+			const html = await page.text();
+			if (expectedFragment) {
+				assert.ok(
+					html.includes(`id="${expectedFragment}"`),
+					`Expected ${resolved.pathname}${resolved.search} to contain id="${expectedFragment}"`
+				);
+			}
+			return resolved;
+		};
+		const linkedEnhanced = await postJob(`/networks/${personId}?/link`, {
+			job_id: job.id,
+			notes: 'Referrer'
+		});
+		assert.equal(linkedEnhanced.type, 'success');
+		assert.equal(parse(linkedEnhanced.data).saved, 'network-linked');
 		const personDetails = await (await fetch(`${base}/networks/${personId}`)).text();
 		assert.ok(personDetails.includes('Linked jobs'));
 		assert.ok(personDetails.includes('Referrer'));
@@ -196,23 +221,62 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		const clamped = await fetch(`${base}/networks?page=99`, { redirect: 'manual' });
 		assert.equal(clamped.status, 303);
 		assert.equal(clamped.headers.get('location'), '/networks');
-		assert.equal(
-			(
-				await postJob(`/networks/${personId}?/addInteraction&jobs_page=2&updates_page=3`, {
-					interaction_date: '2000-01-01',
-					note: 'Met Alex'
-				})
-			).type,
-			'redirect'
+		// Person-page interaction: enhanced submit returns success data without redirecting;
+		// native submit redirects 303 with pagination/return_to params and #person-interactions fragment.
+		const addedInteraction = await postJob(
+			`/networks/${personId}?/addInteraction&jobs_page=2&updates_page=3`,
+			{
+				interaction_date: '2000-01-01',
+				note: 'Met Alex'
+			}
 		);
+		assert.equal(addedInteraction.type, 'success');
+		assert.equal(parse(addedInteraction.data).saved, 'interaction');
 		const interaction = networks.listNetworkUpdates({ network_id: personId }).updates[0];
+		assert.equal(interaction.note, 'Met Alex');
+		const personReturnTo = '/networks?organization=Acme&page=3';
+		const nativeEditInteraction = await postNativePath(
+			`/networks/${personId}?/editInteraction&` +
+				new URLSearchParams({
+					return_to: personReturnTo,
+					jobs_page: '2',
+					updates_page: '3'
+				}),
+			{ update_id: interaction.id, interaction_date: '2000-01-02', note: 'Corrected natively' }
+		);
+		const nativeEditUrl = await assertNativeAnchor(nativeEditInteraction, 'person-interactions');
+		assert.equal(nativeEditUrl.searchParams.get('return_to'), personReturnTo);
+		assert.equal(nativeEditUrl.searchParams.get('jobs_page'), '2');
+		assert.equal(nativeEditUrl.searchParams.get('updates_page'), '3');
+		assert.equal(nativeEditUrl.searchParams.get('saved'), 'interaction-corrected');
+		assert.equal(
+			networks.listNetworkUpdates({ network_id: personId }).updates[0].note,
+			'Corrected natively'
+		);
+		const nativePersonNote = await postNativePath(
+			`/networks/${personId}?/note&` +
+				new URLSearchParams({
+					return_to: personReturnTo,
+					jobs_page: '2',
+					updates_page: '3'
+				}),
+			{ job_id: job.id, notes: 'Referrer updated natively' }
+		);
+		const nativePersonNoteUrl = await assertNativeAnchor(nativePersonNote, 'person-linked-jobs');
+		assert.equal(nativePersonNoteUrl.searchParams.get('return_to'), personReturnTo);
+		assert.equal(nativePersonNoteUrl.searchParams.get('jobs_page'), '2');
+		assert.equal(nativePersonNoteUrl.searchParams.get('updates_page'), '3');
+		assert.equal(nativePersonNoteUrl.searchParams.get('saved'), 'network-note');
 		const editInteraction = await postJob(
 			`/networks/${personId}?/editInteraction&jobs_page=2&updates_page=3`,
 			{ update_id: interaction.id, interaction_date: '2000-01-02', note: 'Corrected' }
 		);
-		assert.equal(editInteraction.type, 'redirect');
-		assert.ok(editInteraction.location.includes('jobs_page=2'));
-		assert.ok(editInteraction.location.includes('updates_page=3'));
+		assert.equal(editInteraction.type, 'success');
+		assert.equal(parse(editInteraction.data).saved, 'interaction-corrected');
+		assert.equal(
+			networks.listNetworkUpdates({ network_id: personId }).updates[0].note,
+			'Corrected'
+		);
 		assert.equal(
 			(await postJob(`/networks/${personId}?/deleteInteraction`, { update_id: interaction.id }))
 				.type,
@@ -225,7 +289,7 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 					confirm: 'true'
 				})
 			).type,
-			'redirect'
+			'success'
 		);
 		assert.equal(
 			(
@@ -234,7 +298,7 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 					notes: 'Hiring manager'
 				})
 			).type,
-			'redirect'
+			'success'
 		);
 		assert.ok((await (await fetch(`${base}/jobs/${job.id}`)).text()).includes('Hiring manager'));
 		const unconfirmedUnlink = await postJob(`/jobs/${job.id}?/networkUnlink`, {
@@ -253,8 +317,36 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 					confirm_note_loss: '1'
 				})
 			).type,
-			'redirect'
+			'success'
 		);
+		// Job-page star: native submit redirects 303 to the top of the page (no fragment) while
+		// preserving return_to; enhanced submit returns success data without redirecting.
+		const jobReturnTo = '/jobs?company=Example';
+		const nativeStar = await postNativePath(
+			`/jobs/${job.id}?/star&` + new URLSearchParams({ return_to: jobReturnTo }),
+			{ is_starred: '1' }
+		);
+		const nativeStarUrl = await assertNativeAnchor(nativeStar, '');
+		assert.equal(nativeStarUrl.searchParams.get('return_to'), jobReturnTo);
+		assert.equal(nativeStarUrl.searchParams.get('saved'), 'starred');
+		assert.equal(getJob(job.id).isStarred, true);
+		const enhancedUnstar = await postJob(`/jobs/${job.id}?/star`, { is_starred: '0' });
+		assert.equal(enhancedUnstar.type, 'success');
+		assert.equal(parse(enhancedUnstar.data).saved, 'starred');
+		assert.equal(getJob(job.id).isStarred, false);
+		// Job-page history (changeStage): native submit redirects 303 with return_to and #job-history.
+		const { listWorkflowStages } = await import('../src/lib/server/application.js');
+		const nextStage = (await listWorkflowStages()).find(
+			(s) => s.id !== getJob(job.id).currentStageId && !s.isClosed
+		);
+		const nativeStage = await postNativePath(
+			`/jobs/${job.id}?/changeStage&` + new URLSearchParams({ return_to: jobReturnTo }),
+			{ stage_id: String(nextStage.id), event_date: '2000-01-01', note: 'Moved natively' }
+		);
+		const nativeStageUrl = await assertNativeAnchor(nativeStage, 'job-history');
+		assert.equal(nativeStageUrl.searchParams.get('return_to'), jobReturnTo);
+		assert.equal(nativeStageUrl.searchParams.get('saved'), 'stage-changed');
+		assert.equal(getJob(job.id).currentStageId, nextStage.id);
 		const contextual = await postJob(`/networks/new?job_id=${job.id}`, { name: 'Context person' });
 		assert.equal(contextual.type, 'redirect');
 		assert.equal(new URL(contextual.location, base).pathname, `/jobs/${job.id}`);
@@ -271,8 +363,16 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		assert.equal(
 			(await postJob(`/jobs/${job.id}?/networkLink`, { network_id: contextId, notes: 'Referral' }))
 				.type,
-			'redirect'
+			'success'
 		);
+		// Job-page networkLink: native submit redirects 303 with return_to and #job-network.
+		const nativeNetworkLink = await postNativePath(
+			`/jobs/${job.id}?/networkLink&` + new URLSearchParams({ return_to: jobReturnTo }),
+			{ network_id: personId, notes: 'Linked natively' }
+		);
+		const nativeNetworkLinkUrl = await assertNativeAnchor(nativeNetworkLink, 'job-network');
+		assert.equal(nativeNetworkLinkUrl.searchParams.get('return_to'), jobReturnTo);
+		assert.equal(nativeNetworkLinkUrl.searchParams.get('saved'), 'network-linked');
 		const missingOrigin = await postJob('/networks/new?job_id=missing', { name: 'Kept person' });
 		assert.ok(missingOrigin.location.includes('missing_job=1'));
 		assert.equal((await fetch(`${base}/networks/not-a-person`)).status, 404);
@@ -437,6 +537,18 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 			(await getProfileDocument({ designation: 'career_direction' })).filename,
 			'direction.md'
 		);
+		// Profile select: native submit redirects 303 to the slot's group anchor (#profile-about-you).
+		const profileSelectCatalog = await (await fetch(`${base}/api/documents`)).json();
+		const cvDoc = profileSelectCatalog.documents.find((d) => d.id === docId);
+		const nativeProfileSelect = await postNativePath('/profile?/select', {
+			designation: 'master_cv',
+			id: docId,
+			token: cvDoc.token,
+			catalog_token: profileSelectCatalog.catalog_token
+		});
+		const nativeProfileUrl = await assertNativeAnchor(nativeProfileSelect, 'profile-about-you');
+		assert.equal(nativeProfileUrl.searchParams.get('saved'), 'profile');
+		assert.equal((await getProfileDocument({ designation: 'master_cv' })).id, docId);
 		const crossOrigin = await fetch(`${base}/api/files/upload?filename=evil.txt`, {
 			method: 'POST',
 			headers: { origin: 'https://evil.example', 'content-type': 'application/octet-stream' },
@@ -444,7 +556,8 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		});
 		assert.equal(crossOrigin.status, 403);
 		const fileBackup = await post('fileBackup', new FormData());
-		assert.equal(fileBackup.type, 'redirect');
+		assert.equal(fileBackup.type, 'success');
+		assert.equal(fileBackup.data?.fileBackupSaved, true);
 		const { listFileBackups } = await import('../src/lib/server/files/backups.js');
 		const fileArtifact = (await listFileBackups()).backups[0];
 		const zipDownload = await fetch(`${base}/settings/files/${fileArtifact.backup_id}`);
@@ -456,7 +569,8 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 			'PK'
 		);
 		const completeBackup = await post('backup', new FormData());
-		assert.equal(completeBackup.type, 'redirect');
+		assert.equal(completeBackup.type, 'success');
+		assert.equal(completeBackup.data?.backupSaved, true);
 		const savedSet = listBackups({ limit: 50 }).backups.find(
 			(b) => b.file_backup_id && b.kind === 'manual'
 		);
@@ -493,7 +607,7 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		deletion.set('contents', 'all');
 		assert.equal((await post('deleteBackup', deletion)).type, 'failure');
 		deletion.set('confirm', 'true');
-		assert.equal((await post('deleteBackup', deletion)).type, 'redirect');
+		assert.equal((await post('deleteBackup', deletion)).type, 'success');
 		// One action exports both halves as one ZIP with exactly the three expected entries.
 		const exported = await post('exportSnapshot', new FormData());
 		assert.equal(exported.type, 'redirect');
@@ -573,7 +687,7 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		immediateDelete.set('confirm', 'true');
 		assert.equal(
 			(await post('deleteBackup', immediateDelete)).type,
-			'redirect',
+			'success',
 			'a freshly imported bundle can be deleted immediately'
 		);
 
@@ -611,10 +725,68 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		pairConfirm.set('restore_id', pairPreview.data.filePairPreview.restore_id);
 		assert.equal((await post('filePairRestore', pairConfirm)).type, 'failure');
 		pairConfirm.set('confirm', 'true');
-		assert.equal((await post('filePairRestore', pairConfirm)).type, 'redirect');
+		assert.equal((await post('filePairRestore', pairConfirm)).type, 'success');
 		const databaseOnly = new FormData();
 		databaseOnly.set('contents', 'database');
-		assert.equal((await post('backup', databaseOnly)).type, 'redirect');
+		assert.equal((await post('backup', databaseOnly)).type, 'success');
+
+		// Settings actions distinguish native form submits (303 redirect to section anchor)
+		// from enhanced submits (accept: application/json -> success data result, no redirect).
+		const postNative = (action, body) =>
+			fetch(`${base}/settings?/${action}`, {
+				method: 'POST',
+				headers: { origin: base, accept: 'text/html' },
+				body,
+				redirect: 'manual'
+			});
+		const beforeNativeBackupIds = new Set(
+			listBackups({ limit: 50 }).backups.map((b) => b.backup_id)
+		);
+		const nativeBackupBody = new FormData();
+		nativeBackupBody.set('contents', 'database');
+		const nativeBackup = await postNative('backup', nativeBackupBody);
+		const nativeBackupUrl = await assertNativeAnchor(nativeBackup, 'backups');
+		assert.equal(nativeBackupUrl.searchParams.get('saved'), 'backup');
+		const nativeCreated = listBackups({ limit: 50 }).backups.find(
+			(b) => !beforeNativeBackupIds.has(b.backup_id)
+		);
+		assert.ok(nativeCreated, 'native backup created a backup entry');
+
+		const beforeEnhancedBackupIds = new Set(
+			listBackups({ limit: 50 }).backups.map((b) => b.backup_id)
+		);
+		const enhancedBackupBody = new FormData();
+		enhancedBackupBody.set('contents', 'database');
+		const enhancedBackup = await post('backup', enhancedBackupBody);
+		assert.equal(enhancedBackup.type, 'success');
+		assert.equal(enhancedBackup.data?.backupSaved, true);
+		const enhancedCreated = listBackups({ limit: 50 }).backups.find(
+			(b) => !beforeEnhancedBackupIds.has(b.backup_id)
+		);
+		assert.ok(enhancedCreated, 'enhanced backup created a backup entry');
+
+		const nativeDeleteBody = new FormData();
+		nativeDeleteBody.set('backup_id', nativeCreated.backup_id);
+		nativeDeleteBody.set('contents', 'database');
+		nativeDeleteBody.set('confirm', 'true');
+		const nativeDelete = await postNative('deleteBackup', nativeDeleteBody);
+		await assertNativeAnchor(nativeDelete, 'backups');
+		assert.ok(
+			!listBackups({ limit: 50 }).backups.some((b) => b.backup_id === nativeCreated.backup_id),
+			'native deleteBackup removed the backup'
+		);
+
+		const enhancedDeleteBody = new FormData();
+		enhancedDeleteBody.set('backup_id', enhancedCreated.backup_id);
+		enhancedDeleteBody.set('contents', 'database');
+		enhancedDeleteBody.set('confirm', 'true');
+		const enhancedDelete = await post('deleteBackup', enhancedDeleteBody);
+		assert.equal(enhancedDelete.type, 'success');
+		assert.equal(enhancedDelete.data?.backupDeleted, true);
+		assert.ok(
+			!listBackups({ limit: 50 }).backups.some((b) => b.backup_id === enhancedCreated.backup_id),
+			'enhanced deleteBackup removed the backup'
+		);
 		const only = listBackups({ limit: 50 }).backups.find(
 			(b) => b.kind === 'manual' && !b.file_backup_id
 		);
@@ -636,6 +808,21 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		db.close();
 		const mismatchSettings = await (await fetch(`${base}/settings`)).text();
 		assert.ok(mismatchSettings.includes('Job attachments need a matching database'));
+		// Recovery copy: native submit redirects 303 to #recovery-<docId> and the anchor exists.
+		const { recoveryDocuments } = await import('../src/lib/server/application.js');
+		const [recoveryDoc] = await recoveryDocuments(newId);
+		assert.equal(recoveryDoc.id, scoped.id);
+		const nativeRecoveryCopy = await postNativePath(`/settings/files/recovery/${newId}?/copy`, {
+			id: recoveryDoc.id,
+			token: recoveryDoc.token,
+			destination_scope: 'documents',
+			filename: 'recovered.md'
+		});
+		const nativeRecoveryUrl = await assertNativeAnchor(
+			nativeRecoveryCopy,
+			`recovery-${recoveryDoc.id}`
+		);
+		assert.equal(nativeRecoveryUrl.searchParams.get('saved'), 'document-copy');
 		const blockedFile = await fetch(`${base}/api/files/${scoped.id}?scope=${newId}`);
 		assert.ok(blockedFile.status >= 400);
 		assert.ok(!(await blockedFile.text()).includes('Original dataset only'));

@@ -1,7 +1,8 @@
-import { fail, redirect } from '@sveltejs/kit';
-import { documentDesignations } from '$lib/file-types.js';
+import { fail } from '@sveltejs/kit';
+import { documentDesignations, documentDesignationGroups } from '$lib/file-types.js';
 import { listDocuments, getDocument, setMasterDocument } from '$lib/server/application.js';
 import { publicFileError } from '$lib/server/files/store.js';
+import { settled } from '$lib/server/settled.js';
 
 const PICKER_PAGE_SIZE = 5;
 
@@ -57,8 +58,8 @@ export async function load({ url }) {
 	}
 }
 export const actions = {
-	select: async ({ request }) => {
-		const v = Object.fromEntries(await request.formData());
+	select: async (event) => {
+		const v = Object.fromEntries(await event.request.formData());
 		try {
 			await setMasterDocument({
 				designation: v.designation,
@@ -69,6 +70,10 @@ export const actions = {
 		} catch (e) {
 			return fail(400, { fileError: publicFileError(e).message });
 		}
-		redirect(303, `/profile?saved=${v.id ? 'profile' : 'profile-cleared'}`);
+		const saved = v.id ? 'profile' : 'profile-cleared';
+		const designation = typeof v.designation === 'string' ? v.designation : '';
+		const group = documentDesignationGroups.find((g) => g.keys.includes(designation));
+		const hash = group ? `#profile-${group.id}` : '';
+		return settled(event, { saved }, `/profile?saved=${saved}${hash}`);
 	}
 };
