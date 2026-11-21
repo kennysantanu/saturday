@@ -12,6 +12,12 @@ Not yet released. Database schema 1 and file manifest 1 are unchanged.
 
 - Backups export as one ZIP that holds your database and every document, and importing that same file restores both. Importing a combined backup ZIP now takes you straight to the restore preview for the file you chose instead of asking you to find it again in the list. The primary control is a single **Download database and files** button (which also saves a local copy); creating a local database-only, files-only, or combined backup without downloading remains under **Advanced backup options**.
 
+### Updates and branch switching
+
+- Settings → Updates → Advanced can move a managed installation between the available `main` and `dev` branches. Download the required database-and-files ZIP and confirm before moving. Every move clears installation data, including local backups, extensions, password and LAN settings; no previous data folder is retained. Source checkouts use Git instead.
+- Branch moves pin the reviewed commit and track the selected branch for later manual update checks. Checks distinguish an unknown installed commit from an up-to-date build; local fingerprint builds retain their build ID and record Git commit and dirty state when these can be proved.
+- Keep the downloaded ZIP outside the installation. It restores database and documents into a compatible fresh build, but does not contain extensions, password or LAN settings. Saturday can detect stream completion, not whether the browser saved the file.
+
 ### Process leases and maintenance reliability
 
 - Web and MCP runtimes now publish version-2 process leases (`<pid>.json`) backed by a per-process 256-bit secret and an unreferenced loopback identity listener (`127.0.0.1`), and synchronously remove their own verified lease on clean exit, `SIGTERM`, `SIGINT`, or stdin EOF.

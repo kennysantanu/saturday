@@ -18,7 +18,17 @@ import {
 	registerProcessLease,
 	sweepDeadLeases
 } from '../src/lib/server/process-leases.js';
-import { connectedClients } from '../src/lib/server/installation-operations.js';
+import {
+	connectedClients,
+	resetLiveData,
+	listBranches,
+	readSwitchExport
+} from '../src/lib/server/installation-operations.js';
+import {
+	claimInstallationMaintenance,
+	withServerActivity,
+	serverPaths
+} from '../src/lib/server/server-lifecycle.js';
 import {
 	assertExtensionProcessesStopped,
 	assertWebRuntimeStopped
@@ -873,6 +883,108 @@ test('a startup sweep removes only leases whose process is provably gone', async
 		assert.ok(remaining.includes('0.json'), 'an invalid PID is left alone');
 	} finally {
 		for (const child of children) await stopChild(child);
+		await fs.rm(root, { recursive: true, force: true });
+	}
+});
+
+test('branch reset deletes lease evidence, proving the final guard must precede reset, while reconstructed maintenance blocks admitted writers', async () => {
+	const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'saturday-lease-reset-')));
+	const prior = { ...process.env };
+	const children = [];
+	try {
+		const config = {
+			format: 'saturday.installation',
+			version: 1,
+			installation_id: randomUUID(),
+			mode: 'managed',
+			descriptor_path: join(root, 'installation.json'),
+			code_root: join(root, 'app'),
+			node_path: process.execPath,
+			runtime_root: join(root, 'runtime', 'node-v24.21.0-darwin-arm64'),
+			runtime_owned: false,
+			code_owned: true,
+			data_root: join(root, 'data'),
+			database: join(root, 'data', 'saturday.db'),
+			files: join(root, 'data', 'files'),
+			files_state: join(root, 'data', 'files.state'),
+			database_backups: join(root, 'data', 'backups', 'database'),
+			database_restore: join(root, 'data', 'saturday.db.restore'),
+			file_backups: join(root, 'data', 'backups', 'files'),
+			extension_state: join(root, 'data', 'extensions'),
+			extension_code: join(root, 'extensions'),
+			extension_backups: join(root, 'data', 'extensions.backups'),
+			logs: join(root, 'logs'),
+			port: 3000,
+			initialized: { database: false, files: false, extensions: false, access: false },
+			setup: {}
+		};
+		await fs.mkdir(config.data_root, { recursive: true });
+		await fs.mkdir(config.extension_state, { recursive: true });
+		await fs.mkdir(config.extension_code, { recursive: true });
+		await fs.writeFile(config.descriptor_path, JSON.stringify(config));
+		for (const key of [
+			'SATURDAY_PROJECT_ROOT',
+			'SATURDAY_DB_PATH',
+			'SATURDAY_FILES_PATH',
+			'SATURDAY_EXTENSION_STATE_PATH',
+			'SATURDAY_EXTENSIONS_PATH'
+		])
+			delete process.env[key];
+		process.env.SATURDAY_INSTALLATION_PATH = config.descriptor_path;
+
+		// Calling reset/branch helpers does not initialize SQLite.
+		assert.equal(readSwitchExport(config), null);
+		assert.equal(existsSync(config.database), false);
+		assert.equal(typeof listBranches, 'function');
+
+		// Genuine live MCP lease blocks before reset.
+		const mcpChild = await spawnRegisteredRuntime(config, 'mcp', 'stay');
+		children.push(mcpChild.child);
+		assert.equal(await connectedClients(config), 1);
+
+		// Once data_root is removed by resetLiveData, processes/ is gone and inspectProcessLeases reports empty
+		// even though the child is still alive: proving why the final lease guard must run before reset.
+		await resetLiveData(config);
+		assert.deepEqual((await inspectProcessLeases(config)).entries, []);
+		assert.equal(await connectedClients(config), 0);
+		assert.equal(existsSync(config.database), false);
+
+		// Operational assumption check: in the gap after reset and before maintenance reconstruction,
+		// a newly starting runtime is NOT prevented by a missing maintenance file.
+		const gapRuntime = await spawnRegisteredRuntime(config, 'mcp', 'stay');
+		children.push(gapRuntime.child);
+		assert.equal(
+			await connectedClients(config),
+			1,
+			'gap runtime can register before maintenance is restored'
+		);
+		await stopChild(gapRuntime.child);
+		await stopChild(mcpChild.child);
+		await resetLiveData(config);
+
+		// Once maintenance is claimed/reconstructed, admitted writers using withServerActivity are blocked.
+		const release = await claimInstallationMaintenance({ persistent: true });
+		try {
+			const record = JSON.parse(readFileSync(serverPaths().maintenance, 'utf8'));
+			assert.throws(
+				() => withServerActivity(() => 'should-not-run'),
+				(err) => err.code === 'BUSY'
+			);
+			// Reconstructing the same maintenance record after reset continues blocking writers.
+			await resetLiveData(config);
+			await fs.mkdir(join(config.data_root, 'server.state'), { recursive: true, mode: 0o700 });
+			await fs.writeFile(serverPaths().maintenance, JSON.stringify(record), { mode: 0o600 });
+			assert.throws(
+				() => withServerActivity(() => 'should-not-run'),
+				(err) => err.code === 'BUSY'
+			);
+		} finally {
+			await release();
+		}
+	} finally {
+		for (const child of children) await stopChild(child);
+		for (const key of Object.keys(process.env)) if (!(key in prior)) delete process.env[key];
+		Object.assign(process.env, prior);
 		await fs.rm(root, { recursive: true, force: true });
 	}
 });

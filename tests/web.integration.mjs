@@ -3,14 +3,20 @@ import * as networks from '../src/lib/server/local/people.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import * as fsp from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { parse } from 'devalue';
 import yauzl from 'yauzl';
+import puppeteer from 'puppeteer';
 import { migrateDatabase } from '../src/lib/server/database.js';
 import { getInstallation } from '../src/lib/server/installation.js';
+import { codeFingerprint } from '../src/lib/server/installation-operations.js';
+import { copySource } from '../scripts/install.mjs';
 import { createJob, getJob, setJobScore } from '../src/lib/server/local/jobs.js';
 import { listBackups } from '../src/lib/server/backups.js';
 import { readBuildInfo } from '../scripts/build-info.mjs';
@@ -892,5 +898,976 @@ test('production Settings download/upload/preview/confirm and manual backups wit
 		else process.env.SATURDAY_FILES_PATH = previousFiles;
 		if (previous === undefined) delete process.env.SATURDAY_DB_PATH;
 		else process.env.SATURDAY_DB_PATH = previous;
+	}
+});
+
+async function settleWithin(promise, ms, onTimeout) {
+	let timer;
+	try {
+		await Promise.race([
+			Promise.resolve(promise).catch(() => {}),
+			new Promise((resolveTimeout) => {
+				timer = setTimeout(() => {
+					try {
+						onTimeout?.();
+					} catch {}
+					resolveTimeout();
+				}, ms);
+				timer.unref();
+			})
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+async function closeBrowserBounded(browser, ms = 10000) {
+	if (!browser) return;
+	await settleWithin(browser.close(), ms, () => {
+		try {
+			browser.process()?.kill('SIGKILL');
+		} catch {}
+	});
+}
+
+async function allocatePort() {
+	const socket = createServer();
+	await new Promise((r) => socket.listen(0, '127.0.0.1', r));
+	const port = socket.address().port;
+	await new Promise((r) => socket.close(r));
+	return port;
+}
+
+async function setupManagedWebFixture(prefix) {
+	const root = await fsp.realpath(await fsp.mkdtemp(join(tmpdir(), prefix)));
+	const app = join(root, 'app');
+	await copySource(resolve('.'), app);
+	await fsp.symlink(resolve('node_modules'), join(app, 'node_modules'), 'dir');
+	await fsp.cp(resolve('build'), join(app, 'build'), { recursive: true });
+	const setup = spawnSync(
+		process.execPath,
+		[
+			join(app, 'scripts/setup.mjs'),
+			'--managed',
+			'--root',
+			root,
+			'--skip-dependencies',
+			'--skip-build',
+			'--skip-pdf',
+			'--json'
+		],
+		{
+			cwd: app,
+			env: {
+				...process.env,
+				SATURDAY_PROJECT_ROOT: app,
+				SATURDAY_INSTALLATION_PATH: '',
+				SATURDAY_DB_PATH: '',
+				SATURDAY_FILES_PATH: '',
+				SATURDAY_EXTENSION_STATE_PATH: '',
+				SATURDAY_EXTENSIONS_PATH: ''
+			},
+			encoding: 'utf8'
+		}
+	);
+	assert.equal(setup.status, 0, setup.stderr || setup.stdout);
+	const descriptor = JSON.parse(setup.stdout).descriptor_path;
+	const config = JSON.parse(await fsp.readFile(descriptor, 'utf8'));
+	config.code_owned = true;
+	config.code_fingerprint = await codeFingerprint(app);
+	config.tracking_ref = 'main';
+	config.build = { id: 'dev.111111111111', commit: '1'.repeat(40), dirty: false };
+	await fsp.writeFile(descriptor, JSON.stringify(config, null, 2));
+	return { root, app, descriptor, config };
+}
+
+async function launchWebProcess({ cwd, descriptor, port, token, fixturePath, extraEnv = {} }) {
+	const base = `http://127.0.0.1:${port}`;
+	const preload = pathToFileURL(resolve('tests/helpers/branch-fetch-fixture.mjs')).href;
+	const env = {
+		...process.env,
+		PORT: String(port),
+		SATURDAY_LOCAL_ORIGIN: base,
+		SATURDAY_SERVER_TOKEN: token,
+		SATURDAY_SERVER_GENERATION: randomUUID(),
+		SATURDAY_RUNNING_ALLOW_LAN: 'false',
+		BODY_SIZE_LIMIT: 'Infinity',
+		SATURDAY_INSTALLATION_PATH: descriptor || '',
+		SATURDAY_PROJECT_ROOT: cwd,
+		...(fixturePath
+			? {
+					SATURDAY_TEST_BRANCH_FIXTURE: fixturePath,
+					NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}`.trim()
+				}
+			: {}),
+		...extraEnv
+	};
+	if (descriptor) {
+		for (const key of [
+			'SATURDAY_DB_PATH',
+			'SATURDAY_FILES_PATH',
+			'SATURDAY_EXTENSION_STATE_PATH',
+			'SATURDAY_EXTENSIONS_PATH'
+		])
+			delete env[key];
+	}
+	const child = spawn(process.execPath, [join(cwd, 'scripts/web.mjs')], {
+		cwd,
+		env,
+		stdio: ['ignore', 'pipe', 'pipe']
+	});
+	let logs = '';
+	child.stdout.on('data', (c) => (logs += c));
+	child.stderr.on('data', (c) => (logs += c));
+	let ready = false;
+	for (let i = 0; i < 100; i++) {
+		try {
+			const res = await fetch(`${base}/health`);
+			if (res.ok) {
+				ready = true;
+				break;
+			}
+		} catch {}
+		await new Promise((r) => setTimeout(r, 100));
+	}
+	const stop = async () => {
+		if (child.exitCode === null && child.signalCode === null) {
+			const exited = new Promise((r) => child.once('close', r));
+			child.kill('SIGTERM');
+			await settleWithin(exited, 5000, () => {
+				if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+			});
+			if (child.exitCode === null && child.signalCode === null) {
+				await settleWithin(exited, 5000);
+			}
+		}
+	};
+	if (!ready) {
+		await stop();
+		assert.fail(`Web server failed to start:\n${logs}`);
+	}
+	return { base, child, stop, logs: () => logs };
+}
+
+function extractCookies(response) {
+	const setCookies = response.headers.getSetCookie?.() ?? [];
+	return setCookies.map((c) => c.split(';')[0]).join('; ');
+}
+
+test('branch switching HTTP authorization, export marker across restart, guards, and real exported ZIP round-trip restore', async () => {
+	const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+	const shaMain = '1'.repeat(40);
+	const shaDev = '2'.repeat(40);
+	const shaDevMoved = '3'.repeat(40);
+	const shaIncompat = '4'.repeat(40);
+	const managed = await setupManagedWebFixture('saturday-web-branch-http-');
+	const restoreTarget = await setupManagedWebFixture('saturday-web-branch-restore-');
+	const sourceScratch = await fsp.realpath(
+		await fsp.mkdtemp(join(tmpdir(), 'saturday-web-branch-source-'))
+	);
+	const fixturePath = join(managed.root, 'branches.json');
+	const makePkg = (dbVer = 1) => ({
+		...pkg,
+		saturday: {
+			...pkg.saturday,
+			storage: {
+				database: { ...pkg.saturday.storage.database, currentVersion: dbVer },
+				manifest: { ...pkg.saturday.storage.manifest }
+			}
+		}
+	});
+	const fixtureState = {
+		branches: [
+			{ name: 'main', commit: { sha: shaMain } },
+			{ name: 'dev', commit: { sha: shaDev } },
+			{ name: 'feat/ignored', commit: { sha: shaDevMoved } }
+		],
+		refs: { main: shaMain, dev: shaDev },
+		commits: {
+			[shaMain]: { package: makePkg(1) },
+			[shaDev]: { package: makePkg(1) },
+			[shaDevMoved]: { package: makePkg(1) },
+			[shaIncompat]: { package: makePkg(2) }
+		}
+	};
+	await fsp.writeFile(fixturePath, JSON.stringify(fixtureState));
+
+	const token = randomBytes(32).toString('hex');
+	const port = await allocatePort();
+	let server = await launchWebProcess({
+		cwd: managed.app,
+		descriptor: managed.descriptor,
+		port,
+		token,
+		fixturePath
+	});
+	let sourceServer, restoreServer;
+	try {
+		const initial = await fetch(`${server.base}/settings`);
+		assert.equal(initial.status, 200);
+		const cookie = extractCookies(initial);
+		assert.ok(cookie.includes('saturday-control-'), 'control cookie issued on loopback GET');
+		const html = await initial.text();
+		assert.ok(html.includes('Advanced'));
+		assert.ok(html.includes('Move installation to branch'));
+
+		const postAction = async (
+			action,
+			fields = {},
+			{ origin = server.base, sendCookie = cookie } = {}
+		) => {
+			const body = new FormData();
+			for (const [k, v] of Object.entries(fields)) body.set(k, v);
+			const headers = {
+				accept: 'application/json',
+				'x-sveltekit-action': 'true',
+				...(origin ? { origin } : {}),
+				...(sendCookie ? { cookie: sendCookie } : {})
+			};
+			const res = await fetch(`${server.base}/settings?/${action}`, {
+				method: 'POST',
+				headers,
+				body
+			});
+			const json = await res.json();
+			return { httpStatus: res.status, ...json, data: json.data ? parse(json.data) : null };
+		};
+
+		// 1. Seed populated job, document, and Profile designation via HTTP so the exported ZIP has real data.
+		const createdJob = await fetch(`${server.base}/jobs/new`, {
+			method: 'POST',
+			headers: {
+				origin: server.base,
+				cookie,
+				accept: 'application/json',
+				'x-sveltekit-action': 'true'
+			},
+			body: new URLSearchParams({ job_title: 'Roundtrip Engineer', company_name: 'ZipCorp' })
+		});
+		assert.equal((await createdJob.json()).type, 'redirect');
+		const docCatalog = await (await fetch(`${server.base}/api/documents`)).json();
+		const roundtripCvContent = `# Roundtrip CV\nReal exported bytes.\n\n${randomBytes(180 * 1024).toString('base64')}`;
+		const createdDoc = await fetch(`${server.base}/documents/new?/save`, {
+			method: 'POST',
+			headers: {
+				origin: server.base,
+				cookie,
+				accept: 'application/json',
+				'x-sveltekit-action': 'true'
+			},
+			body: new URLSearchParams({
+				filename: 'roundtrip-cv',
+				content: roundtripCvContent,
+				designation: 'master_cv',
+				catalog_token: docCatalog.catalog_token
+			})
+		});
+		assert.equal((await createdDoc.json()).type, 'redirect');
+
+		// 2. Every new action rejects foreign Origin and missing/invalid control cookie with 403.
+		for (const action of [
+			'branches',
+			'branchCompatibility',
+			'backupForSwitch',
+			'switchExportStatus',
+			'switchBranch'
+		]) {
+			const badOrigin = await postAction(
+				action,
+				{ ref: 'dev' },
+				{ origin: 'https://evil.example' }
+			);
+			assert.equal(badOrigin.httpStatus, 403, `${action} rejects foreign origin`);
+			const noCookie = await postAction(action, { ref: 'dev' }, { sendCookie: '' });
+			assert.equal(noCookie.status, 403, `${action} rejects missing control cookie`);
+		}
+
+		// 3. Source-mode server refuses forged branch mutations and shows explanatory line with no dropdown.
+		const sourcePort = await allocatePort();
+		const sourceToken = randomBytes(32).toString('hex');
+		const sourceEnv = {
+			SATURDAY_DB_PATH: join(sourceScratch, 'source.sqlite'),
+			SATURDAY_FILES_PATH: join(sourceScratch, 'files'),
+			SATURDAY_EXTENSION_STATE_PATH: join(sourceScratch, 'ext-state'),
+			SATURDAY_EXTENSIONS_PATH: join(sourceScratch, 'ext-code')
+		};
+		const sourceSetup = spawnSync(
+			process.execPath,
+			['scripts/setup.mjs', '--skip-dependencies', '--skip-build', '--skip-pdf', '--json'],
+			{
+				cwd: resolve('.'),
+				env: { ...process.env, SATURDAY_INSTALLATION_PATH: '', ...sourceEnv },
+				encoding: 'utf8'
+			}
+		);
+		assert.equal(sourceSetup.status, 0, sourceSetup.stderr || sourceSetup.stdout);
+		sourceServer = await launchWebProcess({
+			cwd: resolve('.'),
+			descriptor: JSON.parse(sourceSetup.stdout).descriptor_path,
+			port: sourcePort,
+			token: sourceToken
+		});
+		const sourcePage = await fetch(`${sourceServer.base}/settings`);
+		const sourceCookie = extractCookies(sourcePage);
+		const sourceHtml = await sourcePage.text();
+		assert.ok(
+			sourceHtml.includes(
+				'Branch switching is for installed copies; in a source checkout, use git.'
+			)
+		);
+		assert.equal(sourceHtml.includes('id="branch_switch_ref"'), false);
+		const forgedSource = await fetch(`${sourceServer.base}/settings?/branches`, {
+			method: 'POST',
+			headers: {
+				origin: sourceServer.base,
+				cookie: sourceCookie,
+				accept: 'application/json',
+				'x-sveltekit-action': 'true'
+			},
+			body: new FormData()
+		});
+		const forgedSourceJson = await forgedSource.json();
+		assert.equal(forgedSourceJson.status, 409);
+		assert.equal(parse(forgedSourceJson.data).installationCode, 'BRANCH_MODE');
+		await sourceServer.stop();
+		sourceServer = null;
+
+		// 4. Managed branches listing filters to main & dev.
+		const listed = await postAction('branches');
+		assert.equal(listed.type, 'success');
+		assert.deepEqual(
+			listed.data.branches.branches.map((b) => b.ref),
+			['main', 'dev']
+		);
+
+		// 5. Missing ref returns 409 BRANCH_MISSING.
+		await fsp.writeFile(fixturePath, JSON.stringify({ ...fixtureState, refs: { main: shaMain } }));
+		const missingRef = await postAction('branchCompatibility', { ref: 'dev' });
+		assert.equal(missingRef.status, 409);
+		assert.equal(missingRef.data.installationCode, 'BRANCH_MISSING');
+		await fsp.writeFile(fixturePath, JSON.stringify(fixtureState));
+
+		// 6. Review dev -> compatible; direct ordinary update bypass fails with CHECK_PURPOSE.
+		const reviewed = await postAction('branchCompatibility', { ref: 'dev' });
+		assert.equal(reviewed.type, 'success');
+		const check = reviewed.data.branchReview;
+		assert.equal(check.compatibility.verdict, 'compatible');
+		const bypass = await postAction('installationOperation', {
+			operation: 'update',
+			check_id: check.id,
+			confirm: 'true'
+		});
+		assert.equal(bypass.type, 'failure');
+		assert.equal(bypass.status, 409);
+
+		// 7. Create switch export; verify unauthorized/wrong-contents GETs fail; ordinary GET does not complete receipt.
+		const backupRes = await postAction('backupForSwitch', { check_id: check.id });
+		assert.equal(backupRes.type, 'success');
+		const pendingExport = backupRes.data.switchExport;
+		const downloadUrl = backupRes.data.downloadUrl;
+		assert.equal(pendingExport.status, 'pending');
+		assert.ok(downloadUrl.includes(`contents=all&switch_export=${pendingExport.id}`));
+
+		// Ordinary download (without switch_export) must NOT complete the switch export marker.
+		const ordinaryZip = await fetch(
+			`${server.base}/settings/backups/${pendingExport.backup_id}?contents=all`,
+			{ headers: { cookie } }
+		);
+		assert.equal(ordinaryZip.status, 200);
+		await ordinaryZip.arrayBuffer();
+		const stillPending = await postAction('switchExportStatus', { export_id: pendingExport.id });
+		assert.equal(stillPending.data.switchExport.status, 'pending');
+
+		// Cross-site / same-site / unauthorized / database-only switch export GETs must be refused.
+		for (const badSite of ['cross-site', 'same-site', 'evil']) {
+			assert.equal(
+				(
+					await fetch(`${server.base}${downloadUrl}`, {
+						headers: { cookie, 'sec-fetch-site': badSite }
+					})
+				).status,
+				403,
+				`sec-fetch-site: ${badSite} must be refused`
+			);
+		}
+		assert.equal((await fetch(`${server.base}${downloadUrl}`)).status, 403);
+		assert.equal(
+			(
+				await fetch(
+					`${server.base}/settings/backups/${pendingExport.backup_id}?contents=database&switch_export=${pendingExport.id}`,
+					{ headers: { cookie } }
+				)
+			).status,
+			409
+		);
+
+		// 7b. Aborting the switch ZIP mid-stream must NOT complete the receipt and must block switchBranch with EXPORT_REQUIRED.
+		const abortAc = new AbortController();
+		const abortRes = await fetch(`${server.base}${downloadUrl}`, {
+			headers: { cookie, 'sec-fetch-site': 'same-origin' },
+			signal: abortAc.signal
+		});
+		assert.equal(abortRes.status, 200);
+		const abortReader = abortRes.body.getReader();
+		const firstChunk = await abortReader.read();
+		assert.equal(firstChunk.done, false, 'ZIP stream should yield partial bytes before EOF');
+		assert.ok(firstChunk.value.byteLength > 0);
+		abortAc.abort();
+		await abortReader.cancel().catch(() => {});
+		let statusAfterAbort = null;
+		for (let i = 0; i < 20; i++) {
+			const polled = await postAction('switchExportStatus', { export_id: pendingExport.id });
+			statusAfterAbort = polled.data?.switchExport?.status ?? null;
+			if (statusAfterAbort !== 'pending') break;
+			await new Promise((r) => setTimeout(r, 50));
+		}
+		assert.notEqual(
+			statusAfterAbort,
+			'complete',
+			'aborted download must never mark export receipt complete'
+		);
+		const switchAfterAbort = await postAction('switchBranch', {
+			ref: 'dev',
+			commit: shaDev,
+			check_id: check.id,
+			export_id: pendingExport.id,
+			backup_id: pendingExport.backup_id,
+			confirm: 'true'
+		});
+		assert.equal(switchAfterAbort.status, 409);
+		assert.equal(switchAfterAbort.data.installationCode, 'EXPORT_REQUIRED');
+
+		// Re-issue a fresh pending switch export for the full verified download step below.
+		const freshBackupRes = await postAction('backupForSwitch', { check_id: check.id });
+		assert.equal(freshBackupRes.type, 'success');
+		const freshExport = freshBackupRes.data.switchExport;
+		const freshDownloadUrl = freshBackupRes.data.downloadUrl;
+		assert.equal(freshExport.status, 'pending');
+
+		// 8. Real GET on downloadUrl streams verified ZIP and completes receipt with exact bytes & sha256.
+		const zipRes = await fetch(`${server.base}${freshDownloadUrl}`, {
+			headers: { cookie, 'sec-fetch-site': 'same-origin' }
+		});
+		assert.equal(zipRes.status, 200);
+		assert.equal(zipRes.headers.get('content-type'), 'application/zip');
+		assert.equal(zipRes.headers.get('cache-control'), 'no-store');
+		assert.equal(zipRes.headers.get('x-content-type-options'), 'nosniff');
+		const zipBytes = Buffer.from(await zipRes.arrayBuffer());
+		assert.equal(zipBytes.subarray(0, 2).toString(), 'PK');
+		const expectedSha256 = createHash('sha256').update(zipBytes).digest('hex');
+
+		const statusRes = await postAction('switchExportStatus', { export_id: freshExport.id });
+		assert.equal(statusRes.type, 'success');
+		assert.equal(statusRes.data.switchExport.status, 'complete');
+		assert.equal(statusRes.data.switchExport.bytes, zipBytes.length);
+		assert.equal(statusRes.data.switchExport.sha256, expectedSha256);
+
+		// 9. Restart server within TTL: receipt survives restart and is still loaded.
+		await server.stop();
+		const tokenAfterRestart = randomBytes(32).toString('hex');
+		server = await launchWebProcess({
+			cwd: managed.app,
+			descriptor: managed.descriptor,
+			port,
+			token: tokenAfterRestart,
+			fixturePath
+		});
+		const reloadedSettings = await fetch(`${server.base}/settings`);
+		const cookie2 = extractCookies(reloadedSettings);
+		const reloadedHtml = await reloadedSettings.text();
+		assert.ok(reloadedHtml.includes(statusRes.data.switchExport.filename));
+		const afterRestartStatus = await postAction(
+			'switchExportStatus',
+			{ export_id: freshExport.id },
+			{ sendCookie: cookie2 }
+		);
+		assert.equal(afterRestartStatus.data.switchExport.status, 'complete');
+
+		// 10. Upstream branch head moved after review -> 409 BRANCH_CHANGED.
+		await fsp.writeFile(
+			fixturePath,
+			JSON.stringify({ ...fixtureState, refs: { main: shaMain, dev: shaDevMoved } })
+		);
+		const movedHead = await postAction(
+			'switchBranch',
+			{
+				ref: 'dev',
+				commit: shaDev,
+				check_id: check.id,
+				export_id: freshExport.id,
+				backup_id: freshExport.backup_id,
+				confirm: 'true'
+			},
+			{ sendCookie: cookie2 }
+		);
+		assert.equal(movedHead.status, 409);
+		assert.equal(movedHead.data.installationCode, 'BRANCH_CHANGED');
+
+		// 11. Incompatible branch refuses missing/wrong MOVE with 409 SWITCH_TYPED_CONFIRM.
+		await fsp.writeFile(
+			fixturePath,
+			JSON.stringify({ ...fixtureState, refs: { main: shaMain, dev: shaIncompat } })
+		);
+		const incompatRev = await postAction(
+			'branchCompatibility',
+			{ ref: 'dev' },
+			{ sendCookie: cookie2 }
+		);
+		assert.equal(incompatRev.data.branchReview.compatibility.verdict, 'candidate_newer');
+		const incompatBackup = await postAction(
+			'backupForSwitch',
+			{ check_id: incompatRev.data.branchReview.id },
+			{ sendCookie: cookie2 }
+		);
+		const incompatDownload = await fetch(`${server.base}${incompatBackup.data.downloadUrl}`, {
+			headers: { cookie: cookie2 }
+		});
+		assert.equal(incompatDownload.status, 200);
+		await incompatDownload.arrayBuffer();
+		const badMove = await postAction(
+			'switchBranch',
+			{
+				ref: 'dev',
+				commit: shaIncompat,
+				check_id: incompatRev.data.branchReview.id,
+				export_id: incompatBackup.data.switchExport.id,
+				backup_id: incompatBackup.data.switchExport.backup_id,
+				confirm: 'true',
+				confirmation: 'move'
+			},
+			{ sendCookie: cookie2 }
+		);
+		assert.equal(badMove.status, 409);
+		assert.equal(badMove.data.installationCode, 'SWITCH_TYPED_CONFIRM');
+
+		// 12. Real exported ZIP round-trip restore into a fresh compatible disposable workspace!
+		const restorePort = await allocatePort();
+		const restoreToken = randomBytes(32).toString('hex');
+		restoreServer = await launchWebProcess({
+			cwd: restoreTarget.app,
+			descriptor: restoreTarget.descriptor,
+			port: restorePort,
+			token: restoreToken
+		});
+		const restoreInit = await fetch(`${restoreServer.base}/settings`);
+		const restoreCookie = extractCookies(restoreInit);
+		const importRes = await fetch(`${restoreServer.base}/settings/files/import?bundle=true`, {
+			method: 'POST',
+			headers: {
+				origin: restoreServer.base,
+				cookie: restoreCookie,
+				'content-type': 'application/zip'
+			},
+			body: zipBytes
+		});
+		assert.equal(importRes.status, 200);
+		const imported = await importRes.json();
+		const prepBody = new FormData();
+		prepBody.set('file_backup_id', imported.file_backup_id);
+		const prepRes = await fetch(`${restoreServer.base}/settings?/filePairPrepare`, {
+			method: 'POST',
+			headers: {
+				origin: restoreServer.base,
+				cookie: restoreCookie,
+				accept: 'application/json',
+				'x-sveltekit-action': 'true'
+			},
+			body: prepBody
+		});
+		const prepJson = await prepRes.json();
+		assert.equal(prepJson.type, 'success');
+		const pairPreview = parse(prepJson.data).filePairPreview;
+		assert.equal(pairPreview.database.incoming.job_count, 1);
+		assert.equal(pairPreview.files.incoming_count, 1);
+
+		const confirmBody = new FormData();
+		confirmBody.set('restore_id', pairPreview.restore_id);
+		confirmBody.set('confirm', 'true');
+		const restoreRes = await fetch(`${restoreServer.base}/settings?/filePairRestore`, {
+			method: 'POST',
+			headers: {
+				origin: restoreServer.base,
+				cookie: restoreCookie,
+				accept: 'application/json',
+				'x-sveltekit-action': 'true'
+			},
+			body: confirmBody
+		});
+		assert.equal((await restoreRes.json()).type, 'success');
+
+		// Verify restored job, document bytes, and Profile designation in the fresh workspace.
+		const jobsHtml = await (await fetch(`${restoreServer.base}/jobs`)).text();
+		assert.ok(jobsHtml.includes('Roundtrip Engineer'));
+		assert.ok(jobsHtml.includes('ZipCorp'));
+		const docs = await (await fetch(`${restoreServer.base}/api/documents`)).json();
+		const cvDoc = docs.documents.find((d) => d.filename === 'roundtrip-cv.md');
+		assert.ok(cvDoc, 'restored document exists');
+		assert.equal(cvDoc.designation, 'master_cv', 'Profile designation restored');
+		assert.equal(
+			await (await fetch(`${restoreServer.base}/api/files/${cvDoc.id}`)).text(),
+			roundtripCvContent
+		);
+	} finally {
+		await server?.stop();
+		await sourceServer?.stop();
+		await restoreServer?.stop();
+		await fsp.rm(managed.root, { recursive: true, force: true });
+		await fsp.rm(restoreTarget.root, { recursive: true, force: true });
+		await fsp.rm(sourceScratch, { recursive: true, force: true });
+	}
+});
+
+test('Chrome journey: Settings Updates Advanced disclosure, warnings, download gating, MOVE confirmation, unknown commit, no-JS, and responsive layout', async () => {
+	assert.ok(
+		existsSync(await puppeteer.executablePath()),
+		'Managed Chrome is required; a skipped browser journey is not a pass.'
+	);
+	const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+	const shaMain = 'a'.repeat(40);
+	const shaDev = 'b'.repeat(40);
+	const shaIncompat = 'c'.repeat(40);
+	const managed = await setupManagedWebFixture('saturday-web-branch-chrome-');
+	const evidenceDir = join(managed.root, 'evidence');
+	await fsp.mkdir(evidenceDir, { recursive: true });
+	const fixturePath = join(managed.root, 'branches.json');
+	const makePkg = (dbVer = 1) => ({
+		...pkg,
+		saturday: {
+			...pkg.saturday,
+			storage: {
+				database: { ...pkg.saturday.storage.database, currentVersion: dbVer },
+				manifest: { ...pkg.saturday.storage.manifest }
+			}
+		}
+	});
+	const writeFixture = (obj) => fsp.writeFile(fixturePath, JSON.stringify(obj));
+	await writeFixture({
+		branches: [
+			{ name: 'main', commit: { sha: shaMain } },
+			{ name: 'dev', commit: { sha: shaDev } }
+		],
+		refs: { main: shaMain, dev: shaDev },
+		commits: {
+			[shaMain]: { package: makePkg(1) },
+			[shaDev]: { package: makePkg(1) },
+			[shaIncompat]: { package: makePkg(2) }
+		}
+	});
+
+	// Start with unknown installed commit to verify unknown-commit ordinary card copy first.
+	const desc = JSON.parse(await fsp.readFile(managed.descriptor, 'utf8'));
+	desc.build = { id: 'local.0123456789ab', commit: null, dirty: null };
+	desc.tracking_ref = 'main';
+	await fsp.writeFile(managed.descriptor, JSON.stringify(desc, null, 2));
+
+	const port = await allocatePort();
+	const token = randomBytes(32).toString('hex');
+	let server = await launchWebProcess({
+		cwd: managed.app,
+		descriptor: managed.descriptor,
+		port,
+		token,
+		fixturePath
+	});
+	let browser;
+	let step = 'startup';
+	const pageErrors = [];
+	try {
+		browser = await puppeteer.launch({ headless: true, protocolTimeout: 15000 });
+		const browserSession = await browser.target().createCDPSession();
+		await browserSession.send('Browser.setDownloadBehavior', {
+			behavior: 'allow',
+			downloadPath: evidenceDir,
+			eventsEnabled: false
+		});
+		const page = await browser.newPage();
+		page.setDefaultTimeout(12000);
+		page.setDefaultNavigationTimeout(12000);
+		page.on('pageerror', (e) => pageErrors.push(e.message));
+		await page.setViewport({ width: 1280, height: 900 });
+		let branchesFetches = 0;
+		page.on('request', (req) => {
+			if (req.url().includes('?/branches')) branchesFetches++;
+		});
+
+		step = 'initial load';
+		await page.goto(`${server.base}/settings#updates`, { waitUntil: 'networkidle0' });
+
+		// 1. Unknown commit check: neither "You're up to date" nor "Update Saturday".
+		step = '1. unknown commit check';
+		await Promise.all([
+			page.waitForResponse((r) => r.url().includes('?/checkUpdates')),
+			page.locator('#updates button::-p-text(Check for updates)').click()
+		]);
+		await page.waitForFunction(() =>
+			document
+				.querySelector('#updates')
+				?.textContent?.includes('Cannot compare this build with main')
+		);
+		const unknownText = await page.$eval('#updates', (e) => e.textContent);
+		assert.ok(unknownText.includes('The installed commit is unknown.'));
+		assert.equal(unknownText.includes('You’re up to date'), false);
+		assert.equal(await page.$('#updates button::-p-text(Update Saturday)'), null);
+
+		// 2. Switch descriptor to tracking_ref 'dev' with known matching commit -> "You’re up to date on dev".
+		step = '2. dev up-to-date check';
+		desc.tracking_ref = 'dev';
+		desc.build = { id: `dev.${shaDev.slice(0, 12)}`, commit: shaDev, dirty: false };
+		await fsp.writeFile(managed.descriptor, JSON.stringify(desc, null, 2));
+		await Promise.all([
+			page.waitForResponse((r) => r.url().includes('?/checkUpdates')),
+			page.locator('#updates button::-p-text(Check for updates)').click()
+		]);
+		await page.waitForFunction(() =>
+			document.querySelector('#updates')?.textContent?.includes('You’re up to date on dev')
+		);
+
+		// Restore tracking_ref to main (commit shaMain) and reload for Advanced disclosure journey.
+		step = '3. reload for Advanced disclosure';
+		desc.tracking_ref = 'main';
+		desc.build = { id: `dev.${shaMain.slice(0, 12)}`, commit: shaMain, dirty: false };
+		await fsp.writeFile(managed.descriptor, JSON.stringify(desc, null, 2));
+		await page.reload({ waitUntil: 'networkidle0' });
+
+		// 3. Advanced disclosure is closed on initial load; zero ?/branches requests before opening.
+		assert.equal(await page.$eval('#updates details.disclosure-quiet', (el) => el.open), false);
+		assert.equal(branchesFetches, 0);
+
+		// 4. Open Advanced -> loads branches once; marks main (current).
+		step = '4. open Advanced';
+		await Promise.all([
+			page.waitForResponse((r) => r.url().includes('?/branches')),
+			page.click('#updates details.disclosure-quiet summary')
+		]);
+		await page.waitForFunction(() =>
+			[...document.querySelectorAll('#branch_switch_ref option')].some((o) =>
+				o.textContent?.includes('main (current)')
+			)
+		);
+		assert.equal(branchesFetches, 1);
+
+		// Close and reopen -> cached in component state, no second ?/branches request.
+		await page.click('#updates details.disclosure-quiet summary');
+		await page.click('#updates details.disclosure-quiet summary');
+		await new Promise((r) => setTimeout(r, 150));
+		assert.equal(branchesFetches, 1);
+
+		// 5. Select dev -> shows compatibility line + main warning; Move stays disabled until download completes.
+		step = '5. select dev';
+		await Promise.all([
+			page.waitForResponse((r) => r.url().includes('?/branchCompatibility')),
+			page.select('#branch_switch_ref', 'dev')
+		]);
+		await page.waitForFunction(() =>
+			document.querySelector('#updates')?.textContent?.includes('Moving clears this installation')
+		);
+		const reviewText = await page.$eval('#updates', (e) => e.textContent.replace(/\s+/g, ' '));
+		assert.ok(
+			reviewText.includes(
+				'This branch supports your current database and file formats. Moving still clears all installation data.'
+			)
+		);
+		assert.ok(reviewText.includes(`main@${shaMain.slice(0, 12)}`));
+		assert.ok(reviewText.includes(`dev@${shaDev.slice(0, 12)}`));
+		assert.equal(
+			await page.$eval(
+				'#updates button[type="button"].text-destructive, #updates button[data-variant="destructive"]',
+				(b) => b.disabled
+			),
+			true,
+			'Move button is disabled before backup download completes'
+		);
+
+		// 6. Click Download backup -> streams ZIP, enables Move.
+		step = '6. download backup';
+		await Promise.all([
+			page.waitForResponse((r) => r.url().includes('switch_export=')),
+			page.locator('#updates button::-p-text(Download backup)').click()
+		]);
+		await page.waitForFunction(() =>
+			document.querySelector('#updates')?.textContent?.includes('Backup streamed:')
+		);
+		assert.equal(
+			await page.$eval('#updates button[data-variant="destructive"]', (b) => b.disabled),
+			false,
+			'Move button enables after verified ZIP stream completes'
+		);
+
+		// 7. Reload page -> restored receipt keeps Move enabled when Advanced is opened.
+		step = '7. reload restores receipt';
+		await page.reload({ waitUntil: 'networkidle0' });
+		await page.click('#updates details.disclosure-quiet summary');
+		await page.waitForFunction(() =>
+			document.querySelector('#updates')?.textContent?.includes('Backup streamed:')
+		);
+		assert.equal(
+			await page.$eval('#updates button[data-variant="destructive"]', (b) => b.disabled),
+			false
+		);
+
+		// 8. Click Move to this branch -> ConfirmDialog opens, Cancel closes and returns focus to Move.
+		step = '8. confirm dialog cancel';
+		const beforeDescriptor = await fsp.readFile(managed.descriptor, 'utf8');
+		await page.locator('#updates button::-p-text(Move to this branch)').click();
+		await page.waitForSelector('[role="dialog"]');
+		const dialogText = await page.$eval('[role="dialog"]', (e) =>
+			e.textContent.replace(/\s+/g, ' ')
+		);
+		assert.ok(dialogText.includes(`Move to dev@${shaDev.slice(0, 12)}?`));
+		assert.ok(dialogText.includes(`main@${shaMain.slice(0, 12)}`));
+		assert.ok(dialogText.includes('Password and LAN settings must be set again.'));
+		await page.locator('[role="dialog"] button::-p-text(Cancel)').click();
+		await page.waitForSelector('[role="dialog"]', { hidden: true });
+		assert.equal(await fsp.readFile(managed.descriptor, 'utf8'), beforeDescriptor);
+		assert.ok(
+			await page.evaluate(() =>
+				document.activeElement?.textContent?.includes('Move to this branch')
+			),
+			'Cancel restores focus to Move to this branch'
+		);
+
+		// 9. Incompatible branch -> requires literal MOVE in ConfirmDialog.
+		step = '9. incompatible branch MOVE';
+		await writeFixture({
+			branches: [
+				{ name: 'main', commit: { sha: shaMain } },
+				{ name: 'dev', commit: { sha: shaIncompat } }
+			],
+			refs: { main: shaMain, dev: shaIncompat },
+			commits: {
+				[shaMain]: { package: makePkg(1) },
+				[shaIncompat]: { package: makePkg(2) }
+			}
+		});
+		// Change selection away then back to dev -> invalidates old receipt in UI and fetches new incompatible verdict.
+		await page.select('#branch_switch_ref', 'main');
+		await page.waitForFunction(() =>
+			document
+				.querySelector('#updates')
+				?.textContent?.includes('This branch points to your installed commit.')
+		);
+		assert.equal(
+			await page.$eval('#updates button[data-variant="destructive"]', (b) => b.disabled),
+			true,
+			'selection change invalidates previous receipt'
+		);
+		await Promise.all([
+			page.waitForResponse((r) => r.url().includes('?/branchCompatibility')),
+			page.select('#branch_switch_ref', 'dev')
+		]);
+		await page.waitForFunction(() =>
+			document
+				.querySelector('#updates')
+				?.textContent?.includes('This branch uses newer data formats')
+		);
+		await Promise.all([
+			page.waitForResponse((r) => r.url().includes('switch_export=')),
+			page.locator('#updates button::-p-text(Download backup)').click()
+		]);
+		await page.waitForFunction(() =>
+			document.querySelector('#updates')?.textContent?.includes('Backup streamed:')
+		);
+		await page.locator('#updates button::-p-text(Move to this branch)').click();
+		await page.waitForSelector('[role="dialog"] #branch_switch_confirmation');
+		const moveSubmitDisabled = () =>
+			page.$eval('[role="dialog"] button[type="submit"][form="branch-switch"]', (b) => b.disabled);
+		assert.equal(await moveSubmitDisabled(), true, 'empty confirmation disables Move');
+		for (const bad of ['move', 'MOVE ']) {
+			await page.$eval(
+				'#branch_switch_confirmation',
+				(el, val) => {
+					el.value = val;
+					el.dispatchEvent(new Event('input', { bubbles: true }));
+				},
+				bad
+			);
+			assert.equal(await moveSubmitDisabled(), true, `${JSON.stringify(bad)} disables Move`);
+		}
+		await page.$eval('#branch_switch_confirmation', (el) => {
+			el.value = 'MOVE';
+			el.dispatchEvent(new Event('input', { bubbles: true }));
+		});
+		assert.equal(await moveSubmitDisabled(), false, 'exact MOVE enables Move');
+
+		// 10. Responsive widths (320, 640, 767, 768) + light/dark + 200% zoom with dialog open.
+		step = '10. responsive widths and zoom';
+		for (const scheme of ['light', 'dark']) {
+			await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: scheme }]);
+			for (const width of [320, 640, 767, 768]) {
+				await page.setViewport({ width, height: 844 });
+				await new Promise((r) => setTimeout(r, 80));
+				assert.ok(
+					await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+					`${scheme} ${width}px must not overflow`
+				);
+				await page.screenshot({ path: join(evidenceDir, `branch-${scheme}-${width}.png`) });
+			}
+		}
+		await page.setViewport({ width: 640, height: 450, deviceScaleFactor: 2 });
+		await page.screenshot({ path: join(evidenceDir, 'branch-zoom-200.png') });
+		await page.locator('[role="dialog"] button::-p-text(Cancel)').click();
+		await page.waitForSelector('[role="dialog"]', { hidden: true });
+
+		// 11. Missing branch + failed branch list fallback tests on a fresh page.
+		step = '11. missing branch and fallback';
+		await writeFixture({
+			branches: [{ name: 'main', commit: { sha: shaMain } }],
+			refs: { main: shaMain },
+			commits: { [shaMain]: { package: makePkg(1) } }
+		});
+		const missingPage = await browser.newPage();
+		missingPage.setDefaultTimeout(12000);
+		missingPage.on('pageerror', (e) => pageErrors.push(e.message));
+		await missingPage.goto(`${server.base}/settings#updates`, { waitUntil: 'networkidle0' });
+		await Promise.all([
+			missingPage.waitForResponse((r) => r.url().includes('?/branches')),
+			missingPage.click('#updates details.disclosure-quiet summary')
+		]);
+		await missingPage.waitForFunction(() =>
+			document.querySelector('#updates')?.textContent?.includes('Branch dev is missing on GitHub.')
+		);
+		assert.equal(
+			await missingPage.$eval('#branch_switch_ref option[value="dev"]', (o) => o.disabled),
+			true
+		);
+		await missingPage.close();
+
+		await writeFixture({ fail_branches: true, refs: { main: shaMain }, commits: {} });
+		const failListPage = await browser.newPage();
+		failListPage.setDefaultTimeout(12000);
+		failListPage.on('pageerror', (e) => pageErrors.push(e.message));
+		await failListPage.goto(`${server.base}/settings#updates`, { waitUntil: 'networkidle0' });
+		await Promise.all([
+			failListPage.waitForResponse((r) => r.url().includes('?/branches')),
+			failListPage.click('#updates details.disclosure-quiet summary')
+		]);
+		await failListPage.waitForFunction(() =>
+			document.querySelector('#updates')?.textContent?.includes('Branches unavailable')
+		);
+		assert.equal(
+			await failListPage.$eval('#branch_switch_ref option[value="dev"]', (o) => o.disabled),
+			false,
+			'failed list keeps allowlisted fallback options selectable'
+		);
+		await failListPage.close();
+
+		// 12. No-JS flow renders Review branch button and explicit Move confirmation form when receipt exists.
+		step = '12. no-JS flow';
+		const noJs = await browser.newPage();
+		noJs.setDefaultTimeout(12000);
+		await noJs.setJavaScriptEnabled(false);
+		await noJs.goto(`${server.base}/settings#updates`, { waitUntil: 'networkidle0' });
+		const noJsHtml = await noJs.content();
+		assert.ok(noJsHtml.includes('Review branch'));
+		assert.ok(noJsHtml.includes('branch_switch_confirmation_noscript'));
+		await noJs.close();
+
+		assert.deepEqual(pageErrors, []);
+	} catch (error) {
+		throw new Error(`Chrome journey failed at step "${step}": ${error.message}`, { cause: error });
+	} finally {
+		await closeBrowserBounded(browser, 10000);
+		await server?.stop();
+		await fsp.rm(managed.root, { recursive: true, force: true });
 	}
 });

@@ -32,6 +32,12 @@ const {
 	installedCheck,
 	operationStatus,
 	queueOperation,
+	listBranches,
+	branchCompatibility,
+	queueBranchSwitch,
+	validateSwitchCheckForExport,
+	beginSwitchExport,
+	readSwitchExport,
 	serverSummary,
 	controlServer,
 	loginStartupStatus,
@@ -116,6 +122,7 @@ export async function load(event) {
 	const backupHistory = history.backups;
 	const diagnostics = localPlatform.storageDiagnostics(fileSummary);
 	let installationOperation = null,
+		rawCheck = null,
 		updateCheck = null,
 		updateCheckExpired = false,
 		assistantConnected = false,
@@ -125,7 +132,9 @@ export async function load(event) {
 		deletionUnavailable = null;
 	try {
 		installationOperation = operationStatus();
-		updateCheck = installedCheck();
+		rawCheck = installedCheck();
+		updateCheck =
+			rawCheck && (!rawCheck.purpose || rawCheck.purpose === 'update') ? rawCheck : null;
 		updateCheckExpired = Boolean(
 			updateCheck?.checked_at && Date.now() - Date.parse(updateCheck.checked_at) > CHECK_TTL_MS
 		);
@@ -139,6 +148,47 @@ export async function load(event) {
 		deleteDataPaths = ownedRemovalTargets(installation, true);
 	} catch (e) {
 		deletionUnavailable = e.message;
+	}
+	let branchSwitch = null;
+	if (installation.mode === 'managed' && installation.descriptor_path && server.controlsAvailable) {
+		const currentRef = installation.tracking_ref ?? (installation.release ? null : 'main');
+		let review = null;
+		let reviewExpired = false;
+		if (
+			rawCheck?.purpose === 'branch-switch' &&
+			!rawCheck.error &&
+			rawCheck.installation_id === installation.installation_id
+		) {
+			reviewExpired = Boolean(
+				rawCheck.checked_at && Date.now() - Date.parse(rawCheck.checked_at) > CHECK_TTL_MS
+			);
+			if (!reviewExpired) review = rawCheck;
+		}
+		let exportReceipt = null;
+		let exportError = null;
+		try {
+			const candidate = readSwitchExport();
+			if (
+				candidate &&
+				review &&
+				candidate.check_id === review.id &&
+				candidate.ref === review.target?.ref &&
+				candidate.commit === review.target?.commit
+			) {
+				exportReceipt = candidate;
+			}
+		} catch (e) {
+			exportError = e.message;
+		}
+		branchSwitch = {
+			currentRef,
+			branches: null,
+			branchesError: null,
+			review,
+			reviewExpired,
+			export: exportReceipt,
+			exportError
+		};
 	}
 	let workflowStages = [],
 		workflowError = null;
@@ -169,6 +219,7 @@ export async function load(event) {
 		installationOperation,
 		updateCheck,
 		updateCheckExpired,
+		branchSwitch,
 		assistantConnected,
 		assistantNotice,
 		installationError,
@@ -239,6 +290,56 @@ function installationAuthorized(event) {
 		localBrowser(event) &&
 		validServerSession(cookies.get(accessCookieName('control')))
 	);
+}
+const BRANCH_DOMAIN_CODES = new Set([
+	'BRANCH_MODE',
+	'BRANCH_REF',
+	'BRANCH_LOOKUP',
+	'BRANCH_RESPONSE',
+	'BRANCH_MISSING',
+	'BRANCH_IDENTITY',
+	'CANDIDATE_METADATA',
+	'STORAGE_UNAVAILABLE',
+	'SWITCH_CHECK',
+	'BRANCH_CHANGED',
+	'SWITCH_CONFIRM',
+	'SWITCH_TYPED_CONFIRM',
+	'EXPORT_REQUIRED',
+	'EXPORT_STATE',
+	'CHECK_PURPOSE',
+	'OPERATION_BUSY',
+	'RESET_OWNERSHIP',
+	'RESET_UNSAFE',
+	'RESET_FAILED',
+	'MCP_CONNECTED',
+	'BUSY'
+]);
+function authorizeBranchAction(event) {
+	if (!installationAuthorized(event) || !sameOrigin(event)) {
+		return fail(403, { installationError: 'Use this installation’s local browser session.' });
+	}
+	if (getInstallation().mode !== 'managed') {
+		return fail(409, {
+			installationError: 'Branch switching is only available for managed installations.',
+			installationCode: 'BRANCH_MODE'
+		});
+	}
+	return null;
+}
+function branchActionError(e) {
+	if (e?.code && BRANCH_DOMAIN_CODES.has(e.code)) {
+		return fail(409, { installationError: e.message, installationCode: e.code });
+	}
+	if (
+		e?.message &&
+		/Repair the interrupted publication|update check is already running|Run setup before managing installation/i.test(
+			e.message
+		)
+	) {
+		return fail(409, { installationError: e.message, installationCode: e.code || 'CONFLICT' });
+	}
+	console.error('Branch switching action failed:', e);
+	return fail(500, { installationError: 'Branch switching could not be completed. Try again.' });
 }
 export const actions = {
 	navigation: async (event) => {
@@ -412,6 +513,103 @@ export const actions = {
 			return { updatesChecked: true };
 		} catch (e) {
 			return fail(409, { installationError: e.message });
+		}
+	},
+	branches: async (event) => {
+		const denied = authorizeBranchAction(event);
+		if (denied) return denied;
+		try {
+			const branches = await listBranches();
+			return { branches };
+		} catch (e) {
+			return branchActionError(e);
+		}
+	},
+	branchCompatibility: async (event) => {
+		const denied = authorizeBranchAction(event);
+		if (denied) return denied;
+		try {
+			const values = await event.request.formData();
+			const rawRef = values.get('ref');
+			const ref = typeof rawRef === 'string' ? rawRef : '';
+			const branchReview = await branchCompatibility({ ref });
+			return { branchReview, switchExport: null };
+		} catch (e) {
+			return branchActionError(e);
+		}
+	},
+	backupForSwitch: async (event) => {
+		const denied = authorizeBranchAction(event);
+		if (denied) return denied;
+		let check_id;
+		try {
+			const values = await event.request.formData();
+			const rawCheckId = values.get('check_id');
+			check_id = typeof rawCheckId === 'string' ? rawCheckId : '';
+			await validateSwitchCheckForExport(check_id);
+		} catch (e) {
+			return branchActionError(e);
+		}
+		let backup;
+		try {
+			backup = await createManualBackup({ contents: 'all' });
+		} catch (error) {
+			const detail =
+				error.code && !(error instanceof BackupError)
+					? { code: error.code, message: error.message }
+					: publicBackupError(error);
+			return fail(detail.code === 'backup_too_large' ? 413 : 400, {
+				installationError: detail.message,
+				installationCode: detail.code
+			});
+		}
+		try {
+			const switchExport = await beginSwitchExport({
+				check_id,
+				backup_id: backup.database_backup_id
+			});
+			return {
+				switchExport,
+				downloadUrl: `/settings/backups/${backup.database_backup_id}?contents=all&switch_export=${switchExport.id}`
+			};
+		} catch (e) {
+			return branchActionError(e);
+		}
+	},
+	switchExportStatus: async (event) => {
+		const denied = authorizeBranchAction(event);
+		if (denied) return denied;
+		try {
+			const values = await event.request.formData();
+			const rawExportId = values.get('export_id');
+			const export_id = typeof rawExportId === 'string' ? rawExportId : '';
+			const receipt = readSwitchExport();
+			return { switchExport: receipt && receipt.id === export_id ? receipt : null };
+		} catch (e) {
+			return branchActionError(e);
+		}
+	},
+	switchBranch: async (event) => {
+		const denied = authorizeBranchAction(event);
+		if (denied) return denied;
+		try {
+			const values = await event.request.formData();
+			const str = (key) => {
+				const v = values.get(key);
+				return typeof v === 'string' ? v : '';
+			};
+			const result = await queueBranchSwitch({
+				ref: str('ref'),
+				commit: str('commit'),
+				check_id: str('check_id'),
+				export_id: str('export_id'),
+				backup_id: str('backup_id'),
+				confirm: values.get('confirm') === 'true',
+				confirmation: str('confirmation')
+			});
+			return { installationOperation: result };
+		} catch (e) {
+			return branchActionError(e);
 		}
 	},
 	installationOperation: async (event) => {

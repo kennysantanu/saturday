@@ -244,6 +244,6 @@ Use the desktop shortcut to reopen Saturday. Settings provides server controls, 
 - [Installation and requirements](installation-guide.md#requirements)
 - [Open, stop, and restart](installation-guide.md#open-stop-and-restart)
 - [Start at login](installation-guide.md#start-at-login)
-- [Updates](installation-guide.md#updates), [repair](installation-guide.md#repair), and [uninstall](installation-guide.md#uninstall)
+- [Updates](installation-guide.md#updates) (including [moving between branches](installation-guide.md#moving-between-branches)), [repair](installation-guide.md#repair), and [uninstall](installation-guide.md#uninstall)
 
 Uninstall keeps data by default. Back up and review the exact directories before choosing the separate data-deletion option.

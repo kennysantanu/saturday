@@ -2,11 +2,13 @@ import { listReminders } from '../src/lib/server/local/reminders.js';
 // Local browser QA using disposable stores. Writes screenshots only to the OS temp directory.
 import puppeteer from 'puppeteer';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { mkdtemp, rm, writeFile, readFile, cp, symlink } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { connectMcp } from '../tests/helpers/mcp-client.mjs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import assert from 'node:assert/strict';
 const scratch = await mkdtemp(join(tmpdir(), 'saturday-documents-ui-'));
@@ -44,7 +46,6 @@ const sampleEntry = {
 	enabled: true,
 	source: { type: 'local', reference: samplePath.pathname }
 };
-const { cp } = await import('node:fs/promises');
 process.env.SATURDAY_EXTENSIONS_PATH = join(scratch, 'extensions-code');
 await cp(samplePath.pathname, join(process.env.SATURDAY_EXTENSIONS_PATH, 'interview-practice'), {
 	recursive: true
@@ -834,6 +835,234 @@ try {
 		'GET filters work without JavaScript'
 	);
 	await noJs.close();
+
+	// Disposable managed installation branch-switching journey: main -> dev -> dev (same SHA) -> main.
+	step = 'managed branch switching main -> dev -> main';
+	{
+		const { copySource } = await import('./install.mjs');
+		const {
+			branchCompatibility,
+			queueBranchSwitch,
+			executeOperation,
+			codeFingerprint,
+			operationStatus
+		} = await import('../src/lib/server/installation-operations.js');
+		const { getInstallation } = await import('../src/lib/server/installation.js');
+		const managedRoot = join(scratch, 'managed-branch');
+		const managedApp = join(managedRoot, 'app');
+		await copySource(resolve('.'), managedApp);
+		await symlink(resolve('node_modules'), join(managedApp, 'node_modules'), 'dir');
+		await cp(resolve('build'), join(managedApp, 'build'), { recursive: true });
+		const setupOut = execFileSync(
+			process.execPath,
+			[
+				join(managedApp, 'scripts/setup.mjs'),
+				'--managed',
+				'--root',
+				managedRoot,
+				'--skip-dependencies',
+				'--skip-build',
+				'--skip-pdf',
+				'--json'
+			],
+			{
+				cwd: managedApp,
+				env: {
+					...process.env,
+					SATURDAY_PROJECT_ROOT: managedApp,
+					SATURDAY_INSTALLATION_PATH: '',
+					SATURDAY_DB_PATH: '',
+					SATURDAY_FILES_PATH: '',
+					SATURDAY_EXTENSION_STATE_PATH: '',
+					SATURDAY_EXTENSIONS_PATH: ''
+				},
+				encoding: 'utf8'
+			}
+		);
+		const managedDescriptor = JSON.parse(setupOut).descriptor_path;
+		const shaMain = '1'.repeat(40);
+		const shaDev = '2'.repeat(40);
+		const pkg = JSON.parse(await readFile(resolve('package.json'), 'utf8'));
+		const pkgResp = {
+			encoding: 'base64',
+			content: Buffer.from(JSON.stringify(pkg)).toString('base64')
+		};
+		const candDev = join(scratch, 'candidate-dev');
+		const candMain = join(scratch, 'candidate-main');
+		await copySource(resolve('.'), candDev);
+		await writeFile(join(candDev, 'branch-beta-marker.txt'), 'dev');
+		await copySource(resolve('.'), candMain);
+		await writeFile(join(candMain, 'branch-beta-marker.txt'), 'main');
+
+		const initDesc = JSON.parse(await readFile(managedDescriptor, 'utf8'));
+		initDesc.code_owned = true;
+		initDesc.tracking_ref = 'main';
+		initDesc.build = { id: `dev.${shaMain.slice(0, 12)}`, commit: shaMain, dirty: false };
+		initDesc.code_fingerprint = await codeFingerprint(managedApp);
+		await writeFile(managedDescriptor, JSON.stringify(initDesc, null, 2));
+
+		const priorEnv = { ...process.env };
+		const managedEnv = { ...process.env, SATURDAY_INSTALLATION_PATH: managedDescriptor };
+		for (const k of [
+			'SATURDAY_PROJECT_ROOT',
+			'SATURDAY_DB_PATH',
+			'SATURDAY_FILES_PATH',
+			'SATURDAY_EXTENSION_STATE_PATH',
+			'SATURDAY_EXTENSIONS_PATH'
+		])
+			delete managedEnv[k];
+		Object.assign(process.env, { SATURDAY_INSTALLATION_PATH: managedDescriptor });
+		for (const k of [
+			'SATURDAY_PROJECT_ROOT',
+			'SATURDAY_DB_PATH',
+			'SATURDAY_FILES_PATH',
+			'SATURDAY_EXTENSION_STATE_PATH',
+			'SATURDAY_EXTENSIONS_PATH'
+		])
+			delete process.env[k];
+
+		const runManagedMove = async (targetRef, targetSha, candidateDir) => {
+			// Start managed web server, seed a job, stream real combined ZIP export, stop web server, execute switch.
+			const mSocket = createServer();
+			await new Promise((r) => mSocket.listen(0, '127.0.0.1', r));
+			const mPort = mSocket.address().port;
+			await new Promise((r) => mSocket.close(r));
+			const mBase = `http://127.0.0.1:${mPort}`;
+			const mToken = randomBytes(32).toString('hex');
+			const mWeb = spawn(process.execPath, [join(managedApp, 'scripts/web.mjs')], {
+				cwd: managedApp,
+				env: {
+					...managedEnv,
+					PORT: String(mPort),
+					SATURDAY_LOCAL_ORIGIN: mBase,
+					SATURDAY_SERVER_TOKEN: mToken,
+					SATURDAY_SERVER_GENERATION: randomUUID(),
+					SATURDAY_RUNNING_ALLOW_LAN: 'false',
+					BODY_SIZE_LIMIT: 'Infinity'
+				},
+				stdio: ['ignore', 'pipe', 'pipe']
+			});
+			try {
+				for (let i = 0; i < 80; i++) {
+					try {
+						if ((await fetch(`${mBase}/health`)).ok) break;
+					} catch {}
+					await new Promise((r) => setTimeout(r, 100));
+				}
+				const settingsGet = await fetch(`${mBase}/settings`);
+				const cookie = (settingsGet.headers.getSetCookie?.() ?? [])
+					.map((c) => c.split(';')[0])
+					.join('; ');
+				await fetch(`${mBase}/jobs/new`, {
+					method: 'POST',
+					headers: {
+						origin: mBase,
+						cookie,
+						accept: 'application/json',
+						'x-sveltekit-action': 'true'
+					},
+					body: new URLSearchParams({
+						job_title: `Pre-switch ${targetRef}`,
+						company_name: 'BetaCorp'
+					})
+				});
+				const reqStub = async (p) => {
+					if (p === `/commits/${targetRef}`) return { sha: targetSha };
+					if (p === `/contents/package.json?ref=${targetSha}`) return pkgResp;
+					throw new Error(`unexpected ${p}`);
+				};
+				const cfg = getInstallation();
+				const rev = await branchCompatibility({ ref: targetRef, config: cfg, request: reqStub });
+				const backupBody = new FormData();
+				backupBody.set('check_id', rev.id);
+				const backupAction = await fetch(`${mBase}/settings?/backupForSwitch`, {
+					method: 'POST',
+					headers: {
+						origin: mBase,
+						cookie,
+						accept: 'application/json',
+						'x-sveltekit-action': 'true'
+					},
+					body: backupBody
+				});
+				const { parse: parseAction } = await import('devalue');
+				const backupPayload = parseAction((await backupAction.json()).data);
+				const zipRes = await fetch(`${mBase}${backupPayload.downloadUrl}`, {
+					headers: { cookie }
+				});
+				assert.equal(zipRes.status, 200);
+				await zipRes.arrayBuffer();
+				const stopWeb = new Promise((r) => mWeb.once('close', r));
+				mWeb.kill('SIGTERM');
+				await stopWeb;
+
+				const queued = await queueBranchSwitch(
+					{
+						ref: targetRef,
+						commit: targetSha,
+						check_id: rev.id,
+						export_id: backupPayload.switchExport.id,
+						backup_id: backupPayload.switchExport.backup_id,
+						confirm: true
+					},
+					{ config: cfg, request: reqStub, spawnWorker: async () => process.pid }
+				);
+				await executeOperation(queued.id, {
+					copySource,
+					downloadSource: async () => ({ source: candidateDir }),
+					request: reqStub,
+					onRun: async (cmd, args, options, defaultRun) => {
+						if (args[1] === 'ci') {
+							if (!existsSync(join(options.cwd, 'node_modules')))
+								await symlink(resolve('node_modules'), join(options.cwd, 'node_modules'), 'dir');
+							return;
+						}
+						if (args[1] === 'run' && args[2] === 'build') {
+							if (!existsSync(join(options.cwd, 'build')))
+								await cp(resolve('build'), join(options.cwd, 'build'), { recursive: true });
+							return;
+						}
+						return defaultRun(cmd, args, options);
+					}
+				});
+				assert.equal(operationStatus().status, 'complete', JSON.stringify(operationStatus()));
+				const updated = getInstallation();
+				assert.equal(updated.tracking_ref, targetRef);
+				assert.equal(updated.build.commit, targetSha);
+				assert.equal(await readFile(join(managedApp, 'branch-beta-marker.txt'), 'utf8'), targetRef);
+				// Reconnect MCP only after ready and confirm fresh empty workspace & identity.
+				const managedMcp = await connectMcp({
+					entry: join(managedApp, 'build/mcp/index.js'),
+					env: managedEnv
+				});
+				try {
+					const mInfo = await managedMcp.call('get_saturday_info');
+					assert.equal(mInfo.installation_id, updated.installation_id);
+					assert.equal(mInfo.jobs, 0, `${targetRef} move cleared jobs`);
+				} finally {
+					await managedMcp.close();
+				}
+			} finally {
+				if (mWeb.exitCode === null && mWeb.signalCode === null) {
+					const stopped = new Promise((r) => mWeb.once('close', r));
+					mWeb.kill('SIGTERM');
+					await stopped;
+				}
+			}
+		};
+
+		try {
+			await runManagedMove('dev', shaDev, candDev);
+			await runManagedMove('dev', shaDev, candDev); // same-SHA switch still resets
+			await runManagedMove('main', shaMain, candMain);
+			verification.branch_switching =
+				'passed: disposable managed main -> dev -> dev (same SHA) -> main with fresh ZIP export, full reset, tracking_ref and MCP reconnect after ready';
+		} finally {
+			for (const k of Object.keys(process.env)) if (!(k in priorEnv)) delete process.env[k];
+			Object.assign(process.env, priorEnv);
+		}
+	}
+
 	assert.deepEqual(errors, []);
 	await writeFile(
 		join(scratch, 'verification.json'),
