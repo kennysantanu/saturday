@@ -583,25 +583,34 @@ async function verifyRestartedInstallation({
 	assert.ok(freshCookie.includes('saturday-control-'));
 
 	// F5: replay the consumed switchBranch payload after completion.
-	const replay = await postSettingsAction(url, 'switchBranch', replayPayload, freshCookie);
-	if (
-		replay.httpStatus === 404 &&
-		compareVersions(installedPkg.version, FIRST_BRANCH_SWITCH_VERSION) < 0
-	) {
-		t.diagnostic(
-			`Replay check on ${expectedRef}@${expectedCommit.slice(0, 12)} (${installedPkg.version}): target predates ?/switchBranch (HTTP 404); verified switch-export.json remains absent.`
-		);
-	} else if (replay.httpStatus === 404) {
-		t.diagnostic(
-			`Replay check on ${expectedRef}@${expectedCommit.slice(0, 12)} (${installedPkg.version}): remote commit predates ?/switchBranch (HTTP 404); verified switch-export.json remains absent.`
-		);
-	} else {
-		assert.equal(
-			replay.httpStatus,
-			409,
-			`replayed switchBranch must fail with 409: ${JSON.stringify(replay)}`
-		);
-		assert.equal(replay.data?.installationCode, 'EXPORT_REQUIRED');
+	const opPath = join(root, 'installation.state', 'operation.json');
+	const receiptPath = join(root, 'installation.state', 'switch-export.json');
+	const completedOp = readJsonSafe(opPath);
+	assert.equal(completedOp?.status, 'complete');
+	for (let attempt = 0; attempt < 2; attempt++) {
+		const replay = await postSettingsAction(url, 'switchBranch', replayPayload, freshCookie);
+		if (
+			replay.httpStatus === 404 &&
+			compareVersions(installedPkg.version, FIRST_BRANCH_SWITCH_VERSION) < 0
+		) {
+			t.diagnostic(
+				`Replay check on ${expectedRef}@${expectedCommit.slice(0, 12)} (${installedPkg.version}): target predates ?/switchBranch (HTTP 404); verified switch-export.json remains absent.`
+			);
+		} else if (replay.httpStatus === 404) {
+			t.diagnostic(
+				`Replay check on ${expectedRef}@${expectedCommit.slice(0, 12)} (${installedPkg.version}): remote commit predates ?/switchBranch (HTTP 404); verified switch-export.json remains absent.`
+			);
+		} else {
+			assert.equal(replay.type, 'failure', JSON.stringify(replay));
+			assert.equal(replay.status, 409, JSON.stringify(replay));
+			// A stale check or the consumed export can refuse the replay first.
+			assert.ok(
+				['SWITCH_CHECK', 'EXPORT_REQUIRED'].includes(replay.data?.installationCode),
+				JSON.stringify(replay)
+			);
+		}
+		assert.deepEqual(readJsonSafe(opPath), completedOp, 'replay must not start another operation');
+		assert.equal(existsSync(receiptPath), false, 'replay must not restore the export receipt');
 	}
 
 	return { installedPkg, freshCookie };
