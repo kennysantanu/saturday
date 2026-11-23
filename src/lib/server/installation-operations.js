@@ -21,9 +21,11 @@ import {
 	refreshLoginStartup,
 	createDesktopShortcut,
 	setLoginStartup,
-	removeDesktopShortcut
+	removeDesktopShortcut,
+	npmCliCandidates,
+	resolveNpmCli
 } from './installation.js';
-export { BRANCH_REFS } from './installation.js';
+export { BRANCH_REFS, npmCliCandidates, resolveNpmCli } from './installation.js';
 import {
 	serverSummary,
 	controlServer,
@@ -1290,7 +1292,18 @@ export async function queueOperation(
 	}
 }
 export async function queueBranchSwitch(
-	{ ref, commit, check_id, export_id, backup_id, confirm = false, confirmation = '' } = {},
+	{
+		ref,
+		commit,
+		check_id,
+		export_id,
+		backup_id,
+		download_sha256,
+		download_bytes,
+		export_proof: requestedExportProof,
+		confirm = false,
+		confirmation = ''
+	} = {},
 	{ config = getInstallation(), request = github, spawnWorker } = {}
 ) {
 	assertManagedMode(config);
@@ -1361,10 +1374,46 @@ export async function queueBranchSwitch(
 					'EXPORT_REQUIRED',
 					'Download a new database and files backup for this branch before moving.'
 				);
+			const hasDownloadSha = download_sha256 !== undefined && download_sha256 !== null;
+			const hasDownloadBytes = download_bytes !== undefined && download_bytes !== null;
+			let export_proof;
+			if (hasDownloadSha) {
+				if (typeof download_sha256 !== 'string' || download_sha256 !== receipt.sha256)
+					throw branchError(
+						'EXPORT_REQUIRED',
+						'The downloaded backup does not match the one Saturday prepared. Download it again.'
+					);
+				if (hasDownloadBytes) {
+					const parsedBytes =
+						typeof download_bytes === 'number'
+							? download_bytes
+							: typeof download_bytes === 'string' && /^[1-9]\d*$/.test(download_bytes)
+								? Number(download_bytes)
+								: NaN;
+					if (
+						!Number.isSafeInteger(parsedBytes) ||
+						parsedBytes < 1 ||
+						parsedBytes !== receipt.bytes
+					)
+						throw branchError(
+							'EXPORT_REQUIRED',
+							'The downloaded backup does not match the one Saturday prepared. Download it again.'
+						);
+				}
+				export_proof = 'received-bytes';
+			} else {
+				if (hasDownloadBytes || requestedExportProof !== 'server-eof')
+					throw branchError(
+						'EXPORT_REQUIRED',
+						'Download a new database and files backup for this branch before moving.'
+					);
+				export_proof = 'server-eof';
+			}
 			audit = {
 				filename: receipt.filename,
 				bytes: receipt.bytes,
-				sha256: receipt.sha256
+				sha256: receipt.sha256,
+				export_proof
 			};
 			await fs.rm(paths.switch_export, { force: true });
 		} finally {
@@ -1379,6 +1428,7 @@ export async function queueBranchSwitch(
 			filename: audit.filename,
 			bytes: audit.bytes,
 			sha256: audit.sha256,
+			export_proof: audit.export_proof,
 			compatibility: check.compatibility,
 			from_ref: currentTrackedRef(config),
 			from_commit: config.build?.commit ?? null
@@ -2216,15 +2266,13 @@ export async function executeOperation(
 					'This candidate does not support the installed maintenance/update contract. Keep the current app and choose a compatible build.'
 				);
 			const runtime = await prepareRuntime(config, pkg.saturday);
-			const npm = [
-				join(dirname(runtime.node_path), 'node_modules/npm/bin/npm-cli.js'),
-				join(dirname(runtime.node_path), '../lib/node_modules/npm/bin/npm-cli.js')
-			].find(existsSync);
-			if (!npm && !onRun)
-				throw new Error(
-					'The installed runtime has no npm toolchain. Repair the runtime before updating.'
-				);
-			const npmBin = npm || 'npm';
+			let npmBin;
+			try {
+				npmBin = resolveNpmCli(runtime);
+			} catch (e) {
+				if (!onRun) throw e;
+				npmBin = 'npm';
+			}
 			const env = stageEnvironment(runtime, app, workspace, target);
 			await loggingRun(runtime.node_path, [npmBin, 'ci'], {
 				cwd: app,

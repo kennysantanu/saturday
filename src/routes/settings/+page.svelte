@@ -169,10 +169,23 @@
 	const switchRequiresTypedMove = $derived(
 		Boolean(activeReview && activeReview.compatibility?.verdict !== 'compatible')
 	);
+	const verifiedClientExport = $derived(
+		Boolean(
+			completedSwitchExport &&
+			typeof completedSwitchExport.download_sha256 === 'string' &&
+			/^[a-f0-9]{64}$/.test(completedSwitchExport.download_sha256) &&
+			Number.isSafeInteger(completedSwitchExport.download_bytes) &&
+			completedSwitchExport.download_bytes > 0
+		)
+	);
+	const restoredUnverifiedExport = $derived(
+		Boolean(completedSwitchExport && !verifiedClientExport)
+	);
 	const canMoveBranch = $derived(
 		Boolean(
 			activeReview &&
 			completedSwitchExport &&
+			verifiedClientExport &&
 			!reviewLoading &&
 			!switchDownloadPending &&
 			!repairPending &&
@@ -315,6 +328,13 @@
 			if (!response.ok) throw new Error('Backup download failed.');
 			const blob = await response.blob();
 			if (pageDestroyed || generation !== reviewGeneration) return;
+			const downloadBuffer = await blob.arrayBuffer();
+			const downloadDigest = await crypto.subtle.digest('SHA-256', downloadBuffer);
+			if (pageDestroyed || generation !== reviewGeneration) return;
+			const downloadSha256 = Array.from(new Uint8Array(downloadDigest), (byte) =>
+				byte.toString(16).padStart(2, '0')
+			).join('');
+			const downloadBytes = downloadBuffer.byteLength;
 			const disposition = response.headers.get('content-disposition') ?? '';
 			const match = /filename="([^"]+)"/.exec(disposition);
 			const filename = match?.[1] || `saturday-backup-${pendingExport.backup_id}.zip`;
@@ -339,7 +359,11 @@
 				focusFirstError();
 				return;
 			}
-			switchExport = completed;
+			switchExport = {
+				...completed,
+				download_sha256: downloadSha256,
+				download_bytes: downloadBytes
+			};
 			switchDownloadError = '';
 		} catch {
 			if (pageDestroyed || generation !== reviewGeneration) return;
@@ -1788,9 +1812,15 @@
 											{/if}
 											{#if completedSwitchExport}
 												<p class="text-sm break-all text-muted-foreground" role="status">
-													Backup streamed: {completedSwitchExport.filename} · {formatBytes(
-														completedSwitchExport.bytes
-													)}. Check that the file is saved before moving.
+													{#if verifiedClientExport}
+														Backup streamed: {completedSwitchExport.filename} · {formatBytes(
+															completedSwitchExport.bytes
+														)}. Check that the file is saved before moving.
+													{:else}
+														Backup streamed earlier: {completedSwitchExport.filename} · {formatBytes(
+															completedSwitchExport.bytes
+														)}. Download again to verify the file in this browser before moving.
+													{/if}
 												</p>
 											{/if}
 											{#if form?.downloadUrl}
@@ -1833,7 +1863,11 @@
 															repairPending ||
 															operationActive}
 													>
-														{switchDownloadPending ? 'Downloading backup…' : 'Download backup'}
+														{switchDownloadPending
+															? 'Downloading backup…'
+															: restoredUnverifiedExport
+																? 'Download again to verify'
+																: 'Download backup'}
 													</Button>
 												</form>
 												<Button
@@ -1876,8 +1910,21 @@
 														name="backup_id"
 														value={completedSwitchExport.backup_id}
 													/>
+													{#if verifiedClientExport}
+														<input
+															type="hidden"
+															name="download_sha256"
+															value={completedSwitchExport.download_sha256}
+														/>
+														<input
+															type="hidden"
+															name="download_bytes"
+															value={String(completedSwitchExport.download_bytes)}
+														/>
+													{/if}
 													<input type="hidden" name="confirm" value="true" />
 													<noscript>
+														<input type="hidden" name="export_proof" value="server-eof" />
 														<div
 															class="mt-4 space-y-3 rounded-[var(--r-group)] border border-destructive/30 p-4"
 														>

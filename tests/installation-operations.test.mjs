@@ -34,7 +34,9 @@ import {
 	pruneOperationArtifacts,
 	connectedClients,
 	assistantConnectionNotice,
-	PREVIOUS_BUILDS_RETAINED
+	PREVIOUS_BUILDS_RETAINED,
+	npmCliCandidates,
+	resolveNpmCli
 } from '../src/lib/server/installation-operations.js';
 import { copySource, install, run as installerRun } from '../scripts/install.mjs';
 import {
@@ -1618,21 +1620,154 @@ test('switch export receipt lifecycle survives restart, enforces bindings, preve
 			{ code: 'BRANCH_CHANGED' }
 		);
 
-		// Matching completed export queues once and consumes the receipt.
+		// M3: download_sha256 mismatch (wrong, uppercase, truncated, padded) refuses with EXPORT_REQUIRED and changes nothing.
+		const expectedHash = completed.sha256;
+		const receiptBytesBefore = await fs.readFile(paths.switch_export);
+		for (const badHash of [
+			'9'.repeat(64),
+			'A'.repeat(64),
+			expectedHash.slice(0, 32),
+			` ${expectedHash}`,
+			`${expectedHash} `,
+			''
+		]) {
+			await assert.rejects(
+				queueBranchSwitch(
+					{
+						ref: 'dev',
+						commit: sha,
+						check_id: review.id,
+						export_id: completed.id,
+						backup_id: 'b-new',
+						download_sha256: badHash,
+						download_bytes: 4096,
+						confirm: true
+					},
+					{ config, request: compatReq, spawnWorker: async () => process.pid }
+				),
+				(err) =>
+					err.code === 'EXPORT_REQUIRED' &&
+					err.message ===
+						'The downloaded backup does not match the one Saturday prepared. Download it again.'
+			);
+		}
+		// M3 + F7: matching hash with invalid or mismatched download_bytes refuses with EXPORT_REQUIRED and changes nothing.
+		for (const badBytes of [4095, 0, -1, 1.5, '0', '-5', 'abc', '1.5', '']) {
+			await assert.rejects(
+				queueBranchSwitch(
+					{
+						ref: 'dev',
+						commit: sha,
+						check_id: review.id,
+						export_id: completed.id,
+						backup_id: 'b-new',
+						download_sha256: expectedHash,
+						download_bytes: badBytes,
+						confirm: true
+					},
+					{ config, request: compatReq, spawnWorker: async () => process.pid }
+				),
+				(err) =>
+					err.code === 'EXPORT_REQUIRED' &&
+					err.message ===
+						'The downloaded backup does not match the one Saturday prepared. Download it again.'
+			);
+		}
+		// F1 + F7: missing proof (no download_sha256 and no explicit server-eof marker), wrong marker,
+		// or download_bytes sent without download_sha256 must be refused with EXPORT_REQUIRED.
+		for (const missingProofPayload of [
+			{},
+			{ export_proof: '' },
+			{ export_proof: 'received-bytes' },
+			{ export_proof: 'other' },
+			{ download_bytes: 4096 },
+			{ download_bytes: 4096, export_proof: 'server-eof' }
+		]) {
+			await assert.rejects(
+				queueBranchSwitch(
+					{
+						ref: 'dev',
+						commit: sha,
+						check_id: review.id,
+						export_id: completed.id,
+						backup_id: 'b-new',
+						...missingProofPayload,
+						confirm: true
+					},
+					{ config, request: compatReq, spawnWorker: async () => process.pid }
+				),
+				{ code: 'EXPORT_REQUIRED' }
+			);
+		}
+		assert.deepEqual(
+			await fs.readFile(paths.switch_export),
+			receiptBytesBefore,
+			'mismatched download proof leaves receipt untouched'
+		);
+		assert.equal(operationStatus(config), null, 'mismatched download proof queues nothing');
+
+		// M3: uppercase digest of a hex receipt containing letters is never normalized.
+		const letterPending = await beginSwitchExport(
+			{ check_id: review.id, backup_id: 'b-letter' },
+			config
+		);
+		const letterCompleted = await completeSwitchExport(
+			{
+				export_id: letterPending.id,
+				backup_id: 'b-letter',
+				filename: 'saturday-letter.zip',
+				bytes: 4096,
+				sha256: 'a'.repeat(64)
+			},
+			config
+		);
+		await assert.rejects(
+			queueBranchSwitch(
+				{
+					ref: 'dev',
+					commit: sha,
+					check_id: review.id,
+					export_id: letterCompleted.id,
+					backup_id: 'b-letter',
+					download_sha256: 'A'.repeat(64),
+					download_bytes: 4096,
+					confirm: true
+				},
+				{ config, request: compatReq, spawnWorker: async () => process.pid }
+			),
+			{ code: 'EXPORT_REQUIRED' }
+		);
+
+		// Matching completed export with matching download_sha256 + download_bytes queues once, consumes receipt,
+		// keeps export_proof out of the public projection (F2), and records received-bytes in operation.json.
 		const queued = await queueBranchSwitch(
 			{
 				ref: 'dev',
 				commit: sha,
 				check_id: review.id,
-				export_id: completed.id,
-				backup_id: 'b-new',
+				export_id: letterCompleted.id,
+				backup_id: 'b-letter',
+				download_sha256: letterCompleted.sha256,
+				download_bytes: 4096,
 				confirm: true
 			},
 			{ config, request: compatReq, spawnWorker: async () => process.pid }
 		);
 		assert.equal(queued.operation, 'update');
 		assert.equal(queued.reset_data, true);
-		assert.equal(queued.branch_switch.filename, 'saturday-test.zip');
+		assert.equal(queued.branch_switch.filename, 'saturday-letter.zip');
+		assert.equal(
+			'export_proof' in queued.branch_switch,
+			false,
+			'export_proof must not leak into public operationStatus projection'
+		);
+		const rawQueuedOp = JSON.parse(await fs.readFile(paths.status, 'utf8'));
+		assert.equal(rawQueuedOp.branch_switch.export_proof, 'received-bytes');
+		assert.equal(
+			existsSync(paths.switch_export),
+			false,
+			'receipt file is removed on accepted queue'
+		);
 		assert.equal(readSwitchExport(config), null, 'receipt is consumed on accepted queue');
 
 		// Competing active operation rejects without overwriting operation state.
@@ -1642,8 +1777,10 @@ test('switch export receipt lifecycle survives restart, enforces bindings, preve
 					ref: 'dev',
 					commit: sha,
 					check_id: review.id,
-					export_id: completed.id,
-					backup_id: 'b-new',
+					export_id: letterCompleted.id,
+					backup_id: 'b-letter',
+					download_sha256: letterCompleted.sha256,
+					download_bytes: 4096,
 					confirm: true
 				},
 				{ config, request: compatReq, spawnWorker: async () => process.pid }
@@ -1651,6 +1788,59 @@ test('switch export receipt lifecycle survives restart, enforces bindings, preve
 			{ code: 'OPERATION_BUSY' }
 		);
 		await assert.rejects(queueOperation('repair', {}), { code: 'OPERATION_BUSY' });
+
+		// F5: replaying the consumed receipt after the operation finishes refuses with EXPORT_REQUIRED.
+		await fs.rm(paths.status, { force: true });
+		await assert.rejects(
+			queueBranchSwitch(
+				{
+					ref: 'dev',
+					commit: sha,
+					check_id: review.id,
+					export_id: letterCompleted.id,
+					backup_id: 'b-letter',
+					download_sha256: letterCompleted.sha256,
+					download_bytes: 4096,
+					confirm: true
+				},
+				{ config, request: compatReq, spawnWorker: async () => process.pid }
+			),
+			{ code: 'EXPORT_REQUIRED' }
+		);
+
+		// Explicit no-script marker (export_proof: 'server-eof' without download_sha256) is accepted on
+		// the same receipt, stays out of the public projection, and records server-eof in operation.json.
+		const noScriptPending = await beginSwitchExport(
+			{ check_id: review.id, backup_id: 'b-noscript' },
+			config
+		);
+		const noScriptCompleted = await completeSwitchExport(
+			{
+				export_id: noScriptPending.id,
+				backup_id: 'b-noscript',
+				filename: 'saturday-noscript.zip',
+				bytes: 2048,
+				sha256: 'b'.repeat(64)
+			},
+			config
+		);
+		const noScriptQueued = await queueBranchSwitch(
+			{
+				ref: 'dev',
+				commit: sha,
+				check_id: review.id,
+				export_id: noScriptCompleted.id,
+				backup_id: 'b-noscript',
+				export_proof: 'server-eof',
+				confirm: true
+			},
+			{ config, request: compatReq, spawnWorker: async () => process.pid }
+		);
+		assert.equal('export_proof' in noScriptQueued.branch_switch, false);
+		assert.equal(
+			JSON.parse(await fs.readFile(paths.status, 'utf8')).branch_switch.export_proof,
+			'server-eof'
+		);
 
 		// Mark completed and test incompatible typed MOVE requirement.
 		await fs.rm(paths.status, { force: true });
@@ -1704,6 +1894,8 @@ test('switch export receipt lifecycle survives restart, enforces bindings, preve
 				check_id: incompatReview.id,
 				export_id: incompatPending.id,
 				backup_id: 'b-incompat',
+				download_sha256: '3'.repeat(64),
+				download_bytes: 512,
 				confirm: true,
 				confirmation: 'MOVE'
 			},
@@ -1796,6 +1988,8 @@ test('destructive branch switch enforces publish -> reset -> live setup ordering
 				check_id: review1.id,
 				export_id: exp1.id,
 				backup_id: 'b-ord-1',
+				download_sha256: '4'.repeat(64),
+				download_bytes: 2048,
 				confirm: true
 			},
 			{ config, request: devReq, spawnWorker: async () => process.pid }
@@ -1847,6 +2041,8 @@ test('destructive branch switch enforces publish -> reset -> live setup ordering
 				check_id: review2.id,
 				export_id: exp2.id,
 				backup_id: 'b-ord-2',
+				download_sha256: '5'.repeat(64),
+				download_bytes: 2048,
 				confirm: true
 			},
 			{ config, request: devReq, spawnWorker: async () => process.pid }
@@ -2008,6 +2204,8 @@ test('branch switch crash recovery handles pre-publish failures, mid-reset fault
 					check_id: rev.id,
 					export_id: exp.id,
 					backup_id: backupTag,
+					download_sha256: '6'.repeat(64),
+					download_bytes: 1024,
 					confirm: true
 				},
 				{ config: getInstallation(), request: devReq, spawnWorker: async () => process.pid }
@@ -2220,5 +2418,159 @@ test('branch switch crash recovery handles pre-publish failures, mid-reset fault
 		for (const k of Object.keys(process.env)) if (!(k in prior)) delete process.env[k];
 		Object.assign(process.env, prior);
 		await fs.rm(f.root, { recursive: true, force: true });
+	}
+});
+
+test('resolveNpmCli enforces owned runtime containment, supports Homebrew Cellar layouts, and lists every attempted path on failure', async () => {
+	const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'saturday-npm-resolve-')));
+	try {
+		// 1. Standard prefix layout: <prefix>/bin/node -> <prefix>/lib/node_modules/npm/bin/npm-cli.js
+		const prefixRoot = join(root, 'prefix-layout');
+		const prefixNode = join(prefixRoot, 'bin', 'node');
+		const prefixNpm = join(prefixRoot, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
+		await fs.mkdir(join(prefixRoot, 'bin'), { recursive: true });
+		await fs.writeFile(prefixNode, '');
+		await fs.mkdir(join(prefixRoot, 'lib', 'node_modules', 'npm', 'bin'), { recursive: true });
+		await fs.writeFile(prefixNpm, '');
+		assert.equal(
+			resolveNpmCli({ node_path: prefixNode, runtime_root: prefixRoot, runtime_owned: false }),
+			prefixNpm
+		);
+
+		// 2. Homebrew Cellar prefix layout: <brew>/Cellar/node/26.12.1/bin/node -> <brew>/lib/node_modules/npm/bin/npm-cli.js
+		const brewRoot = join(root, 'homebrew');
+		const brewNode = join(brewRoot, 'Cellar', 'node', '26.12.1', 'bin', 'node');
+		const brewNpm = join(brewRoot, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
+		await fs.mkdir(join(brewRoot, 'Cellar', 'node', '26.12.1', 'bin'), { recursive: true });
+		await fs.writeFile(brewNode, '');
+		await fs.mkdir(join(brewRoot, 'lib', 'node_modules', 'npm', 'bin'), { recursive: true });
+		await fs.writeFile(brewNpm, '');
+		assert.equal(
+			resolveNpmCli({
+				node_path: brewNode,
+				runtime_root: join(brewRoot, 'Cellar', 'node', '26.12.1'),
+				runtime_owned: false
+			}),
+			brewNpm
+		);
+
+		// 3. Versioned Homebrew formula (<brew>/Cellar/node@24/<ver>/bin/node) resolves libexec bundled npm first.
+		const brew24Node = join(brewRoot, 'Cellar', 'node@24', '24.10.0', 'bin', 'node');
+		const brew24LibexecNpm = join(
+			brewRoot,
+			'Cellar',
+			'node@24',
+			'24.10.0',
+			'libexec',
+			'lib',
+			'node_modules',
+			'npm',
+			'bin',
+			'npm-cli.js'
+		);
+		await fs.mkdir(join(brewRoot, 'Cellar', 'node@24', '24.10.0', 'bin'), { recursive: true });
+		await fs.writeFile(brew24Node, '');
+		await fs.mkdir(
+			join(
+				brewRoot,
+				'Cellar',
+				'node@24',
+				'24.10.0',
+				'libexec',
+				'lib',
+				'node_modules',
+				'npm',
+				'bin'
+			),
+			{ recursive: true }
+		);
+		await fs.writeFile(brew24LibexecNpm, '');
+		assert.equal(
+			resolveNpmCli({
+				node_path: brew24Node,
+				runtime_root: join(brewRoot, 'Cellar', 'node@24', '24.10.0'),
+				runtime_owned: false
+			}),
+			brew24LibexecNpm
+		);
+
+		// 4. Owned runtime containment: runtime_owned=true MUST NOT escape runtime_root even if npm exists outside it.
+		const ownedInstall = join(root, 'owned-install');
+		const ownedRuntimeRoot = join(ownedInstall, 'runtime', 'node-v24.21.0-win-x64');
+		const ownedNode = join(ownedRuntimeRoot, 'node.exe');
+		const escapedNpm = join(
+			ownedInstall,
+			'runtime',
+			'lib',
+			'node_modules',
+			'npm',
+			'bin',
+			'npm-cli.js'
+		);
+		await fs.mkdir(ownedRuntimeRoot, { recursive: true });
+		await fs.writeFile(ownedNode, '');
+		await fs.mkdir(join(ownedInstall, 'runtime', 'lib', 'node_modules', 'npm', 'bin'), {
+			recursive: true
+		});
+		await fs.writeFile(escapedNpm, '');
+		const ownedRuntime = {
+			node_path: ownedNode,
+			runtime_root: ownedRuntimeRoot,
+			runtime_owned: true
+		};
+		assert.deepEqual(npmCliCandidates(ownedRuntime), [
+			join(ownedRuntimeRoot, 'node_modules', 'npm', 'bin', 'npm-cli.js')
+		]);
+		assert.throws(
+			() => resolveNpmCli(ownedRuntime),
+			(err) => err.message.includes(ownedNode) && !err.message.includes(escapedNpm)
+		);
+
+		// 5. Non-Homebrew paths never guess arbitrary parent depths.
+		const nonBrewNode = join(root, 'Program Files', 'nodejs', 'node.exe');
+		const nonBrewCandidates = npmCliCandidates({
+			node_path: nonBrewNode,
+			runtime_root: join(root, 'Program Files', 'nodejs'),
+			runtime_owned: false
+		});
+		assert.deepEqual(nonBrewCandidates, [
+			join(root, 'Program Files', 'nodejs', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+			join(root, 'Program Files', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')
+		]);
+
+		// 6. Missing npm toolchain error lists node path, every attempted candidate path, and setup-safe wording.
+		const emptyBrewRoot = join(root, 'empty-brew');
+		const emptyNode = join(emptyBrewRoot, 'Cellar', 'node', '26.12.1', 'bin', 'node');
+		await fs.mkdir(join(emptyBrewRoot, 'Cellar', 'node', '26.12.1', 'bin'), { recursive: true });
+		await fs.writeFile(emptyNode, '');
+		const emptyRuntime = {
+			node_path: emptyNode,
+			runtime_root: join(emptyBrewRoot, 'Cellar', 'node', '26.12.1'),
+			runtime_owned: false
+		};
+		const expectedCandidates = npmCliCandidates(emptyRuntime);
+		assert.equal(expectedCandidates.length, 4);
+		assert.throws(
+			() => resolveNpmCli(emptyRuntime),
+			(err) => {
+				assert.ok(
+					err.message.includes(emptyNode),
+					`Error should include node path: ${err.message}`
+				);
+				assert.ok(
+					err.message.includes('Repair or reinstall this Node runtime (npm is missing).'),
+					`Error should include actionable setup/update wording: ${err.message}`
+				);
+				for (const candidate of expectedCandidates) {
+					assert.ok(
+						err.message.includes(candidate),
+						`Error should include attempted path ${candidate}: ${err.message}`
+					);
+				}
+				return true;
+			}
+		);
+	} finally {
+		await fs.rm(root, { recursive: true, force: true });
 	}
 });

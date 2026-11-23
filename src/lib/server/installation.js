@@ -3,11 +3,63 @@ export const BRANCH_REFS = Object.freeze(['main', 'dev']);
 
 // Installation identity and paths shared by scripts, web, CLI and MCP. No store initialization on read.
 import { existsSync, readFileSync, lstatSync, statSync } from 'node:fs';
-import { resolve, dirname, join, sep, basename, win32, posix, isAbsolute } from 'node:path';
+import {
+	resolve,
+	dirname,
+	join,
+	relative,
+	sep,
+	basename,
+	win32,
+	posix,
+	isAbsolute
+} from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import * as fs from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
+
+const HOMEBREW_CELLAR_BIN_RE = /^(.*)[\\/]Cellar[\\/]node(?:@\d+)?[\\/][^\\/]+[\\/]bin$/;
+
+function isInsideRoot(root, candidate) {
+	const rel = relative(resolve(root), resolve(candidate));
+	return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
+export function npmCliCandidates(runtime) {
+	const nodePath = runtime?.node_path;
+	if (typeof nodePath !== 'string' || !nodePath)
+		throw new Error('Runtime node_path is required to locate npm.');
+	const dir = dirname(nodePath);
+	const candidates = [
+		join(dir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+		join(dir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')
+	];
+	if (runtime.runtime_owned === true) {
+		const runtimeRoot = typeof runtime.runtime_root === 'string' ? runtime.runtime_root : '';
+		if (!runtimeRoot) return [];
+		return [...new Set(candidates.filter((candidate) => isInsideRoot(runtimeRoot, candidate)))];
+	}
+	const homebrew = HOMEBREW_CELLAR_BIN_RE.exec(dir);
+	if (homebrew) {
+		const prefix = homebrew[1] || sep;
+		candidates.push(
+			join(dir, '..', 'libexec', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+			join(prefix, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')
+		);
+	}
+	return [...new Set(candidates)];
+}
+
+export function resolveNpmCli(runtime, { exists = existsSync } = {}) {
+	const nodePath = runtime?.node_path;
+	const candidates = npmCliCandidates(runtime);
+	const found = candidates.find((candidate) => exists(candidate));
+	if (found) return found;
+	throw new Error(
+		`The installed runtime has no npm toolchain for ${nodePath}. Tried: ${candidates.join(', ')}. Repair or reinstall this Node runtime (npm is missing).`
+	);
+}
 
 export function defaultInstallationRoot(
 	platform = process.platform,
