@@ -587,25 +587,28 @@ async function verifyRestartedInstallation({
 	const receiptPath = join(root, 'installation.state', 'switch-export.json');
 	const completedOp = readJsonSafe(opPath);
 	assert.equal(completedOp?.status, 'complete');
+	// The second replay checks that the first refusal did not change state.
 	for (let attempt = 0; attempt < 2; attempt++) {
 		const replay = await postSettingsAction(url, 'switchBranch', replayPayload, freshCookie);
 		if (
 			replay.httpStatus === 404 &&
 			compareVersions(installedPkg.version, FIRST_BRANCH_SWITCH_VERSION) < 0
 		) {
-			t.diagnostic(
-				`Replay check on ${expectedRef}@${expectedCommit.slice(0, 12)} (${installedPkg.version}): target predates ?/switchBranch (HTTP 404); verified switch-export.json remains absent.`
-			);
+			if (attempt === 0) {
+				t.diagnostic(
+					`Replay check on ${expectedRef}@${expectedCommit.slice(0, 12)} (${installedPkg.version}): target predates ?/switchBranch (HTTP 404).`
+				);
+			}
 		} else if (replay.httpStatus === 404) {
-			t.diagnostic(
-				`Replay check on ${expectedRef}@${expectedCommit.slice(0, 12)} (${installedPkg.version}): remote commit predates ?/switchBranch (HTTP 404); verified switch-export.json remains absent.`
-			);
+			assert.fail(`?/switchBranch returned HTTP 404 on version ${installedPkg.version}`);
 		} else {
 			assert.equal(replay.type, 'failure', JSON.stringify(replay));
 			assert.equal(replay.status, 409, JSON.stringify(replay));
-			// A stale check or the consumed export can refuse the replay first.
+			// The upstream ref is resolved before the receipt, so a moved ref also refuses the replay.
 			assert.ok(
-				['SWITCH_CHECK', 'EXPORT_REQUIRED'].includes(replay.data?.installationCode),
+				['SWITCH_CHECK', 'EXPORT_REQUIRED', 'BRANCH_CHANGED'].includes(
+					replay.data?.installationCode
+				),
 				JSON.stringify(replay)
 			);
 		}
