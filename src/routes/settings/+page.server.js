@@ -598,12 +598,24 @@ export const actions = {
 				const v = values.get(key);
 				return typeof v === 'string' ? v : '';
 			};
+			const rawDownloadSha256 = values.get('download_sha256');
+			const rawDownloadBytes = values.get('download_bytes');
+			const rawExportProof = values.get('export_proof');
 			const result = await queueBranchSwitch({
 				ref: str('ref'),
 				commit: str('commit'),
 				check_id: str('check_id'),
 				export_id: str('export_id'),
 				backup_id: str('backup_id'),
+				...(rawDownloadSha256 !== null
+					? { download_sha256: typeof rawDownloadSha256 === 'string' ? rawDownloadSha256 : '' }
+					: {}),
+				...(rawDownloadBytes !== null
+					? { download_bytes: typeof rawDownloadBytes === 'string' ? rawDownloadBytes : '' }
+					: {}),
+				...(rawExportProof !== null
+					? { export_proof: typeof rawExportProof === 'string' ? rawExportProof : '' }
+					: {}),
 				confirm: values.get('confirm') === 'true',
 				confirmation: str('confirmation')
 			});

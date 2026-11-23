@@ -1362,6 +1362,69 @@ test('branch switching HTTP authorization, export marker across restart, guards,
 		assert.equal(statusRes.data.switchExport.bytes, zipBytes.length);
 		assert.equal(statusRes.data.switchExport.sha256, expectedSha256);
 
+		// 8b. M3 + F1 + F7: hash mismatch, invalid/mismatched download_bytes, missing proof, or wrong
+		// export_proof marker all refuse with 409 EXPORT_REQUIRED and leave receipt intact.
+		const badHashSwitch = await postAction('switchBranch', {
+			ref: 'dev',
+			commit: shaDev,
+			check_id: check.id,
+			export_id: freshExport.id,
+			backup_id: freshExport.backup_id,
+			download_sha256: '0'.repeat(64),
+			download_bytes: String(zipBytes.length),
+			confirm: 'true'
+		});
+		assert.equal(badHashSwitch.status, 409);
+		assert.equal(badHashSwitch.data.installationCode, 'EXPORT_REQUIRED');
+		assert.equal(
+			badHashSwitch.data.installationError,
+			'The downloaded backup does not match the one Saturday prepared. Download it again.'
+		);
+		for (const badBytes of [String(zipBytes.length + 1), '0', '-5', 'abc', '1.5', '']) {
+			const badBytesSwitch = await postAction('switchBranch', {
+				ref: 'dev',
+				commit: shaDev,
+				check_id: check.id,
+				export_id: freshExport.id,
+				backup_id: freshExport.backup_id,
+				download_sha256: expectedSha256,
+				download_bytes: badBytes,
+				confirm: 'true'
+			});
+			assert.equal(
+				badBytesSwitch.status,
+				409,
+				`download_bytes=${JSON.stringify(badBytes)} refused`
+			);
+			assert.equal(badBytesSwitch.data.installationCode, 'EXPORT_REQUIRED');
+		}
+		for (const missingProof of [
+			{},
+			{ export_proof: 'received-bytes' },
+			{ download_bytes: String(zipBytes.length) },
+			{ download_bytes: String(zipBytes.length), export_proof: 'server-eof' }
+		]) {
+			const refused = await postAction('switchBranch', {
+				ref: 'dev',
+				commit: shaDev,
+				check_id: check.id,
+				export_id: freshExport.id,
+				backup_id: freshExport.backup_id,
+				...missingProof,
+				confirm: 'true'
+			});
+			assert.equal(refused.status, 409);
+			assert.equal(refused.data.installationCode, 'EXPORT_REQUIRED');
+		}
+		const stillCompleteAfterMismatch = await postAction('switchExportStatus', {
+			export_id: freshExport.id
+		});
+		assert.equal(
+			stillCompleteAfterMismatch.data.switchExport.status,
+			'complete',
+			'mismatched switchBranch leaves export receipt untouched'
+		);
+
 		// 9. Restart server within TTL: receipt survives restart and is still loaded.
 		await server.stop();
 		const tokenAfterRestart = randomBytes(32).toString('hex');
@@ -1692,18 +1755,52 @@ test('Chrome journey: Settings Updates Advanced disclosure, warnings, download g
 			false,
 			'Move button enables after verified ZIP stream completes'
 		);
+		const clientProof = await page.evaluate(() => ({
+			sha: document.querySelector('#branch-switch input[name="download_sha256"]')?.value ?? null,
+			bytes: document.querySelector('#branch-switch input[name="download_bytes"]')?.value ?? null
+		}));
+		assert.match(
+			clientProof.sha ?? '',
+			/^[a-f0-9]{64}$/,
+			'client computes lowercase SHA-256 of blob'
+		);
+		assert.match(
+			clientProof.bytes ?? '',
+			/^[1-9]\d*$/,
+			'client records positive byte length of blob'
+		);
 
-		// 7. Reload page -> restored receipt keeps Move enabled when Advanced is opened.
-		step = '7. reload restores receipt';
+		// 7. Reload page -> restored receipt has no client digest, so Move stays disabled and prompts
+		// "Download again to verify"; clicking it re-downloads and re-enables Move with a fresh digest.
+		step = '7. reload requires re-verification';
 		await page.reload({ waitUntil: 'networkidle0' });
 		await page.click('#updates details.disclosure-quiet summary');
+		await page.waitForFunction(() =>
+			document.querySelector('#updates')?.textContent?.includes('Download again to verify')
+		);
+		assert.equal(
+			await page.$eval('#updates button[data-variant="destructive"]', (b) => b.disabled),
+			true,
+			'Move button stays disabled after reload until browser verifies downloaded bytes again'
+		);
+		await Promise.all([
+			page.waitForResponse((r) => r.url().includes('switch_export=')),
+			page.locator('#updates button::-p-text(Download again to verify)').click()
+		]);
 		await page.waitForFunction(() =>
 			document.querySelector('#updates')?.textContent?.includes('Backup streamed:')
 		);
 		assert.equal(
 			await page.$eval('#updates button[data-variant="destructive"]', (b) => b.disabled),
-			false
+			false,
+			'Move button re-enables after re-downloading and hashing the ZIP'
 		);
+		const reVerifiedProof = await page.evaluate(() => ({
+			sha: document.querySelector('#branch-switch input[name="download_sha256"]')?.value ?? null,
+			bytes: document.querySelector('#branch-switch input[name="download_bytes"]')?.value ?? null
+		}));
+		assert.match(reVerifiedProof.sha ?? '', /^[a-f0-9]{64}$/);
+		assert.match(reVerifiedProof.bytes ?? '', /^[1-9]\d*$/);
 
 		// 8. Click Move to this branch -> ConfirmDialog opens, Cancel closes and returns focus to Move.
 		step = '8. confirm dialog cancel';
@@ -1860,6 +1957,15 @@ test('Chrome journey: Settings Updates Advanced disclosure, warnings, download g
 		const noJsHtml = await noJs.content();
 		assert.ok(noJsHtml.includes('Review branch'));
 		assert.ok(noJsHtml.includes('branch_switch_confirmation_noscript'));
+		assert.ok(
+			noJsHtml.includes('name="export_proof" value="server-eof"'),
+			'no-JS confirmation form includes explicit export_proof=server-eof marker'
+		);
+		assert.equal(
+			noJsHtml.includes('name="download_sha256"'),
+			false,
+			'no-JS confirmation form omits client download_sha256'
+		);
 		await noJs.close();
 
 		assert.deepEqual(pageErrors, []);

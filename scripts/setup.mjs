@@ -16,7 +16,8 @@ import {
 	atomicJson,
 	acquireDirectoryLock,
 	ensureRecordedDirectories,
-	checkRecordedDirectories
+	checkRecordedDirectories,
+	resolveNpmCli
 } from '../src/lib/server/installation.js';
 import { initializeAccessSettings } from '../src/lib/server/access-settings.js';
 import { storageCompatibility } from '../src/lib/server/compatibility.js';
@@ -130,16 +131,23 @@ try {
 						)
 			);
 		});
-	const npm = [
-		join(dirname(config.node_path), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-		join(dirname(config.node_path), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-		process.env.npm_execpath
-	]
-		.filter(Boolean)
-		.find(existsSync);
+	let npm = null;
+	let npmError = null;
+	try {
+		npm = resolveNpmCli(config);
+	} catch (e) {
+		if (process.env.npm_execpath && existsSync(process.env.npm_execpath)) {
+			npm = process.env.npm_execpath;
+		} else {
+			npmError = e;
+		}
+	}
 	if (!npm && (!values['skip-dependencies'] || !values['skip-build'] || !values['skip-pdf']))
-		throw new Error(
-			'This Node runtime has no matching npm. Use the supported Node distribution or retry with a complete runtime.'
+		throw (
+			npmError ||
+			new Error(
+				'This Node runtime has no matching npm. Use the supported Node distribution or retry with a complete runtime.'
+			)
 		);
 	async function step(name, skip, work, optional = false) {
 		if (skip) {
