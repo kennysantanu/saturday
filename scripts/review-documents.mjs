@@ -845,7 +845,8 @@ try {
 			queueBranchSwitch,
 			executeOperation,
 			codeFingerprint,
-			operationStatus
+			operationStatus,
+			operationPaths
 		} = await import('../src/lib/server/installation-operations.js');
 		const { getInstallation } = await import('../src/lib/server/installation.js');
 		const managedRoot = join(scratch, 'managed-branch');
@@ -991,7 +992,7 @@ try {
 					headers: { cookie }
 				});
 				assert.equal(zipRes.status, 200);
-				await zipRes.arrayBuffer();
+				const zipBytes = Buffer.from(await zipRes.arrayBuffer());
 				const stopWeb = new Promise((r) => mWeb.once('close', r));
 				mWeb.kill('SIGTERM');
 				await stopWeb;
@@ -1003,10 +1004,15 @@ try {
 						check_id: rev.id,
 						export_id: backupPayload.switchExport.id,
 						backup_id: backupPayload.switchExport.backup_id,
+						download_sha256: createHash('sha256').update(zipBytes).digest('hex'),
+						download_bytes: zipBytes.length,
 						confirm: true
 					},
 					{ config: cfg, request: reqStub, spawnWorker: async () => process.pid }
 				);
+				const rawQueued = JSON.parse(await readFile(operationPaths(cfg).status, 'utf8'));
+				assert.equal(rawQueued.id, queued.id);
+				assert.equal(rawQueued.branch_switch.export_proof, 'received-bytes');
 				await executeOperation(queued.id, {
 					copySource,
 					downloadSource: async () => ({ source: candidateDir }),
