@@ -40,9 +40,14 @@ function fixture() {
 				return JSON.stringify(value);
 			});
 	};
+	const version = JSON.parse(readFileSync(join(root, 'package.json'))).version;
+	edit('release-baselines.json', (text) => {
+		const baselines = JSON.parse(text);
+		baselines.releases = baselines.releases.filter((release) => release.version !== version);
+		return JSON.stringify(baselines);
+	});
 	// Freeze only this disposable candidate; released repository baselines stay untouched.
 	freezeRelease(root);
-	const version = JSON.parse(readFileSync(join(root, 'package.json'))).version;
 	const parts = version.split('.').map(Number);
 	parts[2] += 1;
 	const nextVersion = parts.join('.');

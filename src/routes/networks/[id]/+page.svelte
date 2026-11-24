@@ -94,28 +94,30 @@
 	);
 	$effect(() => {
 		if (!form?.errors) return;
-		if (
-			['addInteraction', 'editInteraction', 'deleteInteraction', 'interaction-deleted'].includes(
-				form.action
-			)
-		) {
-			interactionOpen = true;
-			interactionId = values.update_id ?? '';
-			interactionDate = values.interaction_date ?? data.today;
-			interactionNote = values.note ?? '';
-			addReminder = values.add_reminder === 'on';
-			interactionReminder = {
-				reminder_date: values.reminder_date ?? data.today,
-				reminder_time: values.reminder_time ?? '00:00',
-				reminder_note: values.reminder_note ?? ''
-			};
-			deleteOpen = false;
-		}
-		if (form.action === 'network-note') {
-			noteOpen = true;
-			noteJob = values.job_id ?? '';
-			noteText = values.notes ?? '';
-		}
+		untrack(() => {
+			if (
+				['addInteraction', 'editInteraction', 'deleteInteraction', 'interaction-deleted'].includes(
+					form.action
+				)
+			) {
+				interactionOpen = true;
+				interactionId = values.update_id ?? '';
+				interactionDate = values.interaction_date ?? data.today;
+				interactionNote = values.note ?? '';
+				addReminder = values.add_reminder === 'on';
+				interactionReminder = {
+					reminder_date: values.reminder_date ?? data.today,
+					reminder_time: values.reminder_time ?? '00:00',
+					reminder_note: values.reminder_note ?? ''
+				};
+				deleteOpen = false;
+			}
+			if (form.action === 'network-note') {
+				noteOpen = true;
+				noteJob = values.job_id ?? '';
+				noteText = values.notes ?? '';
+			}
+		});
 	});
 	function href(changes: Record<string, string | number | null>) {
 		const params = new URLSearchParams(page.url.searchParams);
@@ -152,12 +154,16 @@
 					noteOpen = false;
 					unlinkOpen = false;
 				}
-				await update({ reset: false });
-				if (result.type === 'success') {
-					const saved = typeof result.data?.saved === 'string' ? result.data.saved : '';
-					if (saved && SAVED_MESSAGES[saved]) toast.show(SAVED_MESSAGES[saved]);
+				try {
+					await update({ reset: false });
+					await tick();
+					if (result.type === 'success') {
+						const saved = typeof result.data?.saved === 'string' ? result.data.saved : '';
+						if (saved && SAVED_MESSAGES[saved]) toast.show(SAVED_MESSAGES[saved]);
+					}
+				} finally {
+					if (guard) guard.saving = false;
 				}
-				if (guard) guard.saving = false;
 				await tick();
 				focusFirstError();
 			};

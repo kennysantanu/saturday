@@ -25,6 +25,70 @@ import {
 	listNetworks
 } from '../src/lib/server/local/people.js';
 
+test('interaction dialog validates and closes after saving', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'saturday-interaction-web-'));
+	process.env.SATURDAY_DB_PATH = join(root, 'career.sqlite');
+	process.env.SATURDAY_FILES_PATH = join(root, 'files');
+	process.env.SATURDAY_INSTALLATION_PATH = '';
+	process.env.SATURDAY_EXTENSION_STATE_PATH = join(root, 'extensions');
+	process.env.SATURDAY_EXTENSIONS_PATH = join(root, 'extension-code');
+	migrateDatabase();
+	const person = createNetwork({ name: 'Interaction validation contact' });
+	const socket = createServer();
+	await new Promise((r) => socket.listen(0, '127.0.0.1', r));
+	const port = socket.address().port;
+	await new Promise((r) => socket.close(r));
+	const base = `http://127.0.0.1:${port}`;
+	const child = spawn(process.execPath, ['scripts/start.mjs'], {
+		cwd: resolve('.'),
+		env: { ...process.env, PORT: String(port) },
+		stdio: ['ignore', 'pipe', 'pipe']
+	});
+	let logs = '';
+	child.stdout.on('data', (c) => (logs += c));
+	child.stderr.on('data', (c) => (logs += c));
+	let browser;
+	try {
+		let ready = false;
+		for (let i = 0; i < 150; i++) {
+			try {
+				if ((await fetch(base + '/jobs')).ok) {
+					ready = true;
+					break;
+				}
+			} catch {}
+			await new Promise((r) => setTimeout(r, 100));
+		}
+		assert(ready, logs);
+		browser = await puppeteer.launch({ headless: true, protocolTimeout: 15000 });
+		const page = await browser.newPage();
+		await page.goto(base + `/networks/${person.id}`, { waitUntil: 'networkidle0' });
+		await page.click('button::-p-text(Add interaction)');
+		await page.waitForSelector('#interaction_note');
+		await page.click('#network-interaction button[type="submit"]');
+		await page.waitForSelector('#interaction_note[aria-invalid="true"]');
+		assert.ok(await page.$('[role="dialog"]'));
+		await page.type('#interaction_note', 'Met at a conference.');
+		await page.click('#network-interaction button[type="submit"]');
+		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await page.waitForNetworkIdle({ idleTime: 300 });
+		assert.equal(await page.$('[role="dialog"]'), null);
+		assert.match(
+			await page.$eval('#person-interactions', (el) => el.textContent),
+			/Met at a conference\./
+		);
+		assert.equal(
+			listNetworkUpdates({ network_id: person.id }).updates[0].note,
+			'Met at a conference.'
+		);
+	} finally {
+		await browser?.close();
+		child.kill('SIGTERM');
+		await new Promise((r) => (child.exitCode !== null ? r() : child.once('exit', r)));
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test('production stage/history actions, result round trips and read-only overview', async (t) => {
 	const root = await mkdtemp(join(tmpdir(), 'saturday-workflow-web-'));
 	process.env.SATURDAY_DB_PATH = join(root, 'career.sqlite');
@@ -596,6 +660,11 @@ test('production stage/history actions, result round trips and read-only overvie
 			listNetworkUpdates({ network_id: person.id }).updates[0].note,
 			'Interaction validation draft'
 		);
+		assert.match(
+			await page.$eval('#person-interactions', (el) => el.textContent),
+			/Interaction validation draft/
+		);
+		assert.equal(await page.$('[role="dialog"]'), null);
 		await button('Add reminder');
 		await page.waitForSelector('#reminder-note');
 		await page.locator('#reminder-date').fill('2099-01-01');
