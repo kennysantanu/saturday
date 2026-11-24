@@ -1,33 +1,24 @@
 # Saturday release notes
 
-## Saturday 0.1.4 — in development
+## Saturday 0.1.4
 
-Not yet released. Database schema 1 and file manifest 1 are unchanged.
+Database schema 1 and file manifest 1 are unchanged. The 0.1.3 changes are included in this
+release.
 
-### Network
+### Updates and branch switching
 
-- Unlinking a job–person link that carries a saved relationship note now asks for confirmation and states that the note will be lost; links without a note unlink straight through, there is no Undo for unlinking yet, unlinking through the MCP assistant still removes a link and its note without prompting because MCP has no confirmation UI, and confirming an unlink in one tab after another tab edited the same note removes the link with the newer note rather than re-prompting.
+- Settings → Updates → Advanced can move a managed installation between the available `main` and `dev` branches. Download the required database-and-files ZIP and confirm before moving. Every move clears installation data, including local backups, extensions, password and LAN settings; no previous data folder is retained. Source checkouts use Git instead.
+- Branch moves pin the reviewed commit and track the selected branch for later manual update checks. An installation that tracks `dev` offers that branch's later commits as manual updates, and those updates keep the installation's data. Checks distinguish an unknown installed commit from an up-to-date build; local fingerprint builds retain their build ID and record Git commit and dirty state when these can be proved.
+- A move requires proof that the browser holds the ZIP: Settings reads the file it received, sends its SHA-256 and byte count, and the move is refused when they do not match the exported backup. A receipt restored after a reload has no such proof and asks for the download again. With scripts disabled the form falls back to the server's stream reaching its end, a weaker proof that is recorded as such.
+- Keep the downloaded ZIP outside the installation. It restores database and documents into a compatible fresh build, but does not contain extensions, password or LAN settings.
 
 ### Backups
 
 - Backups export as one ZIP that holds your database and every document, and importing that same file restores both. Importing a combined backup ZIP now takes you straight to the restore preview for the file you chose instead of asking you to find it again in the list. The primary control is a single **Download database and files** button (which also saves a local copy); creating a local database-only, files-only, or combined backup without downloading remains under **Advanced backup options**.
 
-### Updates and branch switching
+### Documents and editing
 
-- Settings → Updates → Advanced can move a managed installation between the available `main` and `dev` branches. Download the required database-and-files ZIP and confirm before moving. Every move clears installation data, including local backups, extensions, password and LAN settings; no previous data folder is retained. Source checkouts use Git instead.
-- Branch moves pin the reviewed commit and track the selected branch for later manual update checks. Checks distinguish an unknown installed commit from an up-to-date build; local fingerprint builds retain their build ID and record Git commit and dirty state when these can be proved.
-- Keep the downloaded ZIP outside the installation. It restores database and documents into a compatible fresh build, but does not contain extensions, password or LAN settings. Saturday can detect stream completion, not whether the browser saved the file.
-
-### Process leases and maintenance reliability
-
-- Web and MCP runtimes now publish version-2 process leases (`<pid>.json`) backed by a per-process 256-bit secret and an unreferenced loopback identity listener (`127.0.0.1`), and synchronously remove their own verified lease on clean exit, `SIGTERM`, `SIGINT`, or stdin EOF.
-- Update, repair, uninstall, sign-in maintenance, and extension checks now challenge live PIDs over loopback instead of trusting `pid` liveness alone. Stale v2 leases left behind after a crash whose PID was reused by an unrelated process are ignored without deleting files during reads.
-- Legacy `{pid, role}` leases without an identity endpoint, identity probe timeouts/errors, and invalid or symlinked lease entries continue to block conservatively and now report the exact PID, lease path, and reason. Reconnect upgraded assistants to publish v2 proof; if an old legacy file blocks on an unrelated live PID, stop all Saturday runtimes, inspect the PID's owner, and move only that identified file to a recovery folder.
-- Limitations: forced termination (`SIGKILL`) or power loss can still leave abandoned v2 files on disk for later offline cleanup, and mixed-version old readers remain conservative until upgraded. Cross-platform runtime verification remains separate from local macOS checks.
-
-## Saturday 0.1.3 — in development
-
-Not yet released. Database schema 1 and file manifest 1 are unchanged.
+- Markdown files with a pipe in ordinary text or a horizontal rule now open in the visual editor instead of source mode. Tables and task lists (`- [ ]` checkboxes) now open in the visual editor too, and are saved back as the same Markdown tables and checkboxes. Before a Markdown file opens visually, Saturday now reads and rewrites it exactly as the visual editor would and compares the result, so a file the editor would change (a checkbox item with a wrapped second line, extra spaces inside code in a table cell, a table row the editor reads differently) stays in source mode instead of being altered. Documents with images, link or footnote definitions, or headings underlined with `---` or `===` also open in source mode, and the page says which construct is the reason. HTML in a Markdown file is plain text in the visual editor, so notes that merely mention tags such as `<style>`, `<head>` or `<!DOCTYPE html>` open visually with every word intact; the tags are kept and saved as text (`&lt;style&gt;`) and are never interpreted. A document opens visually only when what a reader sees survives the conversion, so an image that would be reduced to its alt text keeps its file in source mode. Saving from the visual editor is refused, with your edits kept, if the result would not read back.
 
 ### Lists and sorting
 
@@ -36,9 +27,9 @@ Not yet released. Database schema 1 and file manifest 1 are unchanged.
 - Dashboard board cards are ordered by the job's latest update, and a reminder change now counts as job activity.
 - Stage age on board cards reads in days under a month, then months, then years (5d, 3mo, 1y).
 
-### Documents and editing
+### Network
 
-- Markdown files with a pipe in ordinary text or a horizontal rule now open in the visual editor instead of source mode. Tables and task lists (`- [ ]` checkboxes) now open in the visual editor too, and are saved back as the same Markdown tables and checkboxes. Before a Markdown file opens visually, Saturday now reads and rewrites it exactly as the visual editor would and compares the result, so a file the editor would change (a checkbox item with a wrapped second line, extra spaces inside code in a table cell, a table row the editor reads differently) stays in source mode instead of being altered. Documents with images, link or footnote definitions, or headings underlined with `---` or `===` also open in source mode, and the page says which construct is the reason. HTML in a Markdown file is plain text in the visual editor, so notes that merely mention tags such as `<style>`, `<head>` or `<!DOCTYPE html>` open visually with every word intact; the tags are kept and saved as text (`&lt;style&gt;`) and are never interpreted. A document opens visually only when what a reader sees survives the conversion, so an image that would be reduced to its alt text keeps its file in source mode. Saving from the visual editor is refused, with your edits kept, if the result would not read back.
+- Unlinking a job–person link that carries a saved relationship note now asks for confirmation and states that the note will be lost; links without a note unlink straight through, there is no Undo for unlinking yet, unlinking through the MCP assistant still removes a link and its note without prompting because MCP has no confirmation UI, and confirming an unlink in one tab after another tab edited the same note removes the link with the newer note rather than re-prompting.
 
 ### Installation and PDF setup
 
@@ -48,6 +39,13 @@ Not yet released. Database schema 1 and file manifest 1 are unchanged.
 ### Dashboard and Jobs
 
 - Opening Milestone history from the Dashboard no longer expands Advanced filters; other advanced filters still do.
+
+### Process leases and maintenance reliability
+
+- Web and MCP runtimes now publish version-2 process leases (`<pid>.json`) backed by a per-process 256-bit secret and an unreferenced loopback identity listener (`127.0.0.1`), and synchronously remove their own verified lease on clean exit, `SIGTERM`, `SIGINT`, or stdin EOF.
+- Update, repair, uninstall, sign-in maintenance, and extension checks now challenge live PIDs over loopback instead of trusting `pid` liveness alone. Stale v2 leases left behind after a crash whose PID was reused by an unrelated process are ignored without deleting files during reads.
+- Legacy `{pid, role}` leases without an identity endpoint, identity probe timeouts/errors, and invalid or symlinked lease entries continue to block conservatively and now report the exact PID, lease path, and reason. Reconnect upgraded assistants to publish v2 proof; if an old legacy file blocks on an unrelated live PID, stop all Saturday runtimes, inspect the PID's owner, and move only that identified file to a recovery folder.
+- Limitations: forced termination (`SIGKILL`) or power loss can still leave abandoned v2 files on disk for later offline cleanup, and mixed-version old readers remain conservative until upgraded. Cross-platform runtime verification remains separate from local macOS checks.
 
 ## Saturday 0.1.2
 
