@@ -29,9 +29,13 @@ function fixture() {
 		join(root, 'tests/fixtures/release-0.1.0-current'),
 		{ recursive: true }
 	);
+	const version = JSON.parse(readFileSync(join(root, 'package.json'))).version;
+	const baselinesPath = join(root, 'release-baselines.json');
+	const baselines = JSON.parse(readFileSync(baselinesPath, 'utf8'));
+	baselines.releases = baselines.releases.filter((release) => release.version !== version);
+	writeFileSync(baselinesPath, JSON.stringify(baselines));
 	// Prepare a fictional release of the current version in this disposable copy.
 	freezeRelease(root);
-	const version = JSON.parse(readFileSync(join(root, 'package.json'))).version;
 	const git = (...args) =>
 		execFileSync('git', ['-C', root, ...args], {
 			encoding: 'utf8',
