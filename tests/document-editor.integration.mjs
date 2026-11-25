@@ -75,19 +75,39 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 			await new Promise((r) => setTimeout(r, 100));
 		}
 		assert(ready, logs);
-		browser = await puppeteer.launch({ headless: true, protocolTimeout: 30000 });
+		browser = await puppeteer.launch({ headless: true, protocolTimeout: 15000 });
 		const page = await browser.newPage(),
 			errors = [];
 		page.on('pageerror', (e) => errors.push(e.message));
 		await page.setViewport({ width: 1100, height: 900 });
 		const status = () =>
 			page.$eval('.editor-actionbar [role="status"]', (e) => e.textContent.trim());
+		const readDrafts = () => page.evaluate(() => JSON.stringify(Object.values(localStorage)));
 		const waitForDraft = (label, pattern) =>
-			waitForValue(
+			waitForValue(label, readDrafts, (storedDrafts) => pattern.test(storedDrafts));
+		const waitForStableDraft = async (
+			label,
+			pattern,
+			{ settleMs = 250, timeoutMs = 10000 } = {}
+		) => {
+			let observed = { first: null, second: null };
+			await waitForCondition(
 				label,
-				() => page.evaluate(() => JSON.stringify(Object.values(localStorage))),
-				(storedDrafts) => pattern.test(storedDrafts)
+				async () => {
+					const first = await readDrafts();
+					await new Promise((r) => setTimeout(r, settleMs));
+					const second = await readDrafts();
+					observed = { first, second };
+					return pattern.test(first) && pattern.test(second) && first === second;
+				},
+				{
+					timeoutMs,
+					intervalMs: 100,
+					describe: () => observed
+				}
 			);
+			return observed.second;
+		};
 		// Reaching a document by clicking (client-side navigation, not a reload) must not loop and
 		// must leave the editor usable: the stored text ends with a newline, which the editor drops.
 		const cdp = await page.createCDPSession();
@@ -206,7 +226,12 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 				describe: () => lastWordSelection
 			}
 		);
-		assert.match(await page.evaluate(() => getSelection().toString()), /\S/);
+		await new Promise((r) => setTimeout(r, 500));
+		assert.match(
+			await page.evaluate(() => getSelection().toString()),
+			/\S/,
+			'word selection survives rendering'
+		);
 		await page.keyboard.press('ArrowRight');
 		// A draft survives a reload (the leave prompt is accepted) and is offered back.
 		await waitForDraft('unsaved draft with typed text in localStorage', /typed/);
@@ -440,7 +465,7 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 			{ timeout: 5000 }
 		);
 		// Path 2: an edit that serializes to the same Markdown still reschedules the draft write.
-		await waitForDraft('restored lossy draft in localStorage', /x {2}y/);
+		await waitForStableDraft('restored lossy draft in localStorage to stabilize', /x {2}y/);
 		await page.evaluate(() => localStorage.clear());
 		await page.click('.markdown-editor .document-prose td code');
 		await page.keyboard.press('Home');

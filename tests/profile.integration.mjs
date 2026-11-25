@@ -69,7 +69,7 @@ test('profile: grouped slots, document picker, upload into a slot and clearing',
 			await new Promise((r) => setTimeout(r, 100));
 		}
 		assert(ready, logs);
-		browser = await puppeteer.launch({ headless: true, protocolTimeout: 30000 });
+		browser = await puppeteer.launch({ headless: true, protocolTimeout: 15000 });
 		const page = await browser.newPage(),
 			errors = [];
 		page.on('pageerror', (e) => errors.push(e.message));
