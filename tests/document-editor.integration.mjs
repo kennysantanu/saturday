@@ -13,6 +13,7 @@ import {
 	getDocument,
 	listDocuments
 } from '../src/lib/server/files/documents.js';
+import { waitForCondition, waitForSelectorReady, waitForValue } from './helpers/wait-for.mjs';
 
 test('document editor: no false unsaved state, formatting, Ctrl+S, rename in place and a ready New document form', async (t) => {
 	if (!existsSync(await puppeteer.executablePath())) return t.skip('Managed Chrome is required.');
@@ -81,6 +82,12 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		await page.setViewport({ width: 1100, height: 900 });
 		const status = () =>
 			page.$eval('.editor-actionbar [role="status"]', (e) => e.textContent.trim());
+		const waitForDraft = (label, pattern) =>
+			waitForValue(
+				label,
+				() => page.evaluate(() => JSON.stringify(Object.values(localStorage))),
+				(storedDrafts) => pattern.test(storedDrafts)
+			);
 		// Reaching a document by clicking (client-side navigation, not a reload) must not loop and
 		// must leave the editor usable: the stored text ends with a newline, which the editor drops.
 		const cdp = await page.createCDPSession();
@@ -99,8 +106,15 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		await page.waitForSelector('.document-prose');
 		await new Promise((r) => setTimeout(r, 500));
 		await clickLink('Edit', 'edit=1');
-		await page.waitForSelector('.editor-sticky');
-		await new Promise((r) => setTimeout(r, 800));
+		await waitForSelectorReady(page, '.editor-sticky', {
+			label: 'sticky editor toolbar',
+			visible: true
+		});
+		await waitForSelectorReady(page, '.markdown-editor .document-prose[contenteditable="true"]', {
+			label: 'editable visual document prose',
+			visible: true
+		});
+		await new Promise((r) => setTimeout(r, 400));
 		const proseBox = await page.$eval('.document-prose p, .document-prose li', (e) => {
 			const r = e.getBoundingClientRect();
 			return { x: r.x + 12, y: r.y + 10 };
@@ -166,7 +180,7 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		assert.match(await page.evaluate(() => getSelection().toString()), /\S/);
 		await page.keyboard.press('ArrowRight');
 		// A draft survives a reload (the leave prompt is accepted) and is offered back.
-		await new Promise((r) => setTimeout(r, 900));
+		await waitForDraft('unsaved draft with typed text in localStorage', /typed/);
 		page.once('dialog', (dialog) => dialog.accept());
 		await page.goto(`${base}/documents/${id}?edit=1`, { waitUntil: 'networkidle0' });
 		await page.waitForFunction(() =>
@@ -192,7 +206,11 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 			await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point });
 		}
 		await page.click('.editor-toolbar [aria-label="Strikethrough"]');
-		await new Promise((r) => setTimeout(r, 300));
+		await waitForValue(
+			'hidden content input to include strikethrough markdown',
+			() => page.$eval('input[name="content"]', (e) => e.value),
+			(value) => /~~/.test(value)
+		);
 		assert(await page.$('.markdown-editor .document-prose'), 'still in the visual editor');
 		assert.match(await page.$eval('input[name="content"]', (e) => e.value), /~~/);
 		await Promise.all([
@@ -209,10 +227,20 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		);
 		// Detail page: metadata and an actions menu; rename keeps you on the document.
 		assert.match(await page.$eval('.page-meta', (e) => e.textContent), /Markdown · /);
-		// Let the client-side navigation finish hydrating before opening the menu.
-		await page.waitForSelector('button[aria-label^="More actions for"]');
-		await new Promise((r) => setTimeout(r, 800));
-		await (await page.$('button[aria-label^="More actions for"]')).click();
+		// Wait for hydration so clicking the actions menu reliably opens Rename.
+		await waitForSelectorReady(page, 'button[aria-label^="More actions for"]', {
+			label: 'More actions button',
+			visible: true
+		});
+		await waitForCondition(
+			'Rename menu item to appear after clicking More actions',
+			async () => {
+				if (await page.$('[role="menuitem"]::-p-text(Rename)')) return true;
+				await page.click('button[aria-label^="More actions for"]');
+				return Boolean(await page.$('[role="menuitem"]::-p-text(Rename)'));
+			},
+			{ timeoutMs: 15000, intervalMs: 150 }
+		);
 		await page.locator('[role="menuitem"]::-p-text(Rename)').click();
 		await page.waitForSelector('[role="dialog"] input[name="filename"]');
 		await page.$eval('[role="dialog"] input[name="filename"]', (e) => (e.value = ''));
@@ -264,16 +292,33 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		// One tab stop in the toolbar; arrow keys move within it.
 		assert.equal(await page.$$eval('.editor-toolbar [tabindex="0"]', (e) => e.length), 1);
 		assert.deepEqual(errors, []);
+		// Type the extra space inside the code span; retry in case the editor was still settling.
+		const typeCodeSpace = async () => {
+			await waitForCondition(
+				'extra space inside code span to render as "x  y"',
+				async () => {
+					await page.click('.markdown-editor .document-prose td code');
+					await page.keyboard.press('Home');
+					await page.keyboard.press('ArrowRight');
+					await page.keyboard.type(' ');
+					return (await page.$eval('.document-prose td code', (e) => e.textContent)) === 'x  y';
+				},
+				{
+					timeoutMs: 10000,
+					intervalMs: 300,
+					describe: () => page.$eval('.document-prose td code', (e) => e.textContent)
+				}
+			);
+		};
 		// A space typed inside code in a table cell would be squeezed out on save. Save is refused, the
 		// stored file is untouched, and the "Not saved yet" notice appears and takes focus.
 		await page.setViewport({ width: 1100, height: 900 });
 		await page.goto(`${base}/documents/${tableId}?edit=1`, { waitUntil: 'networkidle0' });
-		await page.waitForSelector('.markdown-editor .document-prose td code');
-		await new Promise((r) => setTimeout(r, 400));
-		await page.click('.markdown-editor .document-prose td code');
-		await page.keyboard.press('Home');
-		await page.keyboard.press('ArrowRight');
-		await page.keyboard.type(' ');
+		await waitForSelectorReady(page, '.markdown-editor .document-prose td code', {
+			label: 'table code cell in visual editor',
+			visible: true
+		});
+		await typeCodeSpace();
 		assert.equal(await page.$eval('.document-prose td code', (e) => e.textContent), 'x  y');
 		await page.keyboard.down('Control');
 		await page.keyboard.press('s');
@@ -309,6 +354,11 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		await page.keyboard.press('ArrowRight');
 		await page.keyboard.press('ArrowRight');
 		await page.keyboard.press('Backspace');
+		await waitForValue(
+			'code span text to return to "x y"',
+			() => page.$eval('.document-prose td code', (e) => e.textContent),
+			(text) => text === 'x y'
+		);
 		assert.equal(await page.$eval('.document-prose td code', (e) => e.textContent), 'x y');
 		await page.keyboard.down('Control');
 		await page.keyboard.press('s');
@@ -330,21 +380,12 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		// Bypass 1: switching to Markdown must not destroy lossy live edits and then let source save them.
 		// Pages left with unsaved edits ask before leaving; accept so each scenario starts fresh.
 		page.on('dialog', (dialog) => dialog.accept());
-		// Type the extra space inside the code span; retry in case the editor was still settling.
-		const typeCodeSpace = async () => {
-			for (let attempt = 0; attempt < 5; attempt++) {
-				await new Promise((r) => setTimeout(r, 500));
-				await page.click('.markdown-editor .document-prose td code');
-				await page.keyboard.press('Home');
-				await page.keyboard.press('ArrowRight');
-				await page.keyboard.type(' ');
-				if ((await page.$eval('.document-prose td code', (e) => e.textContent)) === 'x  y') return;
-			}
-			assert.fail('could not type the extra space inside the code span');
-		};
 		const lossyEdit = async (docId) => {
 			await page.goto(`${base}/documents/${docId}?edit=1`, { waitUntil: 'networkidle0' });
-			await page.waitForSelector('.markdown-editor .document-prose td code');
+			await waitForSelectorReady(page, '.markdown-editor .document-prose td code', {
+				label: 'table code cell for lossy edit',
+				visible: true
+			});
 			await typeCodeSpace();
 		};
 		const stored = async (docId) =>
@@ -358,7 +399,7 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		assert.equal(await stored(tableId), tableText.length, 'nothing was saved');
 		// Crash: the draft keeps the live document, so the lossy edit (and its exact text) survives a reload,
 		// and a draft whose Markdown equals the stored file is not discarded as "no changes".
-		await new Promise((r) => setTimeout(r, 1000));
+		await waitForDraft('lossy live draft in localStorage', /x {2}y/);
 		await page.goto(`${base}/documents/${tableId}?edit=1`, { waitUntil: 'networkidle0' });
 		await page.waitForFunction(() =>
 			document.body.innerText.includes('Restore your unsaved draft')
@@ -370,7 +411,7 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 			{ timeout: 5000 }
 		);
 		// Path 2: an edit that serializes to the same Markdown still reschedules the draft write.
-		await new Promise((r) => setTimeout(r, 1000));
+		await waitForDraft('restored lossy draft in localStorage', /x {2}y/);
 		await page.evaluate(() => localStorage.clear());
 		await page.click('.markdown-editor .document-prose td code');
 		await page.keyboard.press('Home');
@@ -380,7 +421,7 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 			() => document.querySelector('.document-prose td code')?.textContent === 'x   y',
 			{ timeout: 5000 }
 		);
-		await new Promise((r) => setTimeout(r, 1200));
+		await waitForDraft('rewritten live draft with three spaces in localStorage', /x {3}y/);
 		assert.match(
 			await page.evaluate(() => JSON.stringify(Object.values(localStorage))),
 			/x {3}y/,
@@ -395,7 +436,7 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		await page.locator('.segmented button::-p-text(Markdown)').click();
 		await page.waitForSelector('#document_content');
 		await page.locator('button::-p-text(Restore draft)').click();
-		await new Promise((r) => setTimeout(r, 1200));
+		await waitForDraft('source-mode restored draft with three spaces in localStorage', /x {3}y/);
 		assert.match(
 			await page.evaluate(() => JSON.stringify(Object.values(localStorage))),
 			/x {3}y/,
@@ -457,7 +498,7 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		await page.keyboard.press('a');
 		await page.keyboard.up('Control');
 		await page.keyboard.type('Draft title\n===');
-		await new Promise((r) => setTimeout(r, 1000));
+		await waitForDraft('source draft with underlined heading in localStorage', /Draft title/);
 		await page.goto(`${base}/documents/${tableId}?edit=1`, { waitUntil: 'networkidle0' });
 		await page.waitForFunction(() =>
 			document.body.innerText.includes('Restore your unsaved draft')
@@ -481,7 +522,11 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		await page.keyboard.up('Control');
 		await page.keyboard.type('Title\n===');
 		await page.$eval('.segmented button:first-child', (e) => e.click());
-		await new Promise((r) => setTimeout(r, 100));
+		await waitForValue(
+			'source view refusal status notice',
+			() => page.$eval('p[role="status"]', (e) => e.textContent),
+			(text) => /headings underlined/.test(text)
+		);
 		assert.notEqual(await page.$('#document_content'), null, 'stayed in the source view');
 		assert.equal(await page.$('.markdown-editor'), null, 'visual mode was not entered');
 		assert.match(await page.$eval('p[role="status"]', (e) => e.textContent), /headings underlined/);
@@ -520,16 +565,17 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		await page.keyboard.down('Control');
 		await page.keyboard.press('s');
 		await page.keyboard.up('Control');
-		await page.waitForFunction(
-			() => !location.search.includes('edit') || document.body.innerText.includes('Edited.'),
-			{ timeout: 10000 }
+		await waitForCondition(
+			'hazard document save to leave edit mode',
+			() => page.evaluate(() => !new URL(location.href).searchParams.has('edit')),
+			{ timeoutMs: 10000 }
 		);
-		let saved;
-		for (let i = 0; i < 50; i++) {
-			saved = (await getDocument({ id: hazardId, include_content: true })).content;
-			if (saved.includes('Edited.')) break;
-			await new Promise((r) => setTimeout(r, 200));
-		}
+		const saved = await waitForValue(
+			'saved hazard document content to include Edited.',
+			async () => (await getDocument({ id: hazardId, include_content: true })).content,
+			(content) => content.includes('Edited.'),
+			{ timeoutMs: 10000, intervalMs: 200 }
+		);
 		assert.match(saved, /After paragraph\. Edited\./, 'the edit was saved');
 		// Tags are saved as text (`&lt;style&gt;`), as the design guide states, and read back as the same text.
 		for (const part of [

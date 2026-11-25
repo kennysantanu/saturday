@@ -12,6 +12,12 @@ import {
 	listDocuments,
 	setMasterDocument
 } from '../src/lib/server/files/documents.js';
+import {
+	waitForDialogClosed,
+	waitForPage,
+	waitForSelectorReady,
+	waitForValue
+} from './helpers/wait-for.mjs';
 
 test('profile: grouped slots, document picker, upload into a slot and clearing', async (t) => {
 	if (!existsSync(await puppeteer.executablePath())) return t.skip('Managed Chrome is required.');
@@ -139,46 +145,105 @@ test('profile: grouped slots, document picker, upload into a slot and clearing',
 
 		// Search follows typing and lists only matches.
 		await page.type('#picker_query', 'direction');
-		await page.waitForFunction(() => location.search.includes('query=direction'));
-		await page.waitForFunction(() => document.querySelectorAll('.picker-option').length === 2);
+		await waitForPage(page, 'URL to include query=direction', () =>
+			location.search.includes('query=direction')
+		);
+		await waitForValue(
+			'picker options to show filtered matches',
+			options,
+			(items) => items.length === 2 && items.includes('direction.md')
+		);
 		assert.match(await text('[data-slot="dialog-content"] [role="status"]'), /matching search/);
-		await new Promise((r) => setTimeout(r, 400)); // the dialog resizes while results change
-		await page.click('.search-clear');
-		await page.waitForFunction(() => !location.search.includes('query='));
 
-		// Choosing a file selects it for the slot and closes the dialog.
-		await page.evaluate(() =>
-			[...document.querySelectorAll('.picker-option')]
-				.find((o) => o.textContent.includes('direction.md'))
-				?.click()
+		// Choosing a file from the filtered search results keeps it selected even if search is cleared,
+		// then submitting assigns it to the slot and closes the dialog.
+		await page.evaluate(() => {
+			const match = [...document.querySelectorAll('.picker-option')].find((o) =>
+				o.textContent.includes('direction.md')
+			);
+			if (!match) throw new Error('No .picker-option containing direction.md');
+			match.click();
+		});
+		await waitForValue(
+			'confirm button to become Use direction.md',
+			() =>
+				page.$$eval('[data-slot="dialog-content"] button', (nodes) =>
+					nodes.map((n) => ({
+						text: n.textContent.replace(/\s+/g, ' ').trim(),
+						disabled: n.disabled
+					}))
+				),
+			(buttons) => buttons.some((b) => b.text.includes('Use direction.md') && !b.disabled)
+		);
+		await waitForSelectorReady(page, '.search-clear', {
+			label: 'search clear button',
+			visible: true
+		});
+		await click('.search-clear', 'Clear search filenames');
+		await waitForPage(
+			page,
+			'URL to clear query parameter',
+			() => !location.search.includes('query=')
+		);
+		await waitForValue(
+			'confirm button to remain Use direction.md after clearing search',
+			() =>
+				page.$$eval('[data-slot="dialog-content"] button', (nodes) =>
+					nodes.map((n) => ({
+						text: n.textContent.replace(/\s+/g, ' ').trim(),
+						disabled: n.disabled
+					}))
+				),
+			(buttons) => buttons.some((b) => b.text.includes('Use direction.md') && !b.disabled)
 		);
 		await click('[data-slot="dialog-content"] button', 'Use direction.md');
-		await page.waitForFunction(() => !document.querySelector('[data-slot="dialog-content"]'));
-		await page.waitForFunction(() =>
-			document.querySelector('.page-meta')?.textContent.includes('2 of 5')
+		await waitForDialogClosed(page, { label: 'Career direction picker dialog to close' });
+		await waitForValue('profile summary to show 2 of 5', summary, (value) =>
+			value.includes('2 of 5')
+		);
+		await waitForValue(
+			'profile URL search string to clear',
+			() => new URL(page.url()).search,
+			(search) => search === ''
 		);
 		assert.equal(new URL(page.url()).search, '');
 
 		// Uploading from the picker fills the slot and closes the dialog.
 		await click('.profile-slot a', 'Select document for Assistant preferences');
-		await page.waitForSelector('[data-slot="dialog-content"] .picker-option');
+		await waitForSelectorReady(page, '[data-slot="dialog-content"] .picker-option', {
+			label: 'Assistant preferences picker options',
+			visible: true
+		});
 		const chooser = page.waitForFileChooser();
 		await click('[data-slot="dialog-content"] button', 'Upload');
 		await (await chooser).accept([upload]);
-		await page.waitForFunction(() =>
-			document.querySelector('.page-meta')?.textContent.includes('3 of 5')
+		await waitForValue('profile summary to show 3 of 5 after upload', summary, (value) =>
+			value.includes('3 of 5')
 		);
-		await page.waitForFunction(() => !document.querySelector('[data-slot="dialog-content"]'));
+		await waitForDialogClosed(page, { label: 'Assistant preferences picker dialog to close' });
 		assert.match(await text('main'), /preferences\.md/);
 
 		// Clearing keeps the file.
 		await click('.profile-slot button', 'More actions for Master CV');
-		await page.waitForSelector('[role="menuitem"]');
+		await waitForSelectorReady(page, '[role="menuitem"]', {
+			label: 'Master CV actions menu',
+			visible: true
+		});
 		await click('[role="menuitem"]', 'Clear selection');
-		await page.waitForSelector('[data-slot="dialog-content"]');
+		await waitForValue(
+			'Clear selection confirm button to be ready',
+			() =>
+				page.$$eval('[data-slot="dialog-content"] button', (nodes) =>
+					nodes.map((n) => ({
+						text: n.textContent.replace(/\s+/g, ' ').trim(),
+						disabled: n.disabled
+					}))
+				),
+			(buttons) => buttons.some((b) => b.text.includes('Clear selection') && !b.disabled)
+		);
 		await click('[data-slot="dialog-content"] button', 'Clear selection');
-		await page.waitForFunction(() =>
-			document.querySelector('.page-meta')?.textContent.includes('2 of 5')
+		await waitForValue('profile summary to show 2 of 5 after clearing', summary, (value) =>
+			value.includes('2 of 5')
 		);
 		assert.ok(
 			(await listDocuments({})).documents.some((d) => d.filename === 'resume.md'),
