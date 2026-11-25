@@ -8,6 +8,12 @@ Database schema 1 and file manifest 1 are unchanged.
 
 - Markdown files containing HTML outside fenced code blocks, indented code blocks, and inline code spans—such as comments (`<!-- … -->`), tags like `<details>`, `<br>`, `<style>`, or declarations like `<!DOCTYPE html>`—now open in source mode instead of the visual editor, so their bytes are never rewritten as escaped `&lt;…&gt;` text. Markdown autolinks (`<https://…>`, `<name@host>`), angle-bracket link destinations, and ordinary prose comparisons still open visually, and the refusal notice explains why and points to wrapping the HTML in code or editing in the source view.
 
+- The visual editor keeps the caret and the selection while you write. Opening a document for editing no longer sends the stored text back through the editor once the page finishes loading, and a word selected by double-click is no longer collapsed by the editor's focus handling, which is what made the caret jump under load.
+
+- An edit that arrives from outside the editor is applied as a change to the affected range rather than as a reload of the whole document, so the selection and the undo history outside that range survive. Loading a different document resets the undo history, so Undo cannot replay one document's steps onto another.
+
+- When a save fails, text typed while the save was in flight stays in the editor instead of being replaced by the values that were submitted.
+
 ### Updates
 
 - Branch update checks now verify Git ancestry against the tracked branch on GitHub and offer an update only when the branch head is ahead of the installed commit. An installation whose commit is ahead of its tracked branch, diverged from it, or has no shared history with it is refused rather than offered a backward or sideways move.
