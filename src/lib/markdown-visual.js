@@ -4,11 +4,14 @@ import { markdownExtensions, literalHtmlMarked } from './markdown-extensions.js'
 
 // The visual editor must never silently change a document. Deciding whether a document may open there is
 // therefore done by doing exactly what the editor will do: read it with the editor's own extensions, write
-// it back, and compare what a reader would see in the source with what the round trip leaves. Preserving
-// that meaning is the only authority. The syntax of a construct never admits or refuses a document by
-// itself; once a document has been refused, syntax is used only to put a name to the loss.
+// it back, and compare what a reader would see in the source with what the round trip leaves. Two deliberate
+// policies sit ahead of that comparison: setext headings (the editor has no underlined heading) and HTML
+// outside code (the editor can only escape raw HTML, rewriting the user's bytes). Otherwise preserving
+// meaning is the only authority; once a document has been refused, syntax is used only to put a name to the
+// loss.
 //
-// HTML is literal text here (see literalHtmlMarked), for the editor and for the independent reader alike.
+// HTML is still literal text in literalHtmlMarked(), so no HTML token ever reaches Tiptap's browser-only
+// DOMParser path if a document is parsed directly.
 
 // A parser of our own. The editor's Markdown extension registers its table and task tokenizers on whichever
 // marked instance it is given, so reading the *source* with a shared one would make the source and the
@@ -285,6 +288,118 @@ function preserved(text, tokens) {
 	}
 }
 
+const HTML_BLOCKER = 'HTML that the source editor would keep and the visual editor would escape';
+const URI_AUTOLINK = /<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>\u0000]*>/g;
+const EMAIL_AUTOLINK =
+	/<[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*>/g;
+const HTML_DECLARATION = /<(?:!|\?)/;
+const HTML_TAG = /<\/?[A-Za-z][^>\u0000]*>/;
+
+/** Replaces fenced code blocks (backtick and tilde fences) with blank lines so their contents are ignored. */
+function stripFencedCode(text) {
+	const lines = String(text ?? '').split(/\r?\n/);
+	const kept = [];
+	let fenceChar = '';
+	let fenceLen = 0;
+	let fenceQuotes = 0;
+	for (const line of lines) {
+		const prefix = line.match(/^((?:[ \t]*>[ \t]?)*)/)[1];
+		const quotes = (prefix.match(/>/g) ?? []).length;
+		const rest = line.slice(prefix.length);
+		if (fenceChar) {
+			if (quotes < fenceQuotes) {
+				fenceChar = '';
+				fenceLen = 0;
+				fenceQuotes = 0;
+			} else {
+				const close = rest.match(/^[ \t]*(`{3,}|~{3,})[ \t]*$/);
+				if (close && close[1][0] === fenceChar && close[1].length >= fenceLen) {
+					fenceChar = '';
+					fenceLen = 0;
+					fenceQuotes = 0;
+				}
+				kept.push('');
+				continue;
+			}
+		}
+		const open = rest.match(/^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/);
+		if (open && (open[1][0] === '~' || !open[2].includes('`'))) {
+			fenceChar = open[1][0];
+			fenceLen = open[1].length;
+			fenceQuotes = quotes;
+			kept.push('');
+			continue;
+		}
+		kept.push(line);
+	}
+	return kept.join('\n');
+}
+
+/**
+ * Replaces backtick inline code spans within each non-blank block with a NUL sentinel, so code contents
+ * are ignored and text on either side of a code span or paragraph break cannot fuse into a false tag.
+ */
+function stripInlineCode(text) {
+	return text
+		.split(/\n[ \t]*\n/)
+		.map((block) => {
+			let out = '';
+			let i = 0;
+			while (i < block.length) {
+				if (block[i] !== '`') {
+					out += block[i++];
+					continue;
+				}
+				let backslashes = 0;
+				for (let k = i - 1; k >= 0 && block[k] === '\\'; k--) backslashes++;
+				if (backslashes % 2 === 1) {
+					out += block[i++];
+					continue;
+				}
+				let n = 0;
+				while (i + n < block.length && block[i + n] === '`') n++;
+				let j = i + n;
+				let closedAt = -1;
+				while (j < block.length) {
+					if (block[j] !== '`') {
+						j++;
+						continue;
+					}
+					let m = 0;
+					while (j + m < block.length && block[j + m] === '`') m++;
+					if (m === n) {
+						closedAt = j + m;
+						break;
+					}
+					j += m;
+				}
+				if (closedAt !== -1) {
+					out += '\u0000';
+					i = closedAt;
+				} else {
+					out += block.slice(i, i + n);
+					i += n;
+				}
+			}
+			return out;
+		})
+		.join('\u0000');
+}
+
+/**
+ * True when the source contains HTML markup (comments, declarations, processing instructions, or
+ * opening/closing tags) outside fenced code blocks and inline code spans. Markdown autolinks
+ * (`<https://...>`, `<mailto:...>`, other `<scheme:...>`, `<name@host>`) and backslash-escaped `<`
+ * are excluded.
+ */
+function hasHtmlMarkup(text) {
+	const cleaned = stripInlineCode(stripFencedCode(text))
+		.replace(/\\[^\n\u0000]/g, ' ')
+		.replace(URI_AUTOLINK, '\u0000')
+		.replace(EMAIL_AUTOLINK, '\u0000');
+	return HTML_DECLARATION.test(cleaned) || HTML_TAG.test(cleaned);
+}
+
 /**
  * Why a Markdown document must stay in source mode, as a short plain phrase, or null when the visual
  * editor can hold it without loss. Run it once when a document opens or when the user asks for Visual;
@@ -300,8 +415,10 @@ export function visualMarkdownBlocker(text) {
 		// A document the parser cannot read must stay in source mode rather than be rewritten.
 		return 'text the editor could not read';
 	}
-	// A deliberate policy, not a measured loss: the editor has no heading that is underlined.
+	// Deliberate policies ahead of the round-trip check: the editor has no underlined heading, and
+	// would escape HTML outside code into entities instead of keeping the user's bytes.
 	if (hasSetextHeading(tokens)) return 'headings underlined with --- or ===';
+	if (hasHtmlMarkup(text)) return HTML_BLOCKER;
 	if (preserved(text, tokens)) return null;
 	// Refused. An image or definition anywhere in the document is itself a loss (the editor keeps neither),
 	// and naming it is more useful than the block around it. Otherwise find the block responsible.

@@ -584,38 +584,31 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 		assert.notEqual(await page.$('#document_content'), null, 'stayed in the source view');
 		assert.equal(await page.$('.markdown-editor'), null, 'visual mode was not entered');
 		assert.match(await page.$eval('p[role="status"]', (e) => e.textContent), /headings underlined/);
-		// Real browser: literal tags must not swallow the text after them (the unit suite has no DOMParser).
-		const hazardProse = () => page.$eval('.markdown-editor .document-prose', (e) => e.innerText);
-		const expectHazardText = (prose, label) => {
-			for (const part of [
-				'Before <style> inside text.',
-				'item with <script> inside',
-				'second item',
-				'After paragraph.'
-			])
-				assert(
-					prose.includes(part),
-					`${label}: "${part}" is missing from ${JSON.stringify(prose)}`
-				);
-		};
+		// Real browser: a document with HTML opens in source mode and keeps its exact bytes on save.
 		await page.setViewport({ width: 1280, height: 800 });
 		await page.goto(`${base}/documents/${hazardId}?edit=1`, { waitUntil: 'networkidle0' });
-		await page.waitForSelector('.markdown-editor .document-prose');
+		await page.waitForSelector('#document_content');
 		assert.equal(
-			await page.$('#document_content'),
+			await page.$('.markdown-editor'),
 			null,
-			'opened in the visual editor, not source'
+			'opened in source mode, not the visual editor'
 		);
 		assert.equal(
-			await page.$eval('.segmented button:first-child', (e) => e.getAttribute('aria-pressed')),
-			'true',
-			'Visual is the active mode'
+			await page.$eval('.segmented button:first-child', (e) => e.disabled),
+			true,
+			'Visual mode is disabled for documents containing HTML'
 		);
-		expectHazardText(await hazardProse(), 'opened');
-		await new Promise((r) => setTimeout(r, 400));
-		await page.click('.markdown-editor .document-prose > p:last-child');
+		assert.match(
+			await page.$eval('p[role="status"]', (e) => e.textContent),
+			/HTML that the source editor would keep and the visual editor would escape/
+		);
+		const initialSource = await page.$eval('#document_content', (e) => e.value);
+		assert.equal(initialSource, hazardText, 'source editor preserves exact HTML bytes');
+		await page.click('#document_content');
+		await page.keyboard.down('Control');
 		await page.keyboard.press('End');
-		await page.keyboard.type(' Edited.');
+		await page.keyboard.up('Control');
+		await page.keyboard.type('Edited.\n');
 		await page.keyboard.down('Control');
 		await page.keyboard.press('s');
 		await page.keyboard.up('Control');
@@ -630,16 +623,18 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 			(content) => content.includes('Edited.'),
 			{ timeoutMs: 10000, intervalMs: 200 }
 		);
-		assert.match(saved, /After paragraph\. Edited\./, 'the edit was saved');
-		// Tags are saved as text (`&lt;style&gt;`), as the design guide states, and read back as the same text.
+		assert.match(saved, /Edited\./, 'the edit was saved');
+		// Raw HTML stays untouched in source mode (never escaped to &lt;style&gt; / &lt;script&gt;).
 		for (const part of [
-			'Before &lt;style&gt; inside text.',
-			'- item with &lt;script&gt; inside\n- second item'
+			'Before <style> inside text.',
+			'- item with <script> inside\n- second item'
 		])
 			assert(saved.includes(part), `saved file keeps "${part}": ${JSON.stringify(saved)}`);
+		assert(!saved.includes('&lt;style&gt;'), 'style tag was not escaped');
+		assert(!saved.includes('&lt;script&gt;'), 'script tag was not escaped');
 		await page.goto(`${base}/documents/${hazardId}?edit=1`, { waitUntil: 'networkidle0' });
-		await page.waitForSelector('.markdown-editor .document-prose');
-		expectHazardText(await hazardProse(), 'reopened');
+		await page.waitForSelector('#document_content');
+		assert.equal(await page.$('.markdown-editor'), null, 'reopened in source mode');
 	} finally {
 		await browser?.close();
 		child.kill();

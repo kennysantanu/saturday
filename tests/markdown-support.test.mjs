@@ -378,8 +378,63 @@ const tableWith = (content) => ({
 	]
 });
 
-test('prose that mentions HTML tag names opens visually and keeps every word', () => {
-	assert.equal(visualMarkdownBlocker(websiteNotes), null);
+const htmlBlocker = 'HTML that the source editor would keep and the visual editor would escape';
+
+test('HTML outside code stays in source mode so the visual editor never escapes it', () => {
+	// The four reproduced cases: comments, paired/block tags, inline tags, and tag mentions in prose.
+	for (const text of [
+		'<!-- internal note -->\n\nBody text.\n',
+		'<details><summary>More</summary>\n\nHidden.\n\n</details>\n',
+		'Line one<br>Line two\n',
+		'Set the style tag in <style> if you like.\n',
+		websiteNotes,
+		'Put it in <style>.',
+		'Begin with <!DOCTYPE html> here.',
+		'<?xml version="1.0"?>\n\nBody.',
+		'- <header>, <footer>',
+		'1. Open <html> then <body>',
+		'> quoted <script> mention',
+		'Self-closing <br/> and <img src="a.png"> as text.',
+		'A stray closing </details> tag.',
+		'See <https://example.com> and <br> together.',
+		'<!-- comment mentioning <https://example.com> -->'
+	]) {
+		assert.equal(visualMarkdownBlocker(text), htmlBlocker, text);
+		assert(!visualMarkdownSupported(text), text);
+	}
+	// HTML inside fenced code blocks (backticks and tildes) and inline code spans stays admitted.
+	for (const text of [
+		'```html\n<details><summary>More</summary>\n<!-- note -->\n</details>\n```\n',
+		'~~~html\n<style>p { color: red }</style>\n~~~\n',
+		'````html\n~~~\n<div>inside four-backtick fence</div>\n~~~\n````\n',
+		'> ```html\n> <br>\n> ```\n',
+		'Use `<style>`, `<!-- note -->`, and `<br>` in prose.\n',
+		'Use `` `<details>` `` inside double backticks.\n'
+	]) {
+		assert.equal(visualMarkdownBlocker(text), null, text);
+		assert(visualMarkdownSupported(text), text);
+	}
+	// Markdown autolinks are legitimate Markdown and remain admitted.
+	for (const text of [
+		'Visit <https://example.com> for details.\n',
+		'Email <person@example.com> or <mailto:person@example.com>.\n',
+		'Download from <ftp://files.example.com/archive.zip>.\n'
+	]) {
+		assert.equal(visualMarkdownBlocker(text), null, text);
+		assert(visualMarkdownSupported(text), text);
+	}
+	// Ordinary prose with comparisons, arrows, or no HTML remains admitted.
+	for (const text of [
+		'a < b',
+		'a < b and c > d',
+		'Use -> as an arrow.',
+		'Check x<y in paragraph one.\n\n> Quoted paragraph two.\n',
+		'# Ordinary document\n\nParagraph with **bold**, _italic_, and [a link](https://example.com).\n'
+	]) {
+		assert.equal(visualMarkdownBlocker(text), null, text);
+		assert(visualMarkdownSupported(text), text);
+	}
+	// Direct editor parsing of websiteNotes still preserves every word as literal text (never DOMParser).
 	const written = plain(roundTrip(websiteNotes));
 	for (const text of [
 		'Put all CSS inside <style> in the <head>.',
@@ -391,24 +446,13 @@ test('prose that mentions HTML tag names opens visually and keeps every word', (
 		'After the <title> tag and a stray </body> the text goes on.'
 	])
 		assert(written.includes(text), text);
-	// A second pass changes nothing, so repeated open and save cycles do not degrade the text.
 	assert.equal(roundTrip(roundTrip(websiteNotes)), roundTrip(websiteNotes));
-	for (const text of [
-		'Put it in <style>.',
-		'Use -> as an arrow.',
-		'Begin with <!DOCTYPE html> here.',
-		'- <header>, <footer>',
-		'1. Open <html> then <body>',
-		'> quoted <script> mention',
-		'a < b and c > d',
-		'Self-closing <br/> and <img src="a.png"> as text.'
-	])
-		assert.equal(visualMarkdownBlocker(text), null, text);
 });
 
-test('HTML is literal text: tags are kept as text and never swallow what follows', () => {
+test('HTML is literal text in the parser, and refused by the visual gate', () => {
 	// In a browser, a raw-text tag such as <style>, <script> or <title> swallows the content after it when it
-	// reaches DOMParser, and <head>, <header> and a doctype produce nothing. They must never get that far.
+	// reaches DOMParser, and <head>, <header> and a doctype produce nothing. They must never get that far,
+	// and the visual gate also keeps documents containing them in source mode so bytes are never escaped.
 	const tags = ['<style>', '<script>', '<title>', '<head>', '<header>', '<h1>', '<!DOCTYPE html>'];
 	for (const tag of tags)
 		for (const text of [
@@ -419,9 +463,9 @@ test('HTML is literal text: tags are kept as text and never swallow what follows
 			const json = visualEditorParse(text);
 			assert(editorText(json).join('').includes(tag), `${tag} stays as text in ${text}`);
 			assert.equal(lastParagraphText(json), 'Following paragraph.', `text after ${tag} survives`);
-			assert.equal(visualMarkdownBlocker(text), null, text);
+			assert.equal(visualMarkdownBlocker(text), htmlBlocker, text);
 		}
-	// Complete blocks and paired inline tags are text too, not a container or an emphasis.
+	// Complete blocks and paired inline tags are parsed as text if passed directly, and refused by the gate.
 	assert.deepEqual(editorText(visualEditorParse('<div>real</div>\n\nAfter.')), [
 		'<div>real</div>',
 		'After.'
@@ -429,14 +473,15 @@ test('HTML is literal text: tags are kept as text and never swallow what follows
 	const inline = visualEditorParse('a <em>hi</em> b');
 	assert.deepEqual(editorText(inline), ['a <em>hi</em> b']);
 	assert(!JSON.stringify(inline).includes('"marks"'), 'no emphasis mark');
-	assert.equal(visualMarkdownBlocker('<div>real</div>\n\nAfter.'), null);
-	assert.equal(visualMarkdownBlocker('a <em>hi</em> b'), null);
-	// Comments are not special either: shown as text, nothing dropped.
+	assert.equal(visualMarkdownBlocker('<div>real</div>\n\nAfter.'), htmlBlocker);
+	assert.equal(visualMarkdownBlocker('a <em>hi</em> b'), htmlBlocker);
+	// Comments are parsed as text if passed directly, and refused by the gate.
 	assert.deepEqual(editorText(visualEditorParse('<!-- note -->\n\nAfter.')), [
 		'<!-- note -->',
 		'After.'
 	]);
-	// Code keeps its literal code semantics.
+	assert.equal(visualMarkdownBlocker('<!-- note -->\n\nAfter.'), htmlBlocker);
+	// Code keeps its literal code semantics and stays admitted.
 	const code = '`<style>` and\n\n```html\n<style>\np { color: red }\n</style>\n```\n\nAfter.';
 	assert.equal(visualMarkdownBlocker(code), null);
 	assert.match(roundTrip(code), /```html\n<style>\np \{ color: red \}\n<\/style>\n```/);
@@ -464,18 +509,30 @@ test('neither Marked instance ever produces an HTML token, at block or inline le
 	assert(lexedTypes(globalMarked.lexer('<div>b</div>')).has('html'));
 });
 
-test('equivalent spellings of the same text reach the same decision', () => {
-	const pairs = [
+test('equivalent non-HTML spellings reach the same decision, while raw HTML stays in source mode', () => {
+	const htmlPairs = [
 		[
 			'The file must begin with <!DOCTYPE html>.',
 			'The file must begin with &lt;!DOCTYPE html&gt;.'
 		],
 		['Put CSS in <style> in <head>.', 'Put CSS in &lt;style&gt; in &lt;head&gt;.'],
-		['Put CSS in <style>.', 'Put CSS in \\<style\\>.'],
+		['Put CSS in <style>.', 'Put CSS in \\<style\\>.']
+	];
+	for (const [raw, escaped] of htmlPairs) {
+		assert.equal(visualMarkdownBlocker(raw), htmlBlocker, raw);
+		assert.equal(visualMarkdownBlocker(escaped), null, escaped);
+		assert.equal(
+			visualMarkdownSignature(raw).join('|'),
+			visualMarkdownSignature(escaped).join('|'),
+			`${raw} reads as ${escaped}`
+		);
+		assert.equal(flat(roundTrip(raw)), flat(roundTrip(escaped)));
+	}
+	const plainPairs = [
 		['Project 1 -> project1.jpg', 'Project 1 -&gt; project1.jpg'],
 		['One.\n\nTwo.', 'One.\n\n\n\nTwo.']
 	];
-	for (const [raw, other] of pairs) {
+	for (const [raw, other] of plainPairs) {
 		assert.equal(visualMarkdownBlocker(raw), null, raw);
 		assert.equal(visualMarkdownBlocker(other), null, other);
 		assert.equal(
@@ -577,13 +634,18 @@ test('the live document is still compared before a save, whatever the HTML polic
 	assert.match(visualEditorLoss(tableWith([x, { type: 'hardBreak' }, x])), /change/);
 });
 
-test('admission has no syntax veto and HTML literalization is declared where it is applied', () => {
+test('the gate has no token-type pre-scan and HTML literalization is declared where it is applied', () => {
 	const gate = readFileSync('src/lib/markdown-visual.js', 'utf8');
-	assert(!/raw HTML/.test(gate), 'raw HTML is no longer a reason');
 	assert(!/unsupportedTypes|firstUnsupported/.test(gate), 'no token-type pre-scan');
 	const extensions = readFileSync('src/lib/markdown-extensions.js', 'utf8');
 	assert.match(extensions, /html\(\)\s*\{\s*return undefined;/);
 	assert.match(extensions, /tag\(\)\s*\{\s*return undefined;/);
+	const docEditor = readFileSync('src/lib/components/app/document-editor.svelte', 'utf8');
+	assert.match(
+		docEditor,
+		/visualEditor\?\.saveBlocker\(\)\s*\?\?\s*visualMarkdownBlocker\(content\)/,
+		'save path falls back to visualMarkdownBlocker'
+	);
 });
 
 test('age badge uses days, then months from 30 days, then years from 365 days', () => {
