@@ -167,16 +167,45 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 				'Unsaved changes'
 		);
 		// Words can be selected by double-click and by dragging, and a selection survives rendering.
-		const wordBox = await page.$eval('.document-prose p, .document-prose li', (e) => {
-			const r = e.getBoundingClientRect();
-			return { x: r.x + 12, y: r.y + 10 };
-		});
-		for (const n of [1, 2]) {
-			const point = { x: wordBox.x, y: wordBox.y, button: 'left', clickCount: n };
-			await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point });
-			await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point });
-		}
-		await new Promise((r) => setTimeout(r, 500));
+		let lastWordSelection = null;
+		await waitForCondition(
+			'non-empty word selection after double-clicking document prose',
+			async () => {
+				const target = await page.$eval('.document-prose p, .document-prose li', (e) => {
+					const r = e.getBoundingClientRect();
+					return { x: r.x + 12, y: r.y + 10, paragraphText: e.textContent ?? '' };
+				});
+				await cdp.send('Input.dispatchMouseEvent', {
+					type: 'mouseMoved',
+					x: target.x,
+					y: target.y
+				});
+				for (const n of [1, 2]) {
+					const point = { x: target.x, y: target.y, button: 'left', clickCount: n };
+					await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point });
+					await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point });
+				}
+				const state = await page.evaluate(({ x, y }) => {
+					const el = document.elementFromPoint(x, y);
+					return {
+						selection: getSelection().toString(),
+						textUnderPoint: el?.textContent ?? null
+					};
+				}, target);
+				lastWordSelection = {
+					point: { x: target.x, y: target.y },
+					selection: state.selection,
+					paragraphText: target.paragraphText,
+					textUnderPoint: state.textUnderPoint
+				};
+				return /\S/.test(state.selection);
+			},
+			{
+				timeoutMs: 15000,
+				intervalMs: 150,
+				describe: () => lastWordSelection
+			}
+		);
 		assert.match(await page.evaluate(() => getSelection().toString()), /\S/);
 		await page.keyboard.press('ArrowRight');
 		// A draft survives a reload (the leave prompt is accepted) and is offered back.
