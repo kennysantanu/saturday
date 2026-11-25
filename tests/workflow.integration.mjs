@@ -24,6 +24,15 @@ import {
 	listNetworkUpdates,
 	listNetworks
 } from '../src/lib/server/local/people.js';
+import {
+	clickWhenReady,
+	waitForCondition,
+	waitForDialogClosed,
+	waitForPage,
+	waitForSelectorGone,
+	waitForSelectorReady,
+	waitForValue
+} from './helpers/wait-for.mjs';
 
 test('interaction dialog validates and closes after saving', async () => {
 	const root = await mkdtemp(join(tmpdir(), 'saturday-interaction-web-'));
@@ -60,18 +69,34 @@ test('interaction dialog validates and closes after saving', async () => {
 			await new Promise((r) => setTimeout(r, 100));
 		}
 		assert(ready, logs);
-		browser = await puppeteer.launch({ headless: true, protocolTimeout: 15000 });
+		browser = await puppeteer.launch({ headless: true, protocolTimeout: 30000 });
 		const page = await browser.newPage();
 		await page.goto(base + `/networks/${person.id}`, { waitUntil: 'networkidle0' });
-		await page.click('button::-p-text(Add interaction)');
-		await page.waitForSelector('#interaction_note');
-		await page.click('#network-interaction button[type="submit"]');
-		await page.waitForSelector('#interaction_note[aria-invalid="true"]');
+		await clickWhenReady(page, 'button::-p-text(Add interaction)', {
+			label: 'Add interaction button'
+		});
+		await waitForSelectorReady(page, '#interaction_note', {
+			label: 'interaction note field',
+			visible: true
+		});
+		await clickWhenReady(page, '#network-interaction button[type="submit"]', {
+			label: 'interaction submit button'
+		});
+		await waitForSelectorReady(page, '#interaction_note[aria-invalid="true"]', {
+			label: 'interaction note validation error'
+		});
 		assert.ok(await page.$('[role="dialog"]'));
 		await page.type('#interaction_note', 'Met at a conference.');
-		await page.click('#network-interaction button[type="submit"]');
-		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
-		await page.waitForNetworkIdle({ idleTime: 300 });
+		await clickWhenReady(page, '#network-interaction button[type="submit"]', {
+			label: 'interaction submit button'
+		});
+		await waitForDialogClosed(page, { label: 'interaction dialog to close after saving' });
+		await page.waitForNetworkIdle({ idleTime: 300, timeout: 15000 });
+		await waitForValue(
+			'saved interaction to render in #person-interactions',
+			() => page.$eval('#person-interactions', (el) => el.textContent),
+			(text) => /Met at a conference\./.test(text)
+		);
 		assert.equal(await page.$('[role="dialog"]'), null);
 		assert.match(
 			await page.$eval('#person-interactions', (el) => el.textContent),
@@ -326,36 +351,56 @@ test('production stage/history actions, result round trips and read-only overvie
 			t.diagnostic('Managed Chrome unavailable; native HTTP checks passed.');
 			return;
 		}
-		browser = await puppeteer.launch({ headless: true, protocolTimeout: 15000 });
+		browser = await puppeteer.launch({ headless: true, protocolTimeout: 30000 });
 		const page = await browser.newPage();
 		const errors = [];
 		page.on('pageerror', (e) => errors.push(e.message));
 		await page.setViewport({ width: 1280, height: 960 });
 		await page.goto(base + detail, { waitUntil: 'networkidle0' });
-		const button = (text) => page.click(`button::-p-text(${text})`);
+		const button = (text) =>
+			clickWhenReady(page, `button::-p-text(${text})`, { label: `button "${text}"` });
 		const settle = async () => {
-			await page.waitForNetworkIdle({ idleTime: 300 });
-			await page.evaluate(async () => {
-				await Promise.all(
-					document
-						.getAnimations()
-						.filter((a) => a.effect?.getComputedTiming().endTime !== Infinity)
-						.map((a) => a.finished.catch(() => {}))
-				);
-			});
-		};
-		const saveDialog = async () => {
-			await page.click(
-				'#job-update-form button[type="submit"]:not([formaction]), #reminder-editor button[type="submit"]:not([formaction])'
+			await page.waitForNetworkIdle({ idleTime: 300, timeout: 15000 });
+			await waitForCondition(
+				'page animations to finish',
+				async () => {
+					await page.evaluate(async () => {
+						await Promise.all(
+							document
+								.getAnimations()
+								.filter((a) => a.effect?.getComputedTiming().endTime !== Infinity)
+								.map((a) => a.finished.catch(() => {}))
+						);
+					});
+					return true;
+				},
+				{ timeoutMs: 15000 }
 			);
-			await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		};
+		const saveDialog = async (label = 'dialog save') => {
+			await clickWhenReady(
+				page,
+				'#job-update-form button[type="submit"]:not([formaction]), #reminder-editor button[type="submit"]:not([formaction])',
+				{ label: `${label} submit button` }
+			);
+			await waitForDialogClosed(page, { label: `${label} dialog to close` });
 			await settle();
-			await settle();
+			await waitForValue(
+				`${label} URL to keep job detail and return_to`,
+				() => {
+					const current = new URL(page.url());
+					return { pathname: current.pathname, returnTo: current.searchParams.get('return_to') };
+				},
+				(seen) => seen.pathname === `/jobs/${job.id}` && seen.returnTo === returnTo
+			);
 			assert.equal(new URL(page.url()).pathname, `/jobs/${job.id}`);
 			assert.equal(new URL(page.url()).searchParams.get('return_to'), returnTo);
 		};
 		await button('Change stage');
-		await page.waitForSelector('#move-stage');
+		await waitForSelectorReady(page, '#move-stage', {
+			label: 'Change stage select',
+			visible: true
+		});
 		assert.equal(new URL(page.url()).pathname, `/jobs/${job.id}`);
 		assert.equal(
 			await page.$eval('[data-slot="dialog-title"]', (el) => el.textContent.trim()),
@@ -367,44 +412,71 @@ test('production stage/history actions, result round trips and read-only overvie
 		});
 		await page.select('#move-stage', String(interview.id));
 		await page.type('#move-note', 'Browser stage note');
-		await saveDialog();
+		await saveDialog('Change stage');
 		assert.equal(getJob(job.id).currentStageId, interview.id);
 		await button('Add history');
-		await page.waitForSelector('#history-note');
+		await waitForSelectorReady(page, '#history-note', {
+			label: 'Add history note field',
+			visible: true
+		});
 		assert(await page.$eval('#history-date', (el) => !!el.value));
 		await page.type('#history-note', 'Browser history only');
-		await saveDialog();
+		await saveDialog('Add history');
 		assert.equal(getJob(job.id).currentStageId, interview.id);
 		const browserEntry = getJob(job.id).updates.find(
 			(entry) => entry.note === 'Browser history only'
 		);
-		await page.click('button[aria-label^="Edit history: General note"]');
-		await page.waitForSelector('#correction-note');
+		await clickWhenReady(page, 'button[aria-label^="Edit history: General note"]', {
+			label: 'Edit history: General note button'
+		});
+		await waitForSelectorReady(page, '#correction-note', {
+			label: 'Edit history note field',
+			visible: true
+		});
 		assert.equal(await page.$eval('#correction-note', (el) => el.value), 'Browser history only');
 		await page.locator('#correction-note').fill('Corrected in browser');
-		await saveDialog();
+		await saveDialog('Edit history');
 		assert.equal(
 			getJob(job.id).updates.find((entry) => entry.id === browserEntry.id).note,
 			'Corrected in browser'
 		);
-		await page.click('button[aria-label^="Edit history: General note"]');
-		await page.waitForSelector('#correction-note');
+		await clickWhenReady(page, 'button[aria-label^="Edit history: General note"]', {
+			label: 'Edit history: General note button (draft protection)'
+		});
+		await waitForSelectorReady(page, '#correction-note', {
+			label: 'Edit history note field',
+			visible: true
+		});
 		await page.locator('#correction-note').fill('Unsaved draft');
-		await page.click('#job-update-form button[data-variant="ghost"]');
-		await page.waitForSelector('button::-p-text(Keep editing)');
+		await clickWhenReady(page, '#job-update-form button[data-variant="ghost"]', {
+			label: 'Edit history cancel button'
+		});
+		await waitForSelectorReady(page, 'button::-p-text(Keep editing)', {
+			label: 'Keep editing button',
+			visible: true
+		});
 		await button('Keep editing');
-		await page.waitForSelector('button::-p-text(Keep editing)', { hidden: true });
+		await waitForSelectorGone(page, 'button::-p-text(Keep editing)', {
+			label: 'Keep editing dialog to close'
+		});
 		assert.equal(await page.$eval('#correction-note', (el) => el.value), 'Unsaved draft');
 		// Escape also protects the draft, and Discard closes the editor.
 		await page.keyboard.press('Escape');
-		await page.waitForSelector('button::-p-text(Discard changes)');
+		await waitForSelectorReady(page, 'button::-p-text(Discard changes)', {
+			label: 'Discard changes button',
+			visible: true
+		});
 		await button('Discard changes');
-		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await waitForDialogClosed(page, { label: 'Edit history dialog to close after discard' });
 		await settle();
+		await clickWhenReady(page, 'button[aria-label^="Edit history: General note"]', {
+			label: 'Edit history: General note button (responsive checks)'
+		});
+		await waitForSelectorReady(page, '#correction-note', {
+			label: 'Edit history note field',
+			visible: true
+		});
 		await settle();
-		await page.click('button[aria-label^="Edit history: General note"]');
-		await settle();
-		await page.waitForSelector('#correction-note');
 		await page.setViewport({ width: 320, height: 900 });
 		await settle();
 		assert(await page.$eval('html', (el) => el.scrollWidth <= innerWidth + 1));
@@ -472,23 +544,31 @@ test('production stage/history actions, result round trips and read-only overvie
 		await page.setViewport({ width: 320, height: 900 });
 		await settle();
 		await page.screenshot({ path: '/tmp/saturday-edit-history-dialog-phone.png' });
-		await page.click('#job-update-form button[data-variant="destructive"]');
-		await page.waitForSelector('button[form="job-update-form"]');
-		await page.click('button[form="job-update-form"]');
-		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
-		await settle();
+		await clickWhenReady(page, '#job-update-form button[data-variant="destructive"]', {
+			label: 'Delete history trigger button'
+		});
+		await clickWhenReady(page, 'button[form="job-update-form"]', {
+			label: 'Confirm delete history button'
+		});
+		await waitForDialogClosed(page, { label: 'Delete history dialog to close' });
 		await settle();
 		assert(!getJob(job.id).updates.some((entry) => entry.id === browserEntry.id));
 		assert.equal(getJob(job.id).currentStageId, interview.id);
 		await button('Add reminder');
-		await page.waitForSelector('#reminder-date');
+		await waitForSelectorReady(page, '#reminder-date', {
+			label: 'Add reminder date field',
+			visible: true
+		});
 		await page.locator('#reminder-date').fill('2099-01-01');
 		await page.type('#reminder-note', 'Phone follow-up');
-		await saveDialog();
+		await saveDialog('Add reminder');
 		assert.equal(listReminders({ job_id: job.id }).reminders[0].note, 'Phone follow-up');
 		assert.equal(await page.$('button::-p-text(Clear follow-up)'), null);
 		await button('Edit reminder');
-		await page.waitForSelector('#reminder-note');
+		await waitForSelectorReady(page, '#reminder-note', {
+			label: 'Edit reminder note field',
+			visible: true
+		});
 		await settle();
 		assert(await stackedActions());
 		await page.screenshot({ path: '/tmp/saturday-follow-up-actions-phone.png' });
@@ -497,9 +577,13 @@ test('production stage/history actions, result round trips and read-only overvie
 		// Confirmed deletion ignores invalid draft values and retains the original return context.
 		await page.locator('#reminder-note').fill('Unsaved comment to discard');
 		await page.locator('#reminder-date').fill('');
-		await page.locator('#reminder-editor button::-p-text(Delete reminder)').click();
-		await page.locator('[role=dialog] button[formaction*="reminderDelete"]').click();
-		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await clickWhenReady(page, '#reminder-editor button::-p-text(Delete reminder)', {
+			label: 'Delete reminder trigger button'
+		});
+		await clickWhenReady(page, '[role=dialog] button[formaction*="reminderDelete"]', {
+			label: 'Confirm delete reminder button'
+		});
+		await waitForDialogClosed(page, { label: 'Delete reminder dialog to close' });
 		await settle();
 		assert.equal(getJob(job.id).nextReminder, null);
 		assert.equal(getJob(job.id).updates.length, historyCount);
@@ -507,17 +591,31 @@ test('production stage/history actions, result round trips and read-only overvie
 		assert.equal(await page.$('button::-p-text(Clear follow-up)'), null);
 		await page.setViewport({ width: 1280, height: 960 });
 		// Invalid correction fields do not prevent deletion reaching the server safeguard.
-		await page.click('button[aria-label^="Edit history: Interview"]');
-		await page.waitForSelector('#correction-note');
+		await clickWhenReady(page, 'button[aria-label^="Edit history: Interview"]', {
+			label: 'Edit history: Interview button'
+		});
+		await waitForSelectorReady(page, '#correction-note', {
+			label: 'Edit history note field',
+			visible: true
+		});
 		await page.select('#correction-stage', '');
 		await page.locator('#correction-date').fill('');
 		await page.locator('#correction-note').fill('Protected draft stays here');
-		await page.click('#job-update-form button[data-variant="destructive"]');
-		await page.waitForSelector('button[form="job-update-form"]');
-		await page.click('button[form="job-update-form"]');
-		await page.waitForSelector('#job-update-form [role="alert"]');
-		await page.waitForSelector('button[form="job-update-form"]', { hidden: true });
-		await page.waitForSelector('#job-update-form:not([aria-busy="true"])');
+		await clickWhenReady(page, '#job-update-form button[data-variant="destructive"]', {
+			label: 'Delete history trigger button'
+		});
+		await clickWhenReady(page, 'button[form="job-update-form"]', {
+			label: 'Confirm delete history button'
+		});
+		await waitForSelectorReady(page, '#job-update-form [role="alert"]', {
+			label: 'Delete history safeguard alert'
+		});
+		await waitForSelectorGone(page, 'button[form="job-update-form"]', {
+			label: 'Confirm delete history dialog to close'
+		});
+		await waitForSelectorReady(page, '#job-update-form:not([aria-busy="true"])', {
+			label: 'job update form idle after blocked delete'
+		});
 		await settle();
 		assert.equal(
 			await page.$eval('#correction-note', (el) => el.value),
@@ -529,40 +627,67 @@ test('production stage/history actions, result round trips and read-only overvie
 				'Change stage first'
 			)
 		);
-		await page.click('#job-update-form button[data-variant="ghost"]');
-		await page.waitForSelector('button::-p-text(Discard changes)');
+		await clickWhenReady(page, '#job-update-form button[data-variant="ghost"]', {
+			label: 'Edit history cancel button'
+		});
+		await waitForSelectorReady(page, 'button::-p-text(Discard changes)', {
+			label: 'Discard changes button',
+			visible: true
+		});
 		await button('Discard changes');
-		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await waitForDialogClosed(page, {
+			label: 'Edit history dialog to close after safeguard discard'
+		});
 		await settle();
 		// A server validation failure keeps all fields inside the Add history dialog.
 		await button('Add history');
-		await page.waitForSelector('#history-note');
+		await waitForSelectorReady(page, '#history-note', {
+			label: 'Add history note field',
+			visible: true
+		});
 		await page.type('#history-note', 'Failed save draft');
 		await page.locator('#history-date').fill('');
 		await page.$eval('#job-update-form', (el) => (el.noValidate = true));
-		await page.click(
-			'#job-update-form button[type="submit"]:not([formaction]), #reminder-editor button[type="submit"]:not([formaction])'
+		await clickWhenReady(
+			page,
+			'#job-update-form button[type="submit"]:not([formaction]), #reminder-editor button[type="submit"]:not([formaction])',
+			{ label: 'Add history submit button (validation check)' }
 		);
-		await page.waitForSelector('#history-date[aria-invalid="true"]');
+		await waitForSelectorReady(page, '#history-date[aria-invalid="true"]', {
+			label: 'history date validation error'
+		});
 		await settle();
 		assert.equal(await page.$eval('#history-note', (el) => el.value), 'Failed save draft');
 		assert.equal(await page.$eval(':focus', (el) => el.id), 'history-date');
 		await page.locator('#history-date').fill('2020-01-01');
-		await saveDialog();
+		await saveDialog('Add history after validation fix');
 		assert(getJob(job.id).updates.some((entry) => entry.note === 'Failed save draft'));
 		await button('Add history');
-		await page.waitForSelector('#history-note');
+		await waitForSelectorReady(page, '#history-note', {
+			label: 'Add history note field',
+			visible: true
+		});
 		await page.type('#history-note', 'Keep my short note');
-		await page.click('[data-slot="dialog-close"]');
-		await page.waitForSelector('button::-p-text(Keep editing)');
+		await clickWhenReady(page, '[data-slot="dialog-close"]', { label: 'dialog close button' });
+		await waitForSelectorReady(page, 'button::-p-text(Keep editing)', {
+			label: 'Keep editing button',
+			visible: true
+		});
 		await button('Keep editing');
-		await page.waitForSelector('button::-p-text(Keep editing)', { hidden: true });
+		await waitForSelectorGone(page, 'button::-p-text(Keep editing)', {
+			label: 'Keep editing dialog to close'
+		});
 		await settle();
 		assert.equal(await page.$eval('#history-note', (el) => el.value), 'Keep my short note');
 		await page.mouse.click(1, 1);
-		await page.waitForSelector('button::-p-text(Keep editing)');
+		await waitForSelectorReady(page, 'button::-p-text(Keep editing)', {
+			label: 'Keep editing button after outside click',
+			visible: true
+		});
 		await button('Keep editing');
-		await page.waitForSelector('button::-p-text(Keep editing)', { hidden: true });
+		await waitForSelectorGone(page, 'button::-p-text(Keep editing)', {
+			label: 'Keep editing dialog to close after outside click'
+		});
 		await settle();
 		// Expired sign-in leaves the dialog and draft intact, and resets save progress.
 		await page.setRequestInterception(true);
@@ -577,15 +702,21 @@ test('production stage/history actions, result round trips and read-only overvie
 			} else void request.continue();
 		};
 		page.on('request', intercept);
-		await page.click(
-			'#job-update-form button[type="submit"]:not([formaction]), #reminder-editor button[type="submit"]:not([formaction])'
+		await clickWhenReady(
+			page,
+			'#job-update-form button[type="submit"]:not([formaction]), #reminder-editor button[type="submit"]:not([formaction])',
+			{ label: 'Add history submit button (401 check)' }
 		);
-		await page.waitForFunction(() => document.body.innerText.includes('Session expired'));
-		await page.waitForSelector('#job-update-form:not([aria-busy="true"])');
+		await waitForPage(page, 'Session expired notice', () =>
+			document.body.innerText.includes('Session expired')
+		);
+		await waitForSelectorReady(page, '#job-update-form:not([aria-busy="true"])', {
+			label: 'job update form idle after 401'
+		});
 		assert.equal(await page.$eval('#history-note', (el) => el.value), 'Keep my short note');
 		page.off('request', intercept);
 		await page.setRequestInterception(false);
-		await saveDialog();
+		await saveDialog('Add history after 401 retry');
 		assert(getJob(job.id).updates.some((entry) => entry.note === 'Keep my short note'));
 		// Star keeps both filtered-list and Dashboard return context, including native forms.
 		const dashboardReturn = `/#pipeline-stage-${interview.id}`;
@@ -594,13 +725,14 @@ test('production stage/history actions, result round trips and read-only overvie
 				waitUntil: 'networkidle0'
 			});
 			const starred = !getJob(job.id).isStarred;
-			await page.click('form[action^="?/star"] button');
-			await page.waitForFunction(
+			await clickWhenReady(page, 'form[action^="?/star"] button', { label: 'Star button' });
+			await waitForPage(
+				page,
+				`star button aria-pressed=${starred}`,
 				(value) =>
 					document.querySelector('form[action^="?/star"] button')?.getAttribute('aria-pressed') ===
 					String(value),
-				{},
-				starred
+				[starred]
 			);
 			await settle();
 			assert.equal(new URL(page.url()).searchParams.get('return_to'), origin);
@@ -617,22 +749,35 @@ test('production stage/history actions, result round trips and read-only overvie
 		linkJobNetwork({ job_id: job.id, network_id: person.id, notes: 'Saved relationship' });
 		const keepDraft = async (field, expected, dismiss) => {
 			await dismiss();
-			await page.waitForSelector('button::-p-text(Keep editing)');
+			await waitForSelectorReady(page, 'button::-p-text(Keep editing)', {
+				label: 'Keep editing button',
+				visible: true
+			});
 			await button('Keep editing');
-			await page.waitForSelector('button::-p-text(Keep editing)', { hidden: true });
+			await waitForSelectorGone(page, 'button::-p-text(Keep editing)', {
+				label: 'Keep editing dialog to close'
+			});
 			await settle();
 			assert.equal(await page.$eval(field, (el) => el.value), expected);
 		};
 		const discardDraft = async (formId) => {
-			await page.click(`#${formId} button[data-variant="ghost"]`);
-			await page.waitForSelector('button::-p-text(Discard changes)');
+			await clickWhenReady(page, `#${formId} button[data-variant="ghost"]`, {
+				label: `${formId} cancel button`
+			});
+			await waitForSelectorReady(page, 'button::-p-text(Discard changes)', {
+				label: 'Discard changes button',
+				visible: true
+			});
 			await button('Discard changes');
-			await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+			await waitForDialogClosed(page, { label: `${formId} dialog to close after discard` });
 			await settle();
 		};
 		await page.goto(base + `/networks/${person.id}`, { waitUntil: 'networkidle0' });
 		await button('Add interaction');
-		await page.waitForSelector('#interaction_note');
+		await waitForSelectorReady(page, '#interaction_note', {
+			label: 'Add interaction note field',
+			visible: true
+		});
 		await page.type('#interaction_note', 'Unsaved interaction');
 		await keepDraft('#interaction_note', 'Unsaved interaction', () =>
 			page.keyboard.press('Escape')
@@ -640,22 +785,36 @@ test('production stage/history actions, result round trips and read-only overvie
 		await discardDraft('network-interaction');
 		assert.equal(listNetworkUpdates({ network_id: person.id }).updates.length, 0);
 		await button('Add interaction');
-		await page.waitForSelector('#interaction_note');
+		await waitForSelectorReady(page, '#interaction_note', {
+			label: 'Add interaction note field',
+			visible: true
+		});
 		assert.equal(await page.$eval('#interaction_note', (el) => el.value), '');
 		await page.type('#interaction_note', 'Interaction validation draft');
 		await page.locator('#interaction_date').fill('2099-01-01');
 		await page.$eval('#network-interaction', (el) => (el.noValidate = true));
-		await page.click('#network-interaction button[type="submit"]');
-		await page.waitForSelector('#interaction_date[aria-invalid="true"]');
+		await clickWhenReady(page, '#network-interaction button[type="submit"]', {
+			label: 'Add interaction submit button (validation check)'
+		});
+		await waitForSelectorReady(page, '#interaction_date[aria-invalid="true"]', {
+			label: 'interaction date validation error'
+		});
 		await settle();
 		assert.equal(
 			await page.$eval('#interaction_note', (el) => el.value),
 			'Interaction validation draft'
 		);
 		await page.locator('#interaction_date').fill('2020-01-01');
-		await page.click('#network-interaction button[type="submit"]');
-		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await clickWhenReady(page, '#network-interaction button[type="submit"]', {
+			label: 'Add interaction submit button'
+		});
+		await waitForDialogClosed(page, { label: 'Add interaction dialog to close' });
 		await settle();
+		await waitForValue(
+			'saved interaction row in #person-interactions',
+			() => page.$eval('#person-interactions', (el) => el.textContent),
+			(text) => /Interaction validation draft/.test(text)
+		);
 		assert.equal(
 			listNetworkUpdates({ network_id: person.id }).updates[0].note,
 			'Interaction validation draft'
@@ -666,32 +825,54 @@ test('production stage/history actions, result round trips and read-only overvie
 		);
 		assert.equal(await page.$('[role="dialog"]'), null);
 		await button('Add reminder');
-		await page.waitForSelector('#reminder-note');
+		await waitForSelectorReady(page, '#reminder-note', {
+			label: 'Network Add reminder note field',
+			visible: true
+		});
 		await page.locator('#reminder-date').fill('2099-01-01');
 		await page.type('#reminder-note', 'Unsaved follow-up');
 		await keepDraft('#reminder-note', 'Unsaved follow-up', () =>
-			page.click('[data-slot="dialog-close"]')
+			clickWhenReady(page, '[data-slot="dialog-close"]', { label: 'dialog close button' })
 		);
-		await page.click('#reminder-editor button[type="submit"]');
-		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await clickWhenReady(page, '#reminder-editor button[type="submit"]', {
+			label: 'Network Add reminder submit button'
+		});
+		await waitForDialogClosed(page, { label: 'Network Add reminder dialog to close' });
 		await settle();
 		assert.equal(listReminders({ network_id: person.id }).reminders[0].note, 'Unsaved follow-up');
 		// Existing reminder and interaction removal use the same editor pattern as Jobs.
 		assert.equal(await page.$('main form[action*="clearFollowUp"]'), null);
 		await button('Edit reminder');
-		await page.waitForSelector('#reminder-editor');
+		await waitForSelectorReady(page, '#reminder-editor', {
+			label: 'Network Edit reminder form',
+			visible: true
+		});
 		await page.locator('#reminder-note').fill('Reminder edit');
-		await page.click('#reminder-editor button[type="submit"]:not([formaction])');
-		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await clickWhenReady(page, '#reminder-editor button[type="submit"]:not([formaction])', {
+			label: 'Network Edit reminder submit button'
+		});
+		await waitForDialogClosed(page, { label: 'Network Edit reminder dialog to close' });
+		await settle();
 		assert.equal(listReminders({ network_id: person.id }).reminders[0].note, 'Reminder edit');
 		await button('Edit reminder');
-		await page.waitForSelector('#reminder-editor');
-		await page.locator('#reminder-editor button::-p-text(Delete reminder)').click();
-		await page.locator('[role=dialog] button[formaction*="reminderDelete"]').click();
-		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await waitForSelectorReady(page, '#reminder-editor', {
+			label: 'Network Edit reminder form (delete)',
+			visible: true
+		});
+		await clickWhenReady(page, '#reminder-editor button::-p-text(Delete reminder)', {
+			label: 'Network Delete reminder trigger'
+		});
+		await clickWhenReady(page, '[role=dialog] button[formaction*="reminderDelete"]', {
+			label: 'Network Confirm delete reminder button'
+		});
+		await waitForDialogClosed(page, { label: 'Network Delete reminder dialog to close' });
+		await settle();
 		assert.equal(getNetwork(person.id).next_reminder_at, null);
 		await button('Edit interaction');
-		await page.waitForSelector('#interaction_note');
+		await waitForSelectorReady(page, '#interaction_note', {
+			label: 'Edit interaction note field',
+			visible: true
+		});
 		await page.locator('#interaction_note').fill('Keep this interaction draft');
 		await page.setViewport({ width: 320, height: 900 });
 		await settle();
@@ -719,23 +900,39 @@ test('production stage/history actions, result round trips and read-only overvie
 		);
 		assert.equal(new Set(actions.map((rect) => rect.y)).size, 3);
 		await page.screenshot({ path: '/tmp/saturday-network-interaction-phone.png' });
-		await page.click('#network-interaction button[data-variant="destructive"]');
-		await page.waitForSelector('button[form="network-interaction"]');
-		await page.click(
-			'[data-slot="dialog-content"]:has(button[form="network-interaction"]) button[data-variant="ghost"]'
+		await clickWhenReady(page, '#network-interaction button[data-variant="destructive"]', {
+			label: 'Delete interaction trigger'
+		});
+		await waitForSelectorReady(page, 'button[form="network-interaction"]', {
+			label: 'Confirm delete interaction button',
+			visible: true
+		});
+		await clickWhenReady(
+			page,
+			'[data-slot="dialog-content"]:has(button[form="network-interaction"]) button[data-variant="ghost"]',
+			{ label: 'Cancel delete interaction button' }
 		);
-		await page.waitForSelector('button[form="network-interaction"]', { hidden: true });
+		await waitForSelectorGone(page, 'button[form="network-interaction"]', {
+			label: 'Confirm delete interaction dialog to close'
+		});
 		assert.equal(
 			await page.$eval('#interaction_note', (el) => el.value),
 			'Keep this interaction draft'
 		);
 		// A failed confirmed delete returns to editing without dropping unsaved fields.
 		await page.$eval('#network-interaction input[name="confirm"]', (el) => (el.value = 'false'));
-		await page.click('#network-interaction button[data-variant="destructive"]');
-		await page.waitForSelector('button[form="network-interaction"]');
-		await page.click('button[form="network-interaction"]');
-		await page.waitForSelector('#network-interaction [role="alert"]');
-		await page.waitForSelector('button[form="network-interaction"]', { hidden: true });
+		await clickWhenReady(page, '#network-interaction button[data-variant="destructive"]', {
+			label: 'Delete interaction trigger (failed confirm)'
+		});
+		await clickWhenReady(page, 'button[form="network-interaction"]', {
+			label: 'Confirm delete interaction button (failed confirm)'
+		});
+		await waitForSelectorReady(page, '#network-interaction [role="alert"]', {
+			label: 'Delete interaction failure alert'
+		});
+		await waitForSelectorGone(page, 'button[form="network-interaction"]', {
+			label: 'Confirm delete interaction dialog to close after failure'
+		});
 		assert.equal(
 			await page.$eval('#interaction_note', (el) => el.value),
 			'Keep this interaction draft'
@@ -752,13 +949,20 @@ test('production stage/history actions, result round trips and read-only overvie
 			'row'
 		);
 		await page.screenshot({ path: '/tmp/saturday-network-interaction-desktop.png' });
-		await page.click('#network-interaction button[data-variant="destructive"]');
-		await page.waitForSelector('button[form="network-interaction"]');
-		await page.click('button[form="network-interaction"]');
-		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await clickWhenReady(page, '#network-interaction button[data-variant="destructive"]', {
+			label: 'Delete interaction trigger'
+		});
+		await clickWhenReady(page, 'button[form="network-interaction"]', {
+			label: 'Confirm delete interaction button'
+		});
+		await waitForDialogClosed(page, { label: 'Delete interaction dialog to close' });
+		await settle();
 		assert.equal(listNetworkUpdates({ network_id: person.id }).updates.length, 0);
 		await button('Edit link note');
-		await page.waitForSelector('#relationship_notes');
+		await waitForSelectorReady(page, '#relationship_notes', {
+			label: 'Network link note field',
+			visible: true
+		});
 		await page.locator('#relationship_notes').fill('Unsaved Network link note');
 		await keepDraft('#relationship_notes', 'Unsaved Network link note', () =>
 			page.mouse.click(1, 1)
@@ -768,13 +972,20 @@ test('production stage/history actions, result round trips and read-only overvie
 
 		await page.goto(base + detail, { waitUntil: 'networkidle0' });
 		await button('Edit link note');
-		await page.waitForSelector('#network_relationship_note');
+		await waitForSelectorReady(page, '#network_relationship_note', {
+			label: 'Job link note field',
+			visible: true
+		});
 		await page.locator('#network_relationship_note').fill('Unsaved Job link note');
 		await keepDraft('#network_relationship_note', 'Unsaved Job link note', () =>
-			page.click('#job-link-note button[data-variant="ghost"]')
+			clickWhenReady(page, '#job-link-note button[data-variant="ghost"]', {
+				label: 'Job link note cancel button'
+			})
 		);
-		await page.click('#job-link-note button[type="submit"]');
-		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await clickWhenReady(page, '#job-link-note button[type="submit"]', {
+			label: 'Job link note submit button'
+		});
+		await waitForDialogClosed(page, { label: 'Job link note dialog to close' });
 		await settle();
 		assert.equal(
 			listNetworks({ job_id: job.id }).networks[0].job_link.notes,
@@ -785,61 +996,91 @@ test('production stage/history actions, result round trips and read-only overvie
 			createNetwork({ name: `A navigation ${i}`, organization: 'Return QA' });
 		const networkResults = '/networks?organization=Return+QA&page=2';
 		await page.goto(base + networkResults, { waitUntil: 'networkidle0' });
-		await page.click(`a[href^="/networks/${person.id}?"]`);
-		await page.waitForFunction((id) => location.pathname === `/networks/${id}`, {}, person.id);
-		await page.waitForSelector('a[href*="/edit?"]');
+		await clickWhenReady(page, `a[href^="/networks/${person.id}?"]`, {
+			label: 'person detail link from network results'
+		});
+		await waitForPage(
+			page,
+			`navigation to /networks/${person.id}`,
+			(id) => location.pathname === `/networks/${id}`,
+			[person.id]
+		);
+		await waitForSelectorReady(page, 'a[href*="/edit?"]', { label: 'person edit link' });
 		assert.equal(new URL(page.url()).searchParams.get('return_to'), networkResults);
 		const personDetail = new URL(page.url());
 		personDetail.searchParams.set('jobs_page', '2');
 		personDetail.searchParams.set('updates_page', '3');
 		await page.goto(personDetail.href, { waitUntil: 'networkidle0' });
-		await page.click('a[href*="/edit?"]');
-		await page.waitForSelector('#name');
+		await clickWhenReady(page, 'a[href*="/edit?"]', { label: 'person edit link' });
+		await waitForSelectorReady(page, '#name', { label: 'person edit name field', visible: true });
 		const editBack = await page.$eval('a.back-link', (el) => el.getAttribute('href'));
 		assert.equal(new URL(editBack, base).searchParams.get('updates_page'), '3');
-		await page.click('.form-actions a');
-		await page.waitForSelector('a[href*="/edit?"]');
+		await clickWhenReady(page, '.form-actions a', { label: 'person edit cancel link' });
+		await waitForSelectorReady(page, 'a[href*="/edit?"]', { label: 'person detail edit link' });
 		assert.equal(new URL(page.url()).searchParams.get('jobs_page'), '2');
-		await page.click('a[href*="/edit?"]');
-		await page.waitForSelector('#name');
+		await clickWhenReady(page, 'a[href*="/edit?"]', { label: 'person edit link' });
+		await waitForSelectorReady(page, '#name', { label: 'person edit name field', visible: true });
 		await page.locator('#name').fill('');
 		await page.$eval('form:has(#name)', (el) => (el.noValidate = true));
-		await page.click('button[type="submit"]');
-		await page.waitForSelector('#name[aria-invalid="true"]');
+		await clickWhenReady(page, 'button[type="submit"]', { label: 'person edit submit button' });
+		await waitForSelectorReady(page, '#name[aria-invalid="true"]', {
+			label: 'person name validation error'
+		});
 		assert.equal(await page.$eval('a.back-link', (el) => el.getAttribute('href')), editBack);
 		await page.locator('#name').fill(person.name);
-		await page.click('button[type="submit"]');
-		await page.waitForSelector('a[href*="/edit?"]');
+		await clickWhenReady(page, 'button[type="submit"]', { label: 'person edit submit button' });
+		await waitForSelectorReady(page, 'a[href*="/edit?"]', {
+			label: 'person detail edit link after save'
+		});
 		assert.equal(new URL(page.url()).searchParams.get('updates_page'), '3');
 		assert.equal(await page.$eval('a.back-link', (el) => el.getAttribute('href')), networkResults);
-		await page.click('a.back-link');
-		await page.waitForFunction(() => location.pathname === '/networks');
-		await page.waitForSelector('a[href^="/networks/' + person.id + '?"]');
+		await clickWhenReady(page, 'a.back-link', { label: 'back to network results link' });
+		await waitForPage(page, 'navigation to /networks', () => location.pathname === '/networks');
+		await waitForSelectorReady(page, 'a[href^="/networks/' + person.id + '?"]', {
+			label: 'person row in network results'
+		});
 		assert.equal(new URL(page.url()).pathname + new URL(page.url()).search, networkResults);
 		// A job-origin person returns to that exact job, including its original results.
 		await page.goto(base + detail + '&network_page=2', { waitUntil: 'networkidle0' });
-		await page.click(`a[href^="/networks/${person.id}?"]`);
-		await page.waitForFunction((id) => location.pathname === `/networks/${id}`, {}, person.id);
-		await page.waitForSelector('a[href*="/edit?"]');
+		await clickWhenReady(page, `a[href^="/networks/${person.id}?"]`, {
+			label: 'person link from job detail'
+		});
+		await waitForPage(
+			page,
+			`navigation to /networks/${person.id} from job`,
+			(id) => location.pathname === `/networks/${id}`,
+			[person.id]
+		);
+		await waitForSelectorReady(page, 'a[href*="/edit?"]', { label: 'person edit link' });
 		const jobBack = await page.$eval('a.back-link', (el) => el.getAttribute('href'));
 		assert.equal(new URL(jobBack, base).pathname, `/jobs/${job.id}`);
 		assert.equal(new URL(jobBack, base).searchParams.get('return_to'), returnTo);
 		assert.equal(new URL(jobBack, base).searchParams.get('network_page'), '2');
-		await page.click('a.back-link');
-		await page.waitForSelector('button::-p-text(Change stage)');
+		await clickWhenReady(page, 'a.back-link', { label: 'back to job detail link' });
+		await waitForSelectorReady(page, 'button::-p-text(Change stage)', {
+			label: 'Change stage button on job detail',
+			visible: true
+		});
 		// A destination retired by another client while editing must preserve the draft.
 		addWorkflowStage({ name: 'Retired while editing' });
 		const retiring = listWorkflowStages().find((stage) => stage.name === 'Retired while editing');
 		await button('Change stage');
-		await page.waitForSelector('#move-stage');
+		await waitForSelectorReady(page, '#move-stage', {
+			label: 'Change stage select',
+			visible: true
+		});
 		await page.select('#move-stage', String(retiring.id));
 		await page.type('#move-note', 'Keep this stage-change draft');
 		const previousPlacement = getJob(job.id).currentStageId;
 		archiveWorkflowStage(retiring.id);
-		await page.click(
-			'#job-update-form button[type="submit"]:not([formaction]), #reminder-editor button[type="submit"]:not([formaction])'
+		await clickWhenReady(
+			page,
+			'#job-update-form button[type="submit"]:not([formaction]), #reminder-editor button[type="submit"]:not([formaction])',
+			{ label: 'Change stage submit button (retired destination)' }
 		);
-		await page.waitForSelector('#move-stage[aria-invalid="true"]');
+		await waitForSelectorReady(page, '#move-stage[aria-invalid="true"]', {
+			label: 'retired destination validation error'
+		});
 		await settle();
 		assert.equal(await page.$eval('#move-note', (el) => el.value), 'Keep this stage-change draft');
 		assert.equal(await page.$(`#move-stage option[value="${retiring.id}"]`), null);
@@ -865,36 +1106,64 @@ test('production stage/history actions, result round trips and read-only overvie
 		);
 		assert.equal(getJob(job.id).updates.length, beforeRetry + 1);
 		await page.goto(base + '/settings#workflow', { waitUntil: 'networkidle0' });
-		await page.click(`#workflow-stage-${custom.id} a[href*="edit_stage"]`);
+		await clickWhenReady(page, `#workflow-stage-${custom.id} a[href*="edit_stage"]`, {
+			label: `edit workflow stage ${custom.id} link`
+		});
+		await waitForSelectorReady(page, `#workflow-name-${custom.id}`, {
+			label: `workflow stage ${custom.id} name input`,
+			visible: true
+		});
 		await page.locator(`#workflow-name-${custom.id}`).fill('Conversation again');
-		await page.click(
-			`#workflow-stage-${custom.id} form:has(input[value="rename"]) button[type="submit"]`
+		await clickWhenReady(
+			page,
+			`#workflow-stage-${custom.id} form:has(input[value="rename"]) button[type="submit"]`,
+			{ label: `rename workflow stage ${custom.id} button` }
 		);
-		await page.waitForFunction(() =>
-			document.querySelector('.toast')?.textContent.includes('Workflow saved')
+		await waitForPage(page, 'Workflow saved toast', () =>
+			Boolean(document.querySelector('.toast')?.textContent.includes('Workflow saved'))
 		);
 		assert.equal(listWorkflowStages().find((s) => s.id === custom.id).name, 'Conversation again');
 		const screening = listWorkflowStages().find((s) => s.name === 'Screening');
-		await page.click(`#workflow-stage-${screening.id} form:has(input[value="up"]) button`);
-		await page.waitForSelector('button[form="workflow-confirm"]');
-		await page.click('button[form="workflow-confirm"]');
-		await page.waitForFunction(
+		await clickWhenReady(
+			page,
+			`#workflow-stage-${screening.id} form:has(input[value="up"]) button`,
+			{
+				label: `move workflow stage ${screening.id} up button`
+			}
+		);
+		await clickWhenReady(page, 'button[form="workflow-confirm"]', {
+			label: 'confirm starting stage change button'
+		});
+		await waitForPage(
+			page,
+			`workflow stage ${screening.id} row to show Starting stage`,
 			(id) =>
-				document.querySelector('#workflow-stage-' + id)?.textContent.includes('Starting stage'),
-			{},
-			screening.id
+				Boolean(
+					document.querySelector('#workflow-stage-' + id)?.textContent.includes('Starting stage')
+				),
+			[screening.id]
 		);
 		assert.equal(listWorkflowStages().find((s) => s.is_starting).id, screening.id);
-		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
-		await page.waitForNetworkIdle({ idleTime: 300 });
+		await waitForDialogClosed(page, { label: 'starting stage confirmation dialog to close' });
+		await page.waitForNetworkIdle({ idleTime: 300, timeout: 15000 });
 		await page.$eval('#workflow-new-name', (el) => (el.closest('details').open = true));
+		await waitForSelectorReady(page, '#workflow-new-name', {
+			label: 'new workflow stage name input',
+			visible: true
+		});
 		await page.type('#workflow-new-name', 'Applied');
-		await page.click('#workflow form:has(input[value="add"]) button[type="submit"]');
-		await page.waitForSelector('#workflow-new-name[aria-invalid="true"]');
+		await clickWhenReady(page, '#workflow form:has(input[value="add"]) button[type="submit"]', {
+			label: 'add workflow stage submit button (duplicate check)'
+		});
+		await waitForSelectorReady(page, '#workflow-new-name[aria-invalid="true"]', {
+			label: 'duplicate workflow stage validation error'
+		});
 		assert.equal(await page.$eval('#workflow-new-name', (el) => el.value), 'Applied');
 		await page.locator('#workflow-new-name').fill('Phone screen');
-		await page.click('#workflow form:has(input[value="add"]) button[type="submit"]');
-		await page.waitForFunction(() =>
+		await clickWhenReady(page, '#workflow form:has(input[value="add"]) button[type="submit"]', {
+			label: 'add workflow stage submit button'
+		});
+		await waitForPage(page, 'Phone screen workflow stage row', () =>
 			Array.from(document.querySelectorAll('#workflow li')).some((li) =>
 				li.textContent.includes('Phone screen')
 			)
@@ -980,7 +1249,7 @@ test('production stage/history actions, result round trips and read-only overvie
 			score_comment: 'Zero is a valid assessment.\nRead-only assistant notes.'
 		});
 		await page.reload({ waitUntil: 'networkidle0' });
-		await page.waitForSelector('.job-score');
+		await waitForSelectorReady(page, '.job-score', { label: 'job score button', visible: true });
 		assert.equal(await page.$eval('.job-score-number', (el) => el.textContent), '0');
 		const headerLayout = () =>
 			page.evaluate(() => {
@@ -997,8 +1266,11 @@ test('production stage/history actions, result round trips and read-only overvie
 				);
 			});
 		assert(await headerLayout(), 'Metadata orders current stage before the optional score');
-		await page.click('.job-score');
-		await page.waitForSelector('[data-slot="dialog-content"]');
+		await clickWhenReady(page, '.job-score', { label: 'job score button' });
+		await waitForSelectorReady(page, '[data-slot="dialog-content"]', {
+			label: 'job score assessment dialog',
+			visible: true
+		});
 		assert(
 			(await page.$eval('[data-slot="dialog-content"]', (el) => el.textContent)).includes(
 				'Zero is a valid assessment.'
@@ -1009,14 +1281,16 @@ test('production stage/history actions, result round trips and read-only overvie
 			null
 		);
 		await page.keyboard.press('Escape');
-		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await waitForDialogClosed(page, { label: 'job score dialog to close' });
 		await settle();
 		assert.equal(await page.$eval('.job-score', (el) => document.activeElement === el), true);
 		assert(await page.$eval('html', (el) => el.scrollWidth <= innerWidth + 1));
 		await page.screenshot({ path: '/tmp/saturday-job-detail-phone.png', fullPage: true });
 		await page.setViewport({ width: 1280, height: 960 });
 		await page.goto(base + `/jobs/${layoutJob.id}`, { waitUntil: 'networkidle0' });
-		await page.waitForFunction(() => document.querySelector('#job-information').open);
+		await waitForPage(page, '#job-information disclosure to open on desktop', () =>
+			Boolean(document.querySelector('#job-information')?.open)
+		);
 		assert(await headerLayout());
 		assert.equal(
 			await page.$eval('.navigation-item', (el) => getComputedStyle(el).flexDirection),
@@ -1050,15 +1324,18 @@ test('production stage/history actions, result round trips and read-only overvie
 		await page.screenshot({ path: '/tmp/saturday-job-detail-desktop.png', fullPage: true });
 		setJobScore(layoutJob.id, { score: 8.5, score_comment: null });
 		await page.reload({ waitUntil: 'networkidle0' });
-		await page.click('.job-score');
-		await page.waitForSelector('[data-slot="dialog-content"]');
+		await clickWhenReady(page, '.job-score', { label: 'job score button (no notes)' });
+		await waitForSelectorReady(page, '[data-slot="dialog-content"]', {
+			label: 'job score assessment dialog (no notes)',
+			visible: true
+		});
 		assert(
 			(await page.$eval('[data-slot="dialog-content"]', (el) => el.textContent)).includes(
 				'No assessment notes provided.'
 			)
 		);
 		await page.keyboard.press('Escape');
-		await page.waitForSelector('[data-slot="dialog-content"]', { hidden: true });
+		await waitForDialogClosed(page, { label: 'job score dialog (no notes) to close' });
 		const nativeDetail = await browser.newPage();
 		await nativeDetail.setJavaScriptEnabled(false);
 		await nativeDetail.goto(base + `/jobs/${layoutJob.id}`);

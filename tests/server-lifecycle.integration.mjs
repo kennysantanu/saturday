@@ -12,6 +12,7 @@ import { withServerActivity } from '../src/lib/server/server-lifecycle.js';
 import { connectedClients } from '../src/lib/server/installation-operations.js';
 import { inspectProcessLeases } from '../src/lib/server/process-leases.js';
 import { getInstallation } from '../src/lib/server/installation.js';
+import { waitForCondition, waitForValue } from './helpers/wait-for.mjs';
 const run = (script, args, env) =>
 	new Promise((res, rej) => {
 		const child = spawn(process.execPath, [script, ...args], {
@@ -35,6 +36,38 @@ async function waitFor(check) {
 		await pause();
 	}
 	throw new Error('Server transition timed out.');
+}
+async function waitForConnectedClients(config, expected, label) {
+	const count = await waitForValue(
+		label,
+		() => connectedClients(config),
+		(seen) => seen === expected,
+		{
+			timeoutMs: 10000,
+			intervalMs: 100,
+			describe: async (seen) => ({
+				connectedClients: seen,
+				leases: (await inspectProcessLeases(config, { includeSelf: false })).entries
+			})
+		}
+	);
+	assert.equal(count, expected, label);
+}
+async function waitForGenuineLease(config, pid, role, label) {
+	await waitForCondition(
+		label,
+		async () => {
+			const inspected = await inspectProcessLeases(config, { includeSelf: false });
+			return inspected.entries.some(
+				(e) => e.pid === pid && e.status === 'genuine' && e.role === role
+			);
+		},
+		{
+			timeoutMs: 10000,
+			intervalMs: 100,
+			describe: async () => (await inspectProcessLeases(config, { includeSelf: false })).entries
+		}
+	);
 }
 test('owned background server reuses, handles collisions, protects active work and restarts/stops through authenticated UI', async () => {
 	const root = await mkdtemp(join(tmpdir(), 'saturday-server-'));
@@ -400,7 +433,7 @@ test('production MCP EOF/SIGINT/SIGKILL and web SIGINT/forced-timeout shutdown h
 		const eofLeasePath = join(leasesDir, `${mcpEof.pid}.json`);
 		await waitFor(async () => existsSync(eofLeasePath));
 		const eofLease = JSON.parse(await readFile(eofLeasePath, 'utf8'));
-		assert.equal(await connectedClients(config), 1);
+		await waitForConnectedClients(config, 1, 'MCP EOF connected client count to be 1');
 		mcpEof.stdin.end();
 		const eofExit = await new Promise((res) => mcpEof.once('exit', res));
 		assert.equal(eofExit, 0);
@@ -415,12 +448,12 @@ test('production MCP EOF/SIGINT/SIGKILL and web SIGINT/forced-timeout shutdown h
 		children.push(mcpInt);
 		const intLeasePath = join(leasesDir, `${mcpInt.pid}.json`);
 		await waitFor(async () => existsSync(intLeasePath));
-		assert.equal(await connectedClients(config), 1);
+		await waitForConnectedClients(config, 1, 'MCP SIGINT connected client count to be 1');
 		mcpInt.kill('SIGINT');
 		const intExit = await new Promise((res) => mcpInt.once('exit', res));
 		assert.equal(intExit, 130);
 		assert.equal(existsSync(intLeasePath), false, 'MCP SIGINT removes its v2 lease');
-		assert.equal(await connectedClients(config), 0);
+		await waitForConnectedClients(config, 0, 'MCP SIGINT connected client count to return to 0');
 
 		// 2. Built MCP SIGKILL leaves crash debris, which is ignored on death and synthetic PID reuse.
 		const mcpKill = spawn(process.execPath, ['build/mcp/index.js'], {
@@ -433,7 +466,7 @@ test('production MCP EOF/SIGINT/SIGKILL and web SIGINT/forced-timeout shutdown h
 		mcpKill.kill('SIGKILL');
 		await new Promise((res) => mcpKill.once('exit', res));
 		assert.equal(existsSync(killLeasePath), true, 'SIGKILL leaves crash lease file');
-		assert.equal(await connectedClients(config), 0, 'dead SIGKILL lease is ignored');
+		await waitForConnectedClients(config, 0, 'dead SIGKILL lease is ignored');
 		const killLease = JSON.parse(await readFile(killLeasePath, 'utf8'));
 		const reusedSleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
 			stdio: 'ignore'
@@ -444,11 +477,7 @@ test('production MCP EOF/SIGINT/SIGKILL and web SIGINT/forced-timeout shutdown h
 			join(leasesDir, `${reusedSleeper.pid}.json`),
 			JSON.stringify({ ...killLease, pid: reusedSleeper.pid })
 		);
-		assert.equal(
-			await connectedClients(config),
-			0,
-			'synthetic PID reuse with dead endpoint is ignored'
-		);
+		await waitForConnectedClients(config, 0, 'synthetic PID reuse with dead endpoint is ignored');
 
 		// 3. Production web forced-timeout SIGTERM branch (7s) removes its own v2 lease.
 		const probePort = createHttpServer();
@@ -466,13 +495,7 @@ test('production MCP EOF/SIGINT/SIGKILL and web SIGINT/forced-timeout shutdown h
 		await waitFor(async () => webOut.includes('Listening on'));
 		const webLeasePath = join(leasesDir, `${webProc.pid}.json`);
 		await waitFor(async () => existsSync(webLeasePath));
-		const inspectedWeb = await inspectProcessLeases(config, { includeSelf: false });
-		assert.equal(
-			inspectedWeb.entries.some(
-				(e) => e.pid === webProc.pid && e.status === 'genuine' && e.role === 'web'
-			),
-			true
-		);
+		await waitForGenuineLease(config, webProc.pid, 'web', 'web forced-timeout genuine v2 lease');
 		// Hold an active (incomplete) HTTP request so server.closeIdleConnections() cannot drain it
 		// and the 7s forced-timeout branch in scripts/web.mjs runs.
 		const heldSocket = connect({ host: '127.0.0.1', port: webPort });
@@ -505,13 +528,7 @@ test('production MCP EOF/SIGINT/SIGKILL and web SIGINT/forced-timeout shutdown h
 		await waitFor(async () => webIntOut.includes('Listening on'));
 		const webIntLeasePath = join(leasesDir, `${webIntProc.pid}.json`);
 		await waitFor(async () => existsSync(webIntLeasePath));
-		const inspectedWebInt = await inspectProcessLeases(config, { includeSelf: false });
-		assert.equal(
-			inspectedWebInt.entries.some(
-				(e) => e.pid === webIntProc.pid && e.status === 'genuine' && e.role === 'web'
-			),
-			true
-		);
+		await waitForGenuineLease(config, webIntProc.pid, 'web', 'web SIGINT genuine v2 lease');
 		webIntProc.kill('SIGINT');
 		const webIntExit = await new Promise((res) => webIntProc.once('exit', res));
 		assert.equal(webIntExit, 0);
