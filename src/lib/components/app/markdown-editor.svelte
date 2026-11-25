@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { onMount, tick, untrack, type Snippet } from 'svelte';
 	import { Editor } from '@tiptap/core';
+	import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
+	import { TextSelection } from '@tiptap/pm/state';
+	import type { EditorView } from '@tiptap/pm/view';
 	import { markdownExtensions, privateMarkdown } from '$lib/markdown-extensions';
 	import { visualEditorLoss } from '$lib/markdown-visual';
 	import Bold from '@lucide/svelte/icons/bold';
@@ -42,9 +45,154 @@
 	// can do that) is still a change, so edits are judged against this as well.
 	let baselineDoc: any = null;
 	// The Markdown last loaded into the editor or emitted by it. The text prop is applied to the
-	// editor only when it differs from this, never by comparing with getMarkdown() (which drops a
-	// trailing newline and so would never match, re-running the effect without end).
+	// editor only when it genuinely differs from what the editor holds, never on trailing-newline or
+	// serializer-formatting differences that represent the same document.
 	let synced = '';
+	// An external value that arrived while the editor was focused and could not be applied without
+	// losing the user's selection; parked here and applied once the editor blurs.
+	let pendingValue: string | null = null;
+	const CONTEXT_RADIUS = 16;
+	const normalizeEnd = (text: string) => text.replace(/\r\n?/g, '\n').replace(/\s+$/, '');
+	function parseMarkdownDoc(current: Editor, markdown: string): ProseMirrorNode | null {
+		try {
+			const parsed = current.markdown?.parse(markdown);
+			return parsed ? current.schema.nodeFromJSON(parsed) : null;
+		} catch {
+			return null;
+		}
+	}
+	function matchesCurrentText(current: Editor, next: string): boolean {
+		return (
+			next === synced ||
+			normalizeEnd(next) === normalizeEnd(synced) ||
+			normalizeEnd(next) === normalizeEnd(current.getMarkdown())
+		);
+	}
+	/**
+	 * Finds the equivalent TextSelection range in `nextDoc` when the selected text and its immediate
+	 * surroundings within the enclosing textblock(s) are unchanged. Returns null when mapping is
+	 * unsafe or ambiguous so a focused editor is never clobbered.
+	 */
+	function findEquivalentSelection(
+		prevDoc: ProseMirrorNode,
+		nextDoc: ProseMirrorNode,
+		selection: Editor['state']['selection']
+	): { anchor: number; head: number } | null {
+		if (!(selection instanceof TextSelection)) return null;
+		const { from, to, anchor, head } = selection;
+		const fromPos = selection.$from;
+		const toPos = selection.$to;
+		const reversed = anchor > head;
+		const blockStart = fromPos.start();
+		const blockEnd = toPos.end();
+		const beforeStart = Math.max(blockStart, from - CONTEXT_RADIUS);
+		const afterEnd = Math.min(blockEnd, to + CONTEXT_RADIUS);
+		const before = prevDoc.textBetween(beforeStart, from, '\n', '\0');
+		const selected = prevDoc.textBetween(from, to, '\n', '\0');
+		const after = prevDoc.textBetween(to, afterEnd, '\n', '\0');
+		const touchesStart = beforeStart === blockStart;
+		const touchesEnd = afterEnd === blockEnd;
+		const snippet = before + selected + after;
+		if (!snippet.length) return null;
+		const matchesAt = (candFrom: number, candTo: number): boolean => {
+			if (candFrom < 0 || candTo > nextDoc.content.size || candFrom > candTo) return false;
+			try {
+				const candFromPos = nextDoc.resolve(candFrom);
+				const candToPos = nextDoc.resolve(candTo);
+				if (!candFromPos.parent.isTextblock || !candToPos.parent.isTextblock) return false;
+				const cBlockStart = candFromPos.start();
+				const cBlockEnd = candToPos.end();
+				const cBeforeStart = candFrom - before.length;
+				const cAfterEnd = candTo + after.length;
+				if (cBeforeStart < cBlockStart || cAfterEnd > cBlockEnd) return false;
+				if (touchesStart && cBeforeStart !== cBlockStart) return false;
+				if (touchesEnd && cAfterEnd !== cBlockEnd) return false;
+				const cBefore = nextDoc.textBetween(cBeforeStart, candFrom, '\n', '\0');
+				const cSelected = nextDoc.textBetween(candFrom, candTo, '\n', '\0');
+				const cAfter = nextDoc.textBetween(candTo, cAfterEnd, '\n', '\0');
+				return cBefore === before && cSelected === selected && cAfter === after;
+			} catch {
+				return false;
+			}
+		};
+		if (matchesAt(from, to)) {
+			return reversed ? { anchor: to, head: from } : { anchor: from, head: to };
+		}
+		if (fromPos.sameParent(toPos)) {
+			const matches: Array<{ from: number; to: number }> = [];
+			nextDoc.descendants((node, pos) => {
+				if (!node.isTextblock) return true;
+				const start = pos + 1;
+				const blockText = node.textBetween(0, node.content.size, '\n', '\0');
+				let searchFrom = 0;
+				while (searchFrom <= blockText.length) {
+					const idx = blockText.indexOf(snippet, searchFrom);
+					if (idx < 0) break;
+					const candFrom = start + idx + before.length;
+					const candTo = candFrom + selected.length;
+					if (matchesAt(candFrom, candTo)) matches.push({ from: candFrom, to: candTo });
+					searchFrom = idx + 1;
+				}
+				return false;
+			});
+			if (matches.length === 1) {
+				const hit = matches[0];
+				return reversed ? { anchor: hit.to, head: hit.from } : { anchor: hit.from, head: hit.to };
+			}
+		}
+		return null;
+	}
+	function applyExternal(
+		current: Editor,
+		next: string,
+		selection: { anchor: number; head: number } | null = null
+	) {
+		pendingValue = null;
+		synced = next;
+		current.commands.setContent(next, { contentType: 'markdown', emitUpdate: false });
+		if (selection) {
+			const size = current.state.doc.content.size;
+			const anchor = Math.max(0, Math.min(selection.anchor, size));
+			const head = Math.max(0, Math.min(selection.head, size));
+			current.view.dispatch(
+				current.state.tr.setSelection(TextSelection.create(current.state.doc, anchor, head))
+			);
+		}
+		baseline = current.getMarkdown();
+		baselineDoc = current.state.doc;
+	}
+	// ProseMirror's focus handler schedules a 20 ms timer that resets the DOM selection from
+	// state.selection if domObserver.currentSelection lags behind the browser. Syncing pointer
+	// selections in a microtask after mouseup/dblclick keeps ProseMirror aligned before that
+	// timer can collapse a fresh word or drag selection.
+	function syncPointerSelection(view: EditorView) {
+		queueMicrotask(() => {
+			if (view.isDestroyed || !view.hasFocus()) return;
+			if (!(view.state.selection instanceof TextSelection)) return;
+			const domSel = view.dom.ownerDocument.getSelection();
+			if (
+				!domSel ||
+				!domSel.anchorNode ||
+				!domSel.focusNode ||
+				!view.dom.contains(domSel.anchorNode) ||
+				!view.dom.contains(domSel.focusNode)
+			)
+				return;
+			try {
+				const anchor = view.posAtDOM(domSel.anchorNode, domSel.anchorOffset);
+				const head = view.posAtDOM(domSel.focusNode, domSel.focusOffset);
+				const next = TextSelection.between(
+					view.state.doc.resolve(anchor),
+					view.state.doc.resolve(head)
+				);
+				if (!next.eq(view.state.selection)) {
+					view.dispatch(view.state.tr.setSelection(next).setMeta('pointer', true));
+				}
+			} catch {
+				/* Ignore transient DOM positions outside editable content. */
+			}
+		});
+	}
 	let linkOpen = $state(false),
 		linkUrl = $state('');
 	let linkInput = $state<HTMLInputElement | null>(null);
@@ -218,6 +366,7 @@
 		if (!editor || editor.isDestroyed || !json || typeof json !== 'object') return false;
 		try {
 			editor.schema.nodeFromJSON(json).check();
+			pendingValue = null;
 			return editor.commands.setContent(json as any, { emitUpdate: true });
 		} catch {
 			return false;
@@ -232,6 +381,16 @@
 			editable: !readonly,
 			editorProps: {
 				transformPastedHTML: cleanPaste,
+				handleDOMEvents: {
+					mouseup: (view, event) => {
+						if (!(event.target instanceof HTMLInputElement)) syncPointerSelection(view);
+						return false;
+					},
+					dblclick: (view, event) => {
+						if (!(event.target instanceof HTMLInputElement)) syncPointerSelection(view);
+						return false;
+					}
+				},
 				handleKeyDown: (view, event) => {
 					// A table cell is one line of Markdown. A line break there would be written as <br>, which
 					// the editor cannot read back, so Enter (and Shift+Enter) does nothing inside a cell.
@@ -257,10 +416,41 @@
 				baseline = editor.getMarkdown();
 				baselineDoc = editor.state.doc;
 			},
-			onUpdate: ({ editor }) => {
+			onUpdate: ({ editor, transaction }) => {
 				const markdown = editor.getMarkdown();
 				synced = markdown;
+				// TrailingNode appends an empty paragraph on the first non-editing transaction (such as
+				// focus) when a document ends with a list or table. Absorb that scaffolding into the
+				// baseline so focusing or selecting text never marks an untouched document dirty.
+				if (
+					!transaction.docChanged &&
+					baselineDoc &&
+					transaction.doc.eq(baselineDoc) &&
+					normalizeEnd(markdown) === normalizeEnd(baseline)
+				) {
+					baseline = markdown;
+					baselineDoc = editor.state.doc;
+					onchange(markdown, false);
+					return;
+				}
+				// User edits supersede any parked external value so blur does not overwrite newer typing.
+				pendingValue = null;
 				onchange(markdown, markdown !== baseline || !editor.state.doc.eq(baselineDoc));
+			},
+			onBlur: ({ editor: current }) => {
+				if (pendingValue === null || current.isDestroyed) return;
+				const next = pendingValue;
+				pendingValue = null;
+				if (matchesCurrentText(current, next)) {
+					synced = next;
+					return;
+				}
+				const nextDoc = parseMarkdownDoc(current, next);
+				if (nextDoc && nextDoc.eq(current.state.doc)) {
+					synced = next;
+					return;
+				}
+				applyExternal(current, next);
 			},
 			// Bump without letting a running effect depend on the counter it is writing.
 			onTransaction: () => untrack(() => version++)
@@ -274,11 +464,32 @@
 		const next = value;
 		const current = editor;
 		untrack(() => {
-			if (!current || current.isDestroyed || next === synced) return;
-			synced = next;
-			current.commands.setContent(next, { contentType: 'markdown', emitUpdate: false });
-			baseline = current.getMarkdown();
-			baselineDoc = current.state.doc;
+			if (!current || current.isDestroyed) return;
+			if (matchesCurrentText(current, next)) {
+				synced = next;
+				pendingValue = null;
+				return;
+			}
+			const nextDoc = parseMarkdownDoc(current, next);
+			if (nextDoc && nextDoc.eq(current.state.doc)) {
+				synced = next;
+				pendingValue = null;
+				return;
+			}
+			if (current.isFocused) {
+				const mapped = nextDoc
+					? findEquivalentSelection(current.state.doc, nextDoc, current.state.selection)
+					: null;
+				if (!mapped) {
+					// Incoming content changes the text around the active selection or cannot be mapped
+					// safely: park it and apply on blur instead of clobbering a focused editor.
+					pendingValue = next;
+					return;
+				}
+				applyExternal(current, next, mapped);
+				return;
+			}
+			applyExternal(current, next);
 		});
 	});
 	$effect(() => {
