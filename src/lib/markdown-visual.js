@@ -288,116 +288,382 @@ function preserved(text, tokens) {
 	}
 }
 
-const HTML_BLOCKER = 'HTML that the source editor would keep and the visual editor would escape';
-const URI_AUTOLINK = /<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>\u0000]*>/g;
+export const HTML_BLOCKER = 'HTML, which the visual editor would save as escaped text';
+const URI_AUTOLINK = /<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>\n\u0000]*>/g;
 const EMAIL_AUTOLINK =
 	/<[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*>/g;
-const HTML_DECLARATION = /<(?:!|\?)/;
-const HTML_TAG = /<\/?[A-Za-z][^>\u0000]*>/;
+const ANGLE_LINK_DEST = /\]\([ \t]*<[^<>\n\u0000]*>/g;
+const ANGLE_REF_DEST = /^\[[^\]\n\u0000]+\]:[ \t]*<[^<>\n\u0000]*>/;
+const HTML_DECLARATION = /<(?:!--|!\[CDATA\[|![A-Za-z]|\?[A-Za-z])/;
+const FENCE_OPEN = /^(`{3,}|~{3,})(.*)$/;
+const FENCE_CLOSE = /^(`{3,}|~{3,})[ \t]*$/;
+const LIST_MARKER = /^(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$)/;
+const ATX_HEADING = /^#{1,6}(?:[ \t]|$)/;
+const THEMATIC_BREAK = /^(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/;
 
-/** Replaces fenced code blocks (backtick and tilde fences) with blank lines so their contents are ignored. */
-function stripFencedCode(text) {
+const isAsciiLetter = (ch) => (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
+const isTagNameChar = (ch) => isAsciiLetter(ch) || (ch >= '0' && ch <= '9') || ch === '-';
+const isAttrStart = (ch) => isAsciiLetter(ch) || ch === '_' || ch === ':';
+const isAttrChar = (ch) =>
+	isAsciiLetter(ch) ||
+	(ch >= '0' && ch <= '9') ||
+	ch === '_' ||
+	ch === '.' ||
+	ch === ':' ||
+	ch === '-';
+const isSpace = (ch) => ch === ' ' || ch === '\t';
+const isUnquotedAttrChar = (ch) =>
+	ch !== ' ' &&
+	ch !== '\t' &&
+	ch !== '\r' &&
+	ch !== '\n' &&
+	ch !== '\u0000' &&
+	ch !== '"' &&
+	ch !== "'" &&
+	ch !== '=' &&
+	ch !== '<' &&
+	ch !== '>' &&
+	ch !== '`';
+
+/** Expands leading spaces and tabs starting from column `startCol`, returning `{ indent, col, index }`. */
+function measureIndent(str, startIndex = 0, startCol = 0) {
+	let i = startIndex;
+	let col = startCol;
+	while (i < str.length) {
+		const ch = str[i];
+		if (ch === ' ') {
+			col++;
+			i++;
+		} else if (ch === '\t') {
+			col += 4 - (col % 4);
+			i++;
+		} else {
+			break;
+		}
+	}
+	return { indent: col - startCol, col, index: i };
+}
+
+/** Strips CommonMark blockquote prefixes (0–3 columns, `>`, optional space) from a line. */
+function stripBlockquotes(line) {
+	let i = 0;
+	let quotes = 0;
+	let col = 0;
+	while (i < line.length) {
+		const ws = measureIndent(line, i, col);
+		if (ws.indent <= 3 && line[ws.index] === '>') {
+			quotes++;
+			i = ws.index + 1;
+			col = ws.col + 1;
+			if (line[i] === ' ') {
+				i++;
+				col++;
+			} else if (line[i] === '\t') {
+				const spaces = 4 - (col % 4) - 1;
+				line = ' '.repeat(spaces) + line.slice(i + 1);
+				i = 0;
+				col = 4 - spaces;
+			}
+		} else {
+			break;
+		}
+	}
+	return { quotes, rest: line.slice(i), startCol: col };
+}
+
+/**
+ * Replaces backtick inline code spans on a single line with a NUL sentinel in O(L) time.
+ * Keeps unmatched backticks intact so text across separate lines or blocks can never pair.
+ */
+function stripInlineCodeLine(line) {
+	if (!line.includes('`')) return line;
+	const len = line.length;
+	/** @type {Map<number, number[]>} */
+	const runsByLen = new Map();
+	for (let i = 0; i < len;) {
+		if (line[i] !== '`') {
+			i++;
+			continue;
+		}
+		const start = i;
+		while (i < len && line[i] === '`') i++;
+		const runLen = i - start;
+		let list = runsByLen.get(runLen);
+		if (!list) {
+			list = [];
+			runsByLen.set(runLen, list);
+		}
+		list.push(start);
+	}
+	/** @type {Map<number, number>} */
+	const cursorByLen = new Map();
+	let out = '';
+	for (let i = 0; i < len;) {
+		if (line[i] !== '`') {
+			const next = line.indexOf('`', i);
+			if (next === -1) {
+				out += line.slice(i);
+				break;
+			}
+			out += line.slice(i, next);
+			i = next;
+			continue;
+		}
+		let backslashes = 0;
+		for (let k = i - 1; k >= 0 && line[k] === '\\'; k--) backslashes++;
+		if (backslashes % 2 === 1) {
+			out += line[i++];
+			continue;
+		}
+		let n = 0;
+		while (i + n < len && line[i + n] === '`') n++;
+		const list = runsByLen.get(n);
+		let closedAt = -1;
+		if (list) {
+			let idx = cursorByLen.get(n) ?? 0;
+			while (idx < list.length && list[idx] < i + n) idx++;
+			cursorByLen.set(n, idx);
+			if (idx < list.length) {
+				closedAt = list[idx] + n;
+				cursorByLen.set(n, idx + 1);
+			}
+		}
+		if (closedAt !== -1) {
+			out += '\u0000';
+			i = closedAt;
+		} else {
+			out += line.slice(i, i + n);
+			i += n;
+		}
+	}
+	return out;
+}
+
+/**
+ * Linear-time check for an HTML open tag (`<name ...>` / `<name .../>`) or closing tag (`</name>`)
+ * on a single line. Follows CommonMark §6.6 open/closing tag syntax. Memoizing failed attribute
+ * start positions guarantees O(L) worst-case time on a line of length L.
+ */
+function hasHtmlTagOnLine(line) {
+	const len = line.length;
+	let i = line.indexOf('<');
+	if (i === -1 || !line.includes('>')) return false;
+	const hasNul = line.includes('\u0000');
+	/** @type {Set<number> | null} */
+	let failedAttr = null;
+	for (; i !== -1; i = line.indexOf('<', i + 1)) {
+		if (i + 1 >= len) break;
+		if (line[i + 1] === '/') {
+			let p = i + 2;
+			if (p < len && isAsciiLetter(line[p])) {
+				p++;
+				while (p < len && isTagNameChar(line[p])) p++;
+				while (p < len && isSpace(line[p])) p++;
+				if (p < len && line[p] === '>') return true;
+			}
+			continue;
+		}
+		if (!isAsciiLetter(line[i + 1])) continue;
+		let p = i + 2;
+		while (p < len && isTagNameChar(line[p])) p++;
+		while (p < len) {
+			const wsStart = p;
+			while (p < len && isSpace(line[p])) p++;
+			const hadSpace = p > wsStart;
+			if (p >= len) break;
+			if (line[p] === '>') return true;
+			if (line[p] === '/' && p + 1 < len && line[p + 1] === '>') return true;
+			if (!hadSpace || !isAttrStart(line[p])) break;
+			if (failedAttr?.has(p)) break;
+			if (!failedAttr && line.indexOf('<', i + 1) !== -1) failedAttr = new Set();
+			failedAttr?.add(p);
+			p++;
+			while (p < len && isAttrChar(line[p])) p++;
+			let eq = p;
+			while (eq < len && isSpace(line[eq])) eq++;
+			if (eq < len && line[eq] === '=') {
+				let v = eq + 1;
+				while (v < len && isSpace(line[v])) v++;
+				if (v >= len) break;
+				const q = line[v];
+				if (q === '"' || q === "'") {
+					const close = line.indexOf(q, v + 1);
+					if (close === -1) break;
+					if (hasNul) {
+						let k = v + 1;
+						while (k < close && line[k] !== '\u0000') k++;
+						if (k < close) break;
+					}
+					p = close + 1;
+				} else {
+					const vStart = v;
+					while (v < len && isUnquotedAttrChar(line[v])) v++;
+					if (v === vStart) break;
+					p = v;
+				}
+			}
+		}
+	}
+	return false;
+}
+
+/** True when a single non-code line contains HTML outside inline code, autolinks, and link destinations. */
+function lineHasHtml(line) {
+	if (!line.includes('<')) return false;
+	const cleaned = stripInlineCodeLine(line)
+		.replace(/\\[^\n\u0000]/g, ' ')
+		.replace(ANGLE_REF_DEST, '\u0000')
+		.replace(ANGLE_LINK_DEST, '](\u0000')
+		.replace(URI_AUTOLINK, '\u0000')
+		.replace(EMAIL_AUTOLINK, '\u0000');
+	if (!cleaned.includes('<')) return false;
+	if (HTML_DECLARATION.test(cleaned)) return true;
+	const piOpen = cleaned.indexOf('<?');
+	if (piOpen !== -1) {
+		const piClose = cleaned.lastIndexOf('?>');
+		if (piClose >= piOpen + 2) {
+			const nul = cleaned.indexOf('\u0000', piOpen + 2);
+			if (nul === -1 || nul > piClose) return true;
+		}
+	}
+	return hasHtmlTagOnLine(cleaned);
+}
+
+/**
+ * True when the source contains HTML markup (comments, declarations, CDATA, processing instructions,
+ * or opening/closing tags) outside fenced code blocks, CommonMark indented code blocks, and inline
+ * code spans. Markdown autolinks (`<https://...>`, `<mailto:...>`, other `<scheme:...>`, `<name@host>`),
+ * angle-bracket link destinations (`[f](<...>)`), and backslash-escaped `<` are excluded.
+ * Scans each line once in O(N) worst-case time over a document of N characters.
+ */
+function hasHtmlMarkup(text) {
 	const lines = String(text ?? '').split(/\r?\n/);
-	const kept = [];
 	let fenceChar = '';
 	let fenceLen = 0;
 	let fenceQuotes = 0;
-	for (const line of lines) {
-		const prefix = line.match(/^((?:[ \t]*>[ \t]?)*)/)[1];
-		const quotes = (prefix.match(/>/g) ?? []).length;
-		const rest = line.slice(prefix.length);
+	let fenceMinIndent = 0;
+	let lastQuotes = 0;
+	let inParagraph = false;
+	/** @type {number[]} */
+	let listIndents = [];
+
+	for (const rawLine of lines) {
+		const { quotes, rest, startCol } = stripBlockquotes(rawLine);
+		if (quotes !== lastQuotes) {
+			listIndents = [];
+			inParagraph = false;
+			lastQuotes = quotes;
+		}
+		const ws = measureIndent(rest, 0, startCol);
+		const isBlank = ws.index === rest.length;
+
 		if (fenceChar) {
 			if (quotes < fenceQuotes) {
 				fenceChar = '';
 				fenceLen = 0;
 				fenceQuotes = 0;
+				fenceMinIndent = 0;
+			} else if (isBlank) {
+				continue;
+			} else if (ws.indent < fenceMinIndent) {
+				fenceChar = '';
+				fenceLen = 0;
+				fenceQuotes = 0;
+				fenceMinIndent = 0;
 			} else {
-				const close = rest.match(/^[ \t]*(`{3,}|~{3,})[ \t]*$/);
-				if (close && close[1][0] === fenceChar && close[1].length >= fenceLen) {
-					fenceChar = '';
-					fenceLen = 0;
-					fenceQuotes = 0;
+				const relIndent = ws.indent - fenceMinIndent;
+				if (relIndent <= 3) {
+					const close = rest.slice(ws.index).match(FENCE_CLOSE);
+					if (close && close[1][0] === fenceChar && close[1].length >= fenceLen) {
+						fenceChar = '';
+						fenceLen = 0;
+						fenceQuotes = 0;
+						fenceMinIndent = 0;
+					}
 				}
-				kept.push('');
 				continue;
 			}
 		}
-		const open = rest.match(/^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})(.*)$/);
-		if (open && (open[1][0] === '~' || !open[2].includes('`'))) {
-			fenceChar = open[1][0];
-			fenceLen = open[1].length;
-			fenceQuotes = quotes;
-			kept.push('');
+
+		if (isBlank) {
+			inParagraph = false;
 			continue;
 		}
-		kept.push(line);
-	}
-	return kept.join('\n');
-}
 
-/**
- * Replaces backtick inline code spans within each non-blank block with a NUL sentinel, so code contents
- * are ignored and text on either side of a code span or paragraph break cannot fuse into a false tag.
- */
-function stripInlineCode(text) {
-	return text
-		.split(/\n[ \t]*\n/)
-		.map((block) => {
-			let out = '';
-			let i = 0;
-			while (i < block.length) {
-				if (block[i] !== '`') {
-					out += block[i++];
-					continue;
-				}
-				let backslashes = 0;
-				for (let k = i - 1; k >= 0 && block[k] === '\\'; k--) backslashes++;
-				if (backslashes % 2 === 1) {
-					out += block[i++];
-					continue;
-				}
-				let n = 0;
-				while (i + n < block.length && block[i + n] === '`') n++;
-				let j = i + n;
-				let closedAt = -1;
-				while (j < block.length) {
-					if (block[j] !== '`') {
-						j++;
-						continue;
-					}
-					let m = 0;
-					while (j + m < block.length && block[j + m] === '`') m++;
-					if (m === n) {
-						closedAt = j + m;
-						break;
-					}
-					j += m;
-				}
-				if (closedAt !== -1) {
-					out += '\u0000';
-					i = closedAt;
-				} else {
-					out += block.slice(i, i + n);
-					i += n;
-				}
+		let indent = ws.indent;
+		let col = ws.col;
+		let index = ws.index;
+
+		while (listIndents.length > 0 && indent < listIndents[listIndents.length - 1]) {
+			listIndents.pop();
+		}
+		let containerIndent = listIndents.length > 0 ? listIndents[listIndents.length - 1] : 0;
+		let relIndent = indent - containerIndent;
+
+		// CommonMark indented code block: 4+ columns relative to container, and cannot interrupt a paragraph.
+		if (!inParagraph && relIndent >= 4) {
+			continue;
+		}
+
+		// Consume any nested list markers at this container level (indented 0–3 columns).
+		let indentedCodeOnListLine = false;
+		while (relIndent <= 3 && index < rest.length) {
+			const tail = rest.slice(index);
+			if (THEMATIC_BREAK.test(tail)) break;
+			const markerMatch = tail.match(LIST_MARKER);
+			if (!markerMatch) break;
+			const markerLen = markerMatch[0].length;
+			const afterMarkerIndex = index + markerLen;
+			const afterMarkerCol = col + markerLen;
+			const afterWs = measureIndent(rest, afterMarkerIndex, afterMarkerCol);
+			inParagraph = false;
+			if (afterWs.index === rest.length) {
+				listIndents.push(indent + markerLen + 1);
+				index = rest.length;
+				break;
 			}
-			return out;
-		})
-		.join('\u0000');
-}
+			const contentIndent =
+				afterWs.indent <= 4 ? indent + markerLen + afterWs.indent : indent + markerLen + 1;
+			listIndents.push(contentIndent);
+			containerIndent = contentIndent;
+			indent = indent + markerLen + afterWs.indent;
+			col = afterWs.col;
+			index = afterWs.index;
+			relIndent = indent - containerIndent;
+			if (relIndent >= 4) {
+				indentedCodeOnListLine = true;
+				break;
+			}
+		}
 
-/**
- * True when the source contains HTML markup (comments, declarations, processing instructions, or
- * opening/closing tags) outside fenced code blocks and inline code spans. Markdown autolinks
- * (`<https://...>`, `<mailto:...>`, other `<scheme:...>`, `<name@host>`) and backslash-escaped `<`
- * are excluded.
- */
-function hasHtmlMarkup(text) {
-	const cleaned = stripInlineCode(stripFencedCode(text))
-		.replace(/\\[^\n\u0000]/g, ' ')
-		.replace(URI_AUTOLINK, '\u0000')
-		.replace(EMAIL_AUTOLINK, '\u0000');
-	return HTML_DECLARATION.test(cleaned) || HTML_TAG.test(cleaned);
+		if (indentedCodeOnListLine || index >= rest.length) {
+			continue;
+		}
+
+		const content = rest.slice(index);
+
+		if (relIndent <= 3) {
+			const open = content.match(FENCE_OPEN);
+			if (open && (open[1][0] === '~' || !open[2].includes('`'))) {
+				fenceChar = open[1][0];
+				fenceLen = open[1].length;
+				fenceQuotes = quotes;
+				fenceMinIndent = containerIndent;
+				inParagraph = false;
+				continue;
+			}
+		}
+
+		if (lineHasHtml(content)) return true;
+
+		if (relIndent <= 3 && (ATX_HEADING.test(content) || THEMATIC_BREAK.test(content))) {
+			inParagraph = false;
+		} else {
+			inParagraph = true;
+		}
+	}
+
+	return false;
 }
 
 /**

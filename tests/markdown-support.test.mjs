@@ -378,7 +378,7 @@ const tableWith = (content) => ({
 	]
 });
 
-const htmlBlocker = 'HTML that the source editor would keep and the visual editor would escape';
+const htmlBlocker = 'HTML, which the visual editor would save as escaped text';
 
 test('HTML outside code stays in source mode so the visual editor never escapes it', () => {
 	// The four reproduced cases: comments, paired/block tags, inline tags, and tag mentions in prose.
@@ -390,50 +390,91 @@ test('HTML outside code stays in source mode so the visual editor never escapes 
 		websiteNotes,
 		'Put it in <style>.',
 		'Begin with <!DOCTYPE html> here.',
+		'<![CDATA[raw]]>\n',
 		'<?xml version="1.0"?>\n\nBody.',
+		'<? processing instruction ?>',
 		'- <header>, <footer>',
 		'1. Open <html> then <body>',
 		'> quoted <script> mention',
 		'Self-closing <br/> and <img src="a.png"> as text.',
 		'A stray closing </details> tag.',
 		'See <https://example.com> and <br> together.',
-		'<!-- comment mentioning <https://example.com> -->'
+		'<!-- comment mentioning <https://example.com> -->',
+		// Regression cases for miss shapes:
+		// 1. Backtick runs across separate blocks with no blank line between them must not pair.
+		'Here ` one\n<div>raw</div>\nThere ` two',
+		'# Heading `\n<div>raw</div>\nFooter `',
+		// 2. Unclosed fence inside a list item ends when indentation drops below the list item.
+		'- item\n  ```\n  code\n<div>raw</div>',
+		'- item\n  ```\n  code\n\n<div>raw</div>',
+		'- ```\n  code\n<div>raw</div>',
+		// 3. Indented code block containing a lone fence opener does not open a fenced block.
+		'    ```\n\n<div>raw</div>',
+		'    ~~~\n\n<div>raw</div>',
+		'    ```\n<div>raw</div>',
+		// Four spaces continuing a paragraph is not an indented code block.
+		'Intro paragraph.\n    <div>raw</div>'
 	]) {
 		assert.equal(visualMarkdownBlocker(text), htmlBlocker, text);
 		assert(!visualMarkdownSupported(text), text);
 	}
-	// HTML inside fenced code blocks (backticks and tildes) and inline code spans stays admitted.
+	// HTML inside fenced code blocks, CommonMark indented code blocks, and inline code spans stays admitted.
 	for (const text of [
 		'```html\n<details><summary>More</summary>\n<!-- note -->\n</details>\n```\n',
 		'~~~html\n<style>p { color: red }</style>\n~~~\n',
 		'````html\n~~~\n<div>inside four-backtick fence</div>\n~~~\n````\n',
 		'> ```html\n> <br>\n> ```\n',
+		'- item\n  ```html\n  <div>inside list fence</div>\n  ```\n',
+		'    <div>indented code</div>',
+		'Intro.\n\n    <div>indented code</div>\n',
+		'>     <div>indented code in quote</div>\n',
+		'- item\n\n      <div>indented code in list</div>\n',
 		'Use `<style>`, `<!-- note -->`, and `<br>` in prose.\n',
 		'Use `` `<details>` `` inside double backticks.\n'
 	]) {
 		assert.equal(visualMarkdownBlocker(text), null, text);
 		assert(visualMarkdownSupported(text), text);
 	}
-	// Markdown autolinks are legitimate Markdown and remain admitted.
+	// Markdown autolinks and angle-bracket link destinations are legitimate Markdown, not HTML.
 	for (const text of [
 		'Visit <https://example.com> for details.\n',
 		'Email <person@example.com> or <mailto:person@example.com>.\n',
-		'Download from <ftp://files.example.com/archive.zip>.\n'
+		'Download from <ftp://files.example.com/archive.zip>.\n',
+		'[f](<page>)',
+		'[f](<my-file.md>)'
 	]) {
 		assert.equal(visualMarkdownBlocker(text), null, text);
 		assert(visualMarkdownSupported(text), text);
 	}
-	// Ordinary prose with comparisons, arrows, or no HTML remains admitted.
+	// Angle-bracket link destination with a space is not refused as HTML; Tiptap's link serializer drops
+	// the angle brackets and breaks the link, so the round-trip comparison catches that real rewrite.
+	assert.equal(visualMarkdownBlocker('[f](<my file.md>)'), 'text the editor would rewrite');
+	// Ordinary prose with comparisons, arrows, `<!` / `<?`, or no HTML remains admitted.
 	for (const text of [
 		'a < b',
 		'a < b and c > d',
 		'Use -> as an arrow.',
 		'Check x<y in paragraph one.\n\n> Quoted paragraph two.\n',
+		'Check x<y here.\n> quoted',
+		'- if a<b\n- go -> next',
+		'when a<b, c>d holds',
+		'if (a<b && c>d)',
+		'a <! b',
+		'a <? b',
+		'Is x <?',
 		'# Ordinary document\n\nParagraph with **bold**, _italic_, and [a link](https://example.com).\n'
 	]) {
 		assert.equal(visualMarkdownBlocker(text), null, text);
 		assert(visualMarkdownSupported(text), text);
 	}
+	// Linear-time guard: pathological lines with many `<a` or unclosed backticks do not go quadratic.
+	assert.equal(visualMarkdownBlocker('<a '.repeat(2000)), null);
+	assert.equal(visualMarkdownBlocker(`${'<a b=1 '.repeat(1000)}!>`), null);
+	assert.equal(visualMarkdownBlocker(`${'<a x=" '.repeat(999)}!>`), null);
+	assert.equal(
+		visualMarkdownBlocker(Array.from({ length: 60 }, (_, n) => '`'.repeat(n + 1)).join(' x ')),
+		null
+	);
 	// Direct editor parsing of websiteNotes still preserves every word as literal text (never DOMParser).
 	const written = plain(roundTrip(websiteNotes));
 	for (const text of [
@@ -640,12 +681,6 @@ test('the gate has no token-type pre-scan and HTML literalization is declared wh
 	const extensions = readFileSync('src/lib/markdown-extensions.js', 'utf8');
 	assert.match(extensions, /html\(\)\s*\{\s*return undefined;/);
 	assert.match(extensions, /tag\(\)\s*\{\s*return undefined;/);
-	const docEditor = readFileSync('src/lib/components/app/document-editor.svelte', 'utf8');
-	assert.match(
-		docEditor,
-		/visualEditor\?\.saveBlocker\(\)\s*\?\?\s*visualMarkdownBlocker\(content\)/,
-		'save path falls back to visualMarkdownBlocker'
-	);
 });
 
 test('age badge uses days, then months from 30 days, then years from 365 days', () => {

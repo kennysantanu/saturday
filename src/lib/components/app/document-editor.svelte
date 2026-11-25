@@ -14,7 +14,7 @@
 	import { toast } from '$lib/toast.svelte';
 	import { UnsavedChanges } from '$lib/unsaved.svelte';
 	import { documentDesignations, fileType } from '$lib/file-types';
-	import { visualMarkdownBlocker } from '$lib/markdown-visual';
+	import { HTML_BLOCKER, visualMarkdownBlocker } from '$lib/markdown-visual';
 	import PageHeader from './page-header.svelte';
 	import PageShell from './page-shell.svelte';
 	import Notice from './notice.svelte';
@@ -70,7 +70,9 @@
 	const supported = $derived(blocker === null);
 	const blockedNote = $derived(
 		blocker
-			? `The visual editor can’t keep ${blocker}, so this document opens as Markdown source. Edit the source, or remove that formatting to use Visual.`
+			? blocker === HTML_BLOCKER
+				? `The visual editor can’t keep ${blocker}, so this document opens as Markdown source. Wrap the HTML in code to use Visual, or edit in the source view.`
+				: `The visual editor can’t keep ${blocker}, so this document opens as Markdown source. Edit the source, or remove that formatting to use Visual.`
 			: ''
 	);
 	const status = $derived(

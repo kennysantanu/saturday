@@ -598,16 +598,15 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 			true,
 			'Visual mode is disabled for documents containing HTML'
 		);
-		assert.match(
-			await page.$eval('p[role="status"]', (e) => e.textContent),
-			/HTML that the source editor would keep and the visual editor would escape/
-		);
+		const htmlNotice = await page.$eval('p[role="status"]', (e) => e.textContent);
+		assert.match(htmlNotice, /HTML, which the visual editor would save as escaped text/);
+		assert.match(htmlNotice, /Wrap the HTML in code to use Visual, or edit in the source view/);
 		const initialSource = await page.$eval('#document_content', (e) => e.value);
 		assert.equal(initialSource, hazardText, 'source editor preserves exact HTML bytes');
-		await page.click('#document_content');
-		await page.keyboard.down('Control');
-		await page.keyboard.press('End');
-		await page.keyboard.up('Control');
+		await page.$eval('#document_content', (e) => {
+			e.focus();
+			e.setSelectionRange(e.value.length, e.value.length);
+		});
 		await page.keyboard.type('Edited.\n');
 		await page.keyboard.down('Control');
 		await page.keyboard.press('s');
@@ -617,21 +616,18 @@ test('document editor: no false unsaved state, formatting, Ctrl+S, rename in pla
 			() => page.evaluate(() => !new URL(location.href).searchParams.has('edit')),
 			{ timeoutMs: 10000 }
 		);
+		const expectedSaved = `${hazardText}Edited.\n`;
 		const saved = await waitForValue(
-			'saved hazard document content to include Edited.',
+			'saved hazard document content to match exact bytes',
 			async () => (await getDocument({ id: hazardId, include_content: true })).content,
-			(content) => content.includes('Edited.'),
+			(content) => content === expectedSaved,
 			{ timeoutMs: 10000, intervalMs: 200 }
 		);
-		assert.match(saved, /Edited\./, 'the edit was saved');
-		// Raw HTML stays untouched in source mode (never escaped to &lt;style&gt; / &lt;script&gt;).
-		for (const part of [
-			'Before <style> inside text.',
-			'- item with <script> inside\n- second item'
-		])
-			assert(saved.includes(part), `saved file keeps "${part}": ${JSON.stringify(saved)}`);
-		assert(!saved.includes('&lt;style&gt;'), 'style tag was not escaped');
-		assert(!saved.includes('&lt;script&gt;'), 'script tag was not escaped');
+		assert.equal(
+			saved,
+			expectedSaved,
+			'source save preserves exact HTML bytes plus the typed edit'
+		);
 		await page.goto(`${base}/documents/${hazardId}?edit=1`, { waitUntil: 'networkidle0' });
 		await page.waitForSelector('#document_content');
 		assert.equal(await page.$('.markdown-editor'), null, 'reopened in source mode');
