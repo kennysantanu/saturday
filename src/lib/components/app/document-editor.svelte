@@ -90,11 +90,22 @@
 			? `${fileType(doc.filename).label} · ${formatBytes(doc.size)} · Updated ${formatDateTime(doc.updated_at)}`
 			: ''
 	);
+	// Only reset editor fields when loaded page data changes (navigation / mode switch), never when
+	// an enhanced form failure echoes stale values back while the user may have kept typing.
+	let loadedData = untrack(() => data);
 	$effect(() => {
-		content = form?.values?.content ?? data.content;
+		const currentData = data;
+		if (currentData === loadedData) return;
+		loadedData = currentData;
+		content = untrack(() => form?.values?.content) ?? currentData.content;
 		untrack(regate);
-		name = form?.values?.filename ?? (data.suggestedName || (data.document ? '' : 'Untitled'));
-		guard.dirty = !!form?.values && Object.hasOwn(form.values, 'content');
+		name =
+			untrack(() => form?.values?.filename) ??
+			(currentData.suggestedName || (currentData.document ? '' : 'Untitled'));
+		guard.dirty = untrack(() => !!form?.values && Object.hasOwn(form.values, 'content'));
+	});
+	$effect(() => {
+		if (form?.values && Object.hasOwn(form.values, 'content')) guard.dirty = true;
 	});
 	$effect(() => {
 		// In the source view, follow what is typed once the user pauses.

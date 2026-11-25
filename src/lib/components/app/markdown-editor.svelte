@@ -48,116 +48,68 @@
 	// editor only when it genuinely differs from what the editor holds, never on trailing-newline or
 	// serializer-formatting differences that represent the same document.
 	let synced = '';
-	// An external value that arrived while the editor was focused and could not be applied without
-	// losing the user's selection; parked here and applied once the editor blurs.
-	let pendingValue: string | null = null;
-	const CONTEXT_RADIUS = 16;
-	const normalizeEnd = (text: string) => text.replace(/\r\n?/g, '\n').replace(/\s+$/, '');
+	const normalizeEnd = (text: string) => text.replace(/\r\n?/g, '\n').trimEnd();
 	function parseMarkdownDoc(current: Editor, markdown: string): ProseMirrorNode | null {
 		try {
 			const parsed = current.markdown?.parse(markdown);
-			return parsed ? current.schema.nodeFromJSON(parsed) : null;
+			if (!parsed) return null;
+			const doc =
+				Array.isArray(parsed.content) && parsed.content.length === 0
+					? current.schema.topNodeType.createAndFill()
+					: current.schema.nodeFromJSON(parsed);
+			doc?.check();
+			return doc;
 		} catch {
 			return null;
 		}
 	}
-	function matchesCurrentText(current: Editor, next: string): boolean {
-		return (
+	// If TrailingNode added an empty trailing paragraph to a non-paragraph document, mirror it on
+	// the parsed target so both same-document checks and findDiffEnd ignore that scaffolding.
+	function alignTrailing(curDoc: ProseMirrorNode, nextDoc: ProseMirrorNode): ProseMirrorNode {
+		const hasTrailingEmpty =
+			curDoc.childCount > 1 &&
+			curDoc.lastChild?.type.name === 'paragraph' &&
+			curDoc.lastChild.content.size === 0;
+		return hasTrailingEmpty && nextDoc.lastChild && nextDoc.lastChild.type.name !== 'paragraph'
+			? curDoc.type.create(curDoc.attrs, nextDoc.content.addToEnd(curDoc.lastChild))
+			: nextDoc;
+	}
+	function parseChangedDoc(current: Editor, next: string): ProseMirrorNode | null | false {
+		if (
 			next === synced ||
 			normalizeEnd(next) === normalizeEnd(synced) ||
 			normalizeEnd(next) === normalizeEnd(current.getMarkdown())
-		);
+		)
+			return false;
+		const parsed = parseMarkdownDoc(current, next);
+		if (!parsed) return null;
+		const targetDoc = alignTrailing(current.state.doc, parsed);
+		return targetDoc.eq(current.state.doc) ? false : targetDoc;
 	}
-	/**
-	 * Finds the equivalent TextSelection range in `nextDoc` when the selected text and its immediate
-	 * surroundings within the enclosing textblock(s) are unchanged. Returns null when mapping is
-	 * unsafe or ambiguous so a focused editor is never clobbered.
-	 */
-	function findEquivalentSelection(
-		prevDoc: ProseMirrorNode,
-		nextDoc: ProseMirrorNode,
-		selection: Editor['state']['selection']
-	): { anchor: number; head: number } | null {
-		if (!(selection instanceof TextSelection)) return null;
-		const { from, to, anchor, head } = selection;
-		const fromPos = selection.$from;
-		const toPos = selection.$to;
-		const reversed = anchor > head;
-		const blockStart = fromPos.start();
-		const blockEnd = toPos.end();
-		const beforeStart = Math.max(blockStart, from - CONTEXT_RADIUS);
-		const afterEnd = Math.min(blockEnd, to + CONTEXT_RADIUS);
-		const before = prevDoc.textBetween(beforeStart, from, '\n', '\0');
-		const selected = prevDoc.textBetween(from, to, '\n', '\0');
-		const after = prevDoc.textBetween(to, afterEnd, '\n', '\0');
-		const touchesStart = beforeStart === blockStart;
-		const touchesEnd = afterEnd === blockEnd;
-		const snippet = before + selected + after;
-		if (!snippet.length) return null;
-		const matchesAt = (candFrom: number, candTo: number): boolean => {
-			if (candFrom < 0 || candTo > nextDoc.content.size || candFrom > candTo) return false;
-			try {
-				const candFromPos = nextDoc.resolve(candFrom);
-				const candToPos = nextDoc.resolve(candTo);
-				if (!candFromPos.parent.isTextblock || !candToPos.parent.isTextblock) return false;
-				const cBlockStart = candFromPos.start();
-				const cBlockEnd = candToPos.end();
-				const cBeforeStart = candFrom - before.length;
-				const cAfterEnd = candTo + after.length;
-				if (cBeforeStart < cBlockStart || cAfterEnd > cBlockEnd) return false;
-				if (touchesStart && cBeforeStart !== cBlockStart) return false;
-				if (touchesEnd && cAfterEnd !== cBlockEnd) return false;
-				const cBefore = nextDoc.textBetween(cBeforeStart, candFrom, '\n', '\0');
-				const cSelected = nextDoc.textBetween(candFrom, candTo, '\n', '\0');
-				const cAfter = nextDoc.textBetween(candTo, cAfterEnd, '\n', '\0');
-				return cBefore === before && cSelected === selected && cAfter === after;
-			} catch {
-				return false;
-			}
-		};
-		if (matchesAt(from, to)) {
-			return reversed ? { anchor: to, head: from } : { anchor: from, head: to };
-		}
-		if (fromPos.sameParent(toPos)) {
-			const matches: Array<{ from: number; to: number }> = [];
-			nextDoc.descendants((node, pos) => {
-				if (!node.isTextblock) return true;
-				const start = pos + 1;
-				const blockText = node.textBetween(0, node.content.size, '\n', '\0');
-				let searchFrom = 0;
-				while (searchFrom <= blockText.length) {
-					const idx = blockText.indexOf(snippet, searchFrom);
-					if (idx < 0) break;
-					const candFrom = start + idx + before.length;
-					const candTo = candFrom + selected.length;
-					if (matchesAt(candFrom, candTo)) matches.push({ from: candFrom, to: candTo });
-					searchFrom = idx + 1;
-				}
-				return false;
-			});
-			if (matches.length === 1) {
-				const hit = matches[0];
-				return reversed ? { anchor: hit.to, head: hit.from } : { anchor: hit.from, head: hit.to };
-			}
-		}
-		return null;
-	}
-	function applyExternal(
-		current: Editor,
-		next: string,
-		selection: { anchor: number; head: number } | null = null
-	) {
-		pendingValue = null;
+	function applyExternal(current: Editor, next: string, targetDoc: ProseMirrorNode | null) {
 		synced = next;
-		current.commands.setContent(next, { contentType: 'markdown', emitUpdate: false });
-		if (selection) {
-			const size = current.state.doc.content.size;
-			const anchor = Math.max(0, Math.min(selection.anchor, size));
-			const head = Math.max(0, Math.min(selection.head, size));
-			current.view.dispatch(
-				current.state.tr.setSelection(TextSelection.create(current.state.doc, anchor, head))
-			);
+		let applied = false;
+		if (targetDoc) {
+			const curDoc = current.state.doc;
+			const start = curDoc.content.findDiffStart(targetDoc.content);
+			const end = start === null ? null : curDoc.content.findDiffEnd(targetDoc.content);
+			if (start !== null && end !== null) {
+				const overlap = Math.max(0, start - Math.min(end.a, end.b));
+				try {
+					const tr = current.state.tr
+						.replace(start, end.a + overlap, targetDoc.slice(start, end.b + overlap))
+						.setMeta('preventUpdate', true)
+						.setMeta('addToHistory', false);
+					if (tr.doc.eq(targetDoc)) {
+						current.view.dispatch(tr);
+						applied = true;
+					}
+				} catch {
+					/* Fall back to setContent when the diff cannot be applied as a range replacement. */
+				}
+			}
 		}
+		if (!applied) current.commands.setContent(next, { contentType: 'markdown', emitUpdate: false });
 		baseline = current.getMarkdown();
 		baselineDoc = current.state.doc;
 	}
@@ -193,6 +145,10 @@
 			}
 		});
 	}
+	const handlePointerSelection = (view: EditorView, event: Event) => {
+		if (!(event.target instanceof HTMLInputElement)) syncPointerSelection(view);
+		return false;
+	};
 	let linkOpen = $state(false),
 		linkUrl = $state('');
 	let linkInput = $state<HTMLInputElement | null>(null);
@@ -366,7 +322,6 @@
 		if (!editor || editor.isDestroyed || !json || typeof json !== 'object') return false;
 		try {
 			editor.schema.nodeFromJSON(json).check();
-			pendingValue = null;
 			return editor.commands.setContent(json as any, { emitUpdate: true });
 		} catch {
 			return false;
@@ -382,14 +337,8 @@
 			editorProps: {
 				transformPastedHTML: cleanPaste,
 				handleDOMEvents: {
-					mouseup: (view, event) => {
-						if (!(event.target instanceof HTMLInputElement)) syncPointerSelection(view);
-						return false;
-					},
-					dblclick: (view, event) => {
-						if (!(event.target instanceof HTMLInputElement)) syncPointerSelection(view);
-						return false;
-					}
+					mouseup: handlePointerSelection,
+					dblclick: handlePointerSelection
 				},
 				handleKeyDown: (view, event) => {
 					// A table cell is one line of Markdown. A line break there would be written as <br>, which
@@ -433,24 +382,7 @@
 					onchange(markdown, false);
 					return;
 				}
-				// User edits supersede any parked external value so blur does not overwrite newer typing.
-				pendingValue = null;
 				onchange(markdown, markdown !== baseline || !editor.state.doc.eq(baselineDoc));
-			},
-			onBlur: ({ editor: current }) => {
-				if (pendingValue === null || current.isDestroyed) return;
-				const next = pendingValue;
-				pendingValue = null;
-				if (matchesCurrentText(current, next)) {
-					synced = next;
-					return;
-				}
-				const nextDoc = parseMarkdownDoc(current, next);
-				if (nextDoc && nextDoc.eq(current.state.doc)) {
-					synced = next;
-					return;
-				}
-				applyExternal(current, next);
 			},
 			// Bump without letting a running effect depend on the counter it is writing.
 			onTransaction: () => untrack(() => version++)
@@ -465,31 +397,12 @@
 		const current = editor;
 		untrack(() => {
 			if (!current || current.isDestroyed) return;
-			if (matchesCurrentText(current, next)) {
+			const nextDoc = parseChangedDoc(current, next);
+			if (nextDoc === false) {
 				synced = next;
-				pendingValue = null;
 				return;
 			}
-			const nextDoc = parseMarkdownDoc(current, next);
-			if (nextDoc && nextDoc.eq(current.state.doc)) {
-				synced = next;
-				pendingValue = null;
-				return;
-			}
-			if (current.isFocused) {
-				const mapped = nextDoc
-					? findEquivalentSelection(current.state.doc, nextDoc, current.state.selection)
-					: null;
-				if (!mapped) {
-					// Incoming content changes the text around the active selection or cannot be mapped
-					// safely: park it and apply on blur instead of clobbering a focused editor.
-					pendingValue = next;
-					return;
-				}
-				applyExternal(current, next, mapped);
-				return;
-			}
-			applyExternal(current, next);
+			applyExternal(current, next, nextDoc);
 		});
 	});
 	$effect(() => {
