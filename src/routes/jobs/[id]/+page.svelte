@@ -6,7 +6,7 @@
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { page } from '$app/state';
 	import { networkDetailUrl } from '$lib/network-navigation.js';
-	import { tick, onMount } from 'svelte';
+	import { tick, onMount, untrack } from 'svelte';
 	import Bot from '@lucide/svelte/icons/bot';
 	import { enhance } from '$app/forms';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -80,22 +80,25 @@
 		editor = { mode, entry };
 	}
 	$effect(() => {
-		if (
-			!form?.errors ||
-			!form.action ||
-			!['changeStage', 'addHistory', 'editHistory', 'deleteHistory'].includes(form.action)
-		)
-			return;
-		editorFailure = {
-			...form,
-			action: form.action,
-			values: form.values ?? {},
-			errors: form.errors ?? {}
-		};
-		editor = {
-			mode: form.action === 'changeStage' ? 'move' : form.action === 'addHistory' ? 'add' : 'edit',
-			entry: updates.find((entry) => String(entry.id) === form.values?.update_id)
-		};
+		if (!form?.errors) return;
+		untrack(() => {
+			if (
+				!form.action ||
+				!['changeStage', 'addHistory', 'editHistory', 'deleteHistory'].includes(form.action)
+			)
+				return;
+			editorFailure = {
+				...form,
+				action: form.action,
+				values: form.values ?? {},
+				errors: form.errors ?? {}
+			};
+			editor = {
+				mode:
+					form.action === 'changeStage' ? 'move' : form.action === 'addHistory' ? 'add' : 'edit',
+				entry: updates.find((entry) => String(entry.id) === form.values?.update_id)
+			};
+		});
 	});
 	const upcoming = $derived(
 		updates
@@ -138,11 +141,13 @@
 	);
 	$effect(() => {
 		if (!form?.errors) return;
-		if (form.action === 'network-note') {
-			networkNoteOpen = true;
-			notePersonId = values.network_id ?? '';
-			networkNote = values.notes ?? '';
-		}
+		untrack(() => {
+			if (form.action === 'network-note') {
+				networkNoteOpen = true;
+				notePersonId = values.network_id ?? '';
+				networkNote = values.notes ?? '';
+			}
+		});
 	});
 	function networkHref(changes: Record<string, string | number | null>) {
 		const query = new URLSearchParams(page.url.searchParams);
