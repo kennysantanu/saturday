@@ -741,7 +741,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
 				say(
 					target.notes || `The installed commit is unknown; cannot tell whether ${label} is newer.`
 				);
-			else if (!target.available) say(target.held_back || `Saturday is up to date (${label}).`);
+			else if (!target.available)
+				say(
+					target.held_back ||
+						(target.kind === 'release' || target.direction === 'same'
+							? `Saturday is up to date (${label}).`
+							: target.notes || `Cannot update to ${label}.`)
+				);
 			else if (check.local?.dirty) {
 				// The controller refuses dirty sources; do not offer an install that cannot run.
 				say(

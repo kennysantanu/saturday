@@ -1685,6 +1685,96 @@ test('Chrome journey: Settings Updates Advanced disclosure, warnings, download g
 			document.querySelector('#updates')?.textContent?.includes('You’re up to date on dev')
 		);
 
+		// 2b. Compare statuses behind, diverged, and 404 render distinct reasons without "up to date" or CLI hints.
+		const baseFixture = {
+			branches: [
+				{ name: 'main', commit: { sha: shaMain } },
+				{ name: 'dev', commit: { sha: shaDev } }
+			],
+			refs: { main: shaMain, dev: shaDev },
+			commits: {
+				[shaMain]: { package: makePkg(1) },
+				[shaDev]: { package: makePkg(1) },
+				[shaIncompat]: { package: makePkg(2) }
+			}
+		};
+		const getUpdateNotesDisclosure = () =>
+			page.$eval('#updates', (root) => {
+				const details = [...root.querySelectorAll('details.disclosure')].find(
+					(el) => el.querySelector('summary')?.textContent?.trim() === 'Update notes'
+				);
+				return details ? { open: details.open, text: details.textContent || '' } : null;
+			});
+
+		step = '2b. dev behind check';
+		desc.build = { id: `dev.${shaMain.slice(0, 12)}`, commit: shaMain, dirty: false };
+		await fsp.writeFile(managed.descriptor, JSON.stringify(desc, null, 2));
+		await writeFixture({
+			...baseFixture,
+			compare: { [`${shaMain}...${shaDev}`]: 'behind' }
+		});
+		await Promise.all([
+			page.waitForResponse((r) => r.url().includes('?/checkUpdates')),
+			page.locator('#updates button::-p-text(Check for updates)').click()
+		]);
+		await page.waitForFunction(() =>
+			document.querySelector('#updates')?.textContent?.includes('This build is ahead of dev')
+		);
+		const behindText = await page.$eval('#updates', (e) => e.textContent);
+		assert.ok(behindText.includes('would move it backwards'));
+		assert.equal(behindText.includes('You’re up to date'), false);
+		assert.equal(behindText.includes('repair --source'), false);
+		assert.equal(await page.$('#updates button::-p-text(Update Saturday)'), null);
+		const behindNotes = await getUpdateNotesDisclosure();
+		assert.ok(behindNotes?.open, 'Update notes disclosure opens for behind');
+		assert.ok(behindNotes.text.includes('newer than dev'));
+		assert.equal(behindNotes.text.includes('repair --source'), false);
+
+		step = '2c. dev diverged check';
+		await writeFixture({
+			...baseFixture,
+			compare: { [`${shaMain}...${shaDev}`]: 'diverged' }
+		});
+		await Promise.all([
+			page.waitForResponse((r) => r.url().includes('?/checkUpdates')),
+			page.locator('#updates button::-p-text(Check for updates)').click()
+		]);
+		await page.waitForFunction(() =>
+			document.querySelector('#updates')?.textContent?.includes('This build has diverged from dev')
+		);
+		const divergedText = await page.$eval('#updates', (e) => e.textContent);
+		assert.ok(divergedText.includes('will not guess'));
+		assert.equal(divergedText.includes('You’re up to date'), false);
+		assert.equal(await page.$('#updates button::-p-text(Update Saturday)'), null);
+		const divergedNotes = await getUpdateNotesDisclosure();
+		assert.ok(divergedNotes?.open, 'Update notes disclosure opens for diverged');
+		assert.ok(divergedNotes.text.includes('have diverged'));
+
+		step = '2d. dev compare 404 check';
+		await writeFixture({
+			...baseFixture,
+			compare: { [`${shaMain}...${shaDev}`]: 404 }
+		});
+		await Promise.all([
+			page.waitForResponse((r) => r.url().includes('?/checkUpdates')),
+			page.locator('#updates button::-p-text(Check for updates)').click()
+		]);
+		await page.waitForFunction(() =>
+			document
+				.querySelector('#updates')
+				?.textContent?.includes('Cannot compare this build with dev')
+		);
+		const compare404Text = await page.$eval('#updates', (e) => e.textContent);
+		assert.ok(
+			compare404Text.includes(
+				'Saturday cannot find the installed commit on GitHub, or the two builds share no history'
+			)
+		);
+		assert.equal(compare404Text.includes('The installed commit is unknown'), false);
+		assert.equal(compare404Text.includes('You’re up to date'), false);
+		assert.equal(await page.$('#updates button::-p-text(Update Saturday)'), null);
+		await writeFixture(baseFixture);
+
 		// Restore tracking_ref to main (commit shaMain) and reload for Advanced disclosure journey.
 		step = '3. reload for Advanced disclosure';
 		desc.tracking_ref = 'main';

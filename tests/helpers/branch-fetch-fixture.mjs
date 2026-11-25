@@ -47,6 +47,28 @@ if (process.env.SATURDAY_TEST_BRANCH_FIXTURE) {
 				commit: { tree: { sha: entry.tree_sha ?? '0'.repeat(40) } }
 			});
 		}
+		if (url.pathname.includes('/compare/')) {
+			const spec = decodeURIComponent(url.pathname.split('/compare/').at(-1));
+			const entry =
+				state.compare && Object.prototype.hasOwnProperty.call(state.compare, spec)
+					? state.compare[spec]
+					: (state.compare?.default ?? state.compare_status);
+			if (entry === 404 || entry === null) {
+				return json({ message: 'Not Found' }, 404);
+			}
+			if (typeof entry === 'number') {
+				return json({ message: 'Compare error' }, entry);
+			}
+			if (typeof entry === 'string') {
+				return json({ status: entry });
+			}
+			if (entry && typeof entry === 'object') {
+				const httpStatus = entry.httpStatus ?? 200;
+				const body = 'body' in entry ? entry.body : entry;
+				return json(body, httpStatus);
+			}
+			return json({ message: 'Not Found' }, 404);
+		}
 		if (url.pathname.includes('/git/trees/')) {
 			const treeSha = url.pathname.split('/').at(-1);
 			const entry = Object.values(state.commits ?? {}).find((c) => c.tree_sha === treeSha);

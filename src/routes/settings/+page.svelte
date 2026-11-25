@@ -577,6 +577,16 @@
 		const refCommit = target?.ref && commit ? `${target.ref}@${commit}` : commit;
 		return target?.version ? `${target.version} (${refCommit})` : refCommit;
 	};
+	// Strip CLI-only repair hints from server update notes shown in Settings.
+	const uiTargetNotes = (target: any) => {
+		if (!target?.notes) return '';
+		if (target.kind === 'development' && target.direction === 'behind') {
+			return String(target.notes)
+				.replace(/\s*Use\s+repair\s+--source\s+instead\s+of\s+updating\.?/i, '')
+				.trim();
+		}
+		return String(target.notes);
+	};
 	$effect(() => {
 		const operation = form?.installationOperation || data.installationOperation;
 		if (operation && activeInstallationStates.includes(operation.status) && !operation.error) {
@@ -1486,6 +1496,14 @@
 					{#if data.updateCheck?.target}
 						{@const target = data.updateCheck.target}
 						{@const trackedRef = target.ref || 'main'}
+						{@const isAheadOfTracked =
+							target.kind === 'development' && target.direction === 'behind'}
+						{@const isDivergedFromTracked =
+							target.kind === 'development' && target.direction === 'diverged'}
+						{@const installedCommitKnown = /^[a-f0-9]{40}$/.test(
+							data.updateCheck.installed?.commit || ''
+						)}
+						{@const visibleNotes = uiTargetNotes(target)}
 						<p class="text-sm">
 							{#if target.available === true}
 								{target.kind === 'release'
@@ -1505,6 +1523,16 @@
 								<a class="link" href={target.url} target="_blank" rel="noreferrer"
 									>{target.release || target.commit?.slice(0, 12)}</a
 								>
+							{:else if isAheadOfTracked}
+								This build is ahead of {trackedRef}:
+								<a class="link" href={target.url} target="_blank" rel="noreferrer"
+									>{targetLabel(target)}</a
+								>
+							{:else if isDivergedFromTracked}
+								This build has diverged from {trackedRef}:
+								<a class="link" href={target.url} target="_blank" rel="noreferrer"
+									>{targetLabel(target)}</a
+								>
 							{:else}
 								{target.kind === 'development'
 									? `You’re up to date on ${trackedRef}`
@@ -1515,8 +1543,19 @@
 							{/if}
 						</p>
 						{#if target.available === null}<p class="text-sm text-muted-foreground">
-								The installed commit is unknown. Repair its build identity or use Advanced to move
-								with a downloaded backup.
+								{#if installedCommitKnown}
+									Saturday cannot find the installed commit on GitHub, or the two builds share no
+									history. Use Advanced to move with a downloaded backup.
+								{:else}
+									The installed commit is unknown. Repair its build identity or use Advanced to move
+									with a downloaded backup.
+								{/if}
+							</p>{:else if isAheadOfTracked}<p class="text-sm text-muted-foreground">
+								This installation is ahead of {trackedRef} and is not updated because that would move
+								it backwards. Use Advanced to move with a downloaded backup.
+							</p>{:else if isDivergedFromTracked}<p class="text-sm text-muted-foreground">
+								This installation has diverged from {trackedRef} and is not updated because Saturday will
+								not guess which build is newer. Use Advanced to move with a downloaded backup.
 							</p>{/if}
 						{#if target.available === true && target.compare_url}<p class="text-sm">
 								<a class="link" href={target.compare_url} target="_blank" rel="noreferrer"
@@ -1542,13 +1581,15 @@
 							>{/if}
 						{#if target.held_back}<Notice title="Staying on this build">{target.held_back}</Notice
 							>{/if}
-						{#if target.notes && !target.held_back}<details
+						{#if visibleNotes && !target.held_back}<details
 								class="disclosure"
-								open={target.kind === 'release' && target.available === true}
+								open={(target.kind === 'release' && target.available === true) ||
+									isAheadOfTracked ||
+									isDivergedFromTracked}
 							>
 								<summary>{target.kind === 'release' ? 'What’s new' : 'Update notes'}</summary>
 								<div class="disclosure-body gap-2 text-sm">
-									{#each parseReleaseNotes(target.notes) as block, index (index)}
+									{#each parseReleaseNotes(visibleNotes) as block, index (index)}
 										{#if block.type === 'heading'}
 											{#if block.level < 3}<h3 class="pt-1 font-semibold">
 													{@render inlines(block.inlines)}

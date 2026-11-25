@@ -352,7 +352,7 @@ async function selectBranchTarget(ref, config, request = github, { checkAncestry
 					comparison: 'unknown',
 					direction: 'unknown',
 					url: `https://github.com/${repository}/commit/${commit}`,
-					notes: `The installed commit is not on GitHub; Saturday cannot compare it with ${ref}.`
+					notes: `Saturday cannot find the installed commit on GitHub, or the two builds share no history; cannot compare it with ${ref}.`
 				};
 			}
 			throw e;

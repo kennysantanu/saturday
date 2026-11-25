@@ -1216,7 +1216,7 @@ test('selectTarget honors tracking_ref before release discovery and enforces bra
 		assert.match(unknown.notes, /installed commit is unknown.*main/);
 	}
 
-	// 7. compare 404: installed commit is not on GitHub -> unknown.
+	// 7. compare 404: installed commit not on GitHub or unrelated history -> unknown.
 	const seen404 = [];
 	const notOnGithub = await selectTarget(
 		{ tracking_ref: 'dev', build: { commit: sha } },
@@ -1232,7 +1232,10 @@ test('selectTarget honors tracking_ref before release discovery and enforces bra
 	assert.equal(notOnGithub.available, null);
 	assert.equal(notOnGithub.comparison, 'unknown');
 	assert.equal(notOnGithub.direction, 'unknown');
-	assert.match(notOnGithub.notes, /not on GitHub/i);
+	assert.match(
+		notOnGithub.notes,
+		/Saturday cannot find the installed commit on GitHub, or the two builds share no history/
+	);
 
 	// 8. compare network/other error: propagates and never silently offers an update.
 	const seenErr = [];
@@ -1282,43 +1285,89 @@ test('selectTarget honors tracking_ref before release discovery and enforces bra
 		);
 		// CLI update check must NOT claim "up to date" when the installed commit is unknown.
 		const cliFixturePath = join(f.root, 'branch-cli-fixture.json');
+		const cliPkg = JSON.parse(await fs.readFile(resolve('package.json'), 'utf8'));
+		const runCliUpdate = () =>
+			run(
+				process.execPath,
+				[
+					'--import',
+					resolve('tests/helpers/branch-fetch-fixture.mjs'),
+					resolve('scripts/install.mjs'),
+					'update',
+					'--installation',
+					f.descriptor
+				],
+				{ env: { ...f.env, SATURDAY_TEST_BRANCH_FIXTURE: cliFixturePath } }
+			);
 		await fs.writeFile(
 			cliFixturePath,
 			JSON.stringify({
 				refs: { dev: sha, main: sha },
-				packages: { [sha]: JSON.parse(await fs.readFile(resolve('package.json'), 'utf8')) }
+				commits: { [sha]: { package: cliPkg }, [other]: { package: cliPkg } }
 			})
 		);
-		const cliOut = await run(
-			process.execPath,
-			[
-				'--import',
-				resolve('tests/helpers/branch-fetch-fixture.mjs'),
-				resolve('scripts/install.mjs'),
-				'update',
-				'--installation',
-				f.descriptor
-			],
-			{ env: { ...f.env, SATURDAY_TEST_BRANCH_FIXTURE: cliFixturePath } }
-		);
+		const cliOut = await runCliUpdate();
 		assert.match(cliOut.stderr, /installed commit is unknown/i);
 		assert.doesNotMatch(cliOut.stderr, /up to date/i);
-		// Matching commit still prints "Saturday is up to date".
+		// Matching commit (direction: 'same') prints "Saturday is up to date".
 		config.build = { id: `dev.${sha.slice(0, 12)}`, commit: sha, dirty: false };
 		await fs.writeFile(f.descriptor, JSON.stringify(config));
-		const cliUpToDate = await run(
-			process.execPath,
-			[
-				'--import',
-				resolve('tests/helpers/branch-fetch-fixture.mjs'),
-				resolve('scripts/install.mjs'),
-				'update',
-				'--installation',
-				f.descriptor
-			],
-			{ env: { ...f.env, SATURDAY_TEST_BRANCH_FIXTURE: cliFixturePath } }
-		);
+		const cliUpToDate = await runCliUpdate();
 		assert.match(cliUpToDate.stderr, /Saturday is up to date/i);
+
+		// Different head commit: exercise behind, diverged, ahead, identical (same), and 404 via /compare/.
+		const writeCompareFixture = (compareStatus) =>
+			fs.writeFile(
+				cliFixturePath,
+				JSON.stringify({
+					refs: { dev: other, main: other },
+					commits: { [sha]: { package: cliPkg }, [other]: { package: cliPkg } },
+					compare: { [`${sha}...${other}`]: compareStatus }
+				})
+			);
+
+		await writeCompareFixture('behind');
+		const cliBehind = await runCliUpdate();
+		assert.equal(
+			cliBehind.stderr.trim(),
+			'The installed build is newer than dev; updating would move it backwards. Use repair --source instead of updating.'
+		);
+		assert.doesNotMatch(cliBehind.stderr, /up to date/i);
+
+		await writeCompareFixture('diverged');
+		const cliDiverged = await runCliUpdate();
+		assert.equal(
+			cliDiverged.stderr.trim(),
+			'The installed build and dev have diverged; Saturday will not guess which is newer.'
+		);
+		assert.doesNotMatch(cliDiverged.stderr, /up to date/i);
+
+		await writeCompareFixture('identical');
+		const cliIdentical = await runCliUpdate();
+		assert.match(cliIdentical.stderr, /Saturday is up to date/i);
+
+		await writeCompareFixture(404);
+		const cli404 = await runCliUpdate();
+		assert.match(
+			cli404.stderr,
+			/Saturday cannot find the installed commit on GitHub, or the two builds share no history/
+		);
+		assert.doesNotMatch(cli404.stderr, /up to date/i);
+
+		await writeCompareFixture('ahead');
+		let cliAheadErr = null;
+		try {
+			await runCliUpdate();
+		} catch (e) {
+			cliAheadErr = e;
+		}
+		assert.ok(
+			cliAheadErr,
+			'ahead without --confirm exits non-zero after reporting update available'
+		);
+		assert.equal(cliAheadErr.code, 1);
+		assert.match(cliAheadErr.stderr, /Update available:/);
+		assert.doesNotMatch(cliAheadErr.stderr, /up to date/i);
 	} finally {
 		for (const k of Object.keys(process.env)) if (!(k in prior)) delete process.env[k];
 		Object.assign(process.env, prior);
