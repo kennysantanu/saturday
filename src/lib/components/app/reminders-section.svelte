@@ -2,7 +2,7 @@
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -69,32 +69,33 @@
 		open = true;
 	}
 	$effect(() => {
-		if (form?.action === 'reminderDismiss' && form.errors) failure = form.errors;
-		if (
-			form?.errors &&
-			['reminderCreate', 'reminderEdit', 'reminderDelete'].includes(form.action ?? '')
-		) {
-			const values = form.values ?? {};
-			failure = form.errors;
-			selected =
-				[...data.active.reminders, ...data.past.reminders].find(
-					(r) => String(r.id) === values.reminder_id
-				) ??
-				selected ??
-				(values.reminder_id ? ({ id: Number(values.reminder_id) } as Reminder) : null);
-			if (values.original_active !== undefined) {
-				originalActive = values.original_active === '1';
-				active = originalActive;
+		if (!form?.errors) return;
+		const { action, errors: formErrors, values: formValues } = form;
+		untrack(() => {
+			if (action === 'reminderDismiss') failure = formErrors;
+			if (['reminderCreate', 'reminderEdit', 'reminderDelete'].includes(action ?? '')) {
+				const values = formValues ?? {};
+				failure = formErrors;
+				selected =
+					[...data.active.reminders, ...data.past.reminders].find(
+						(r) => String(r.id) === values.reminder_id
+					) ??
+					selected ??
+					(values.reminder_id ? ({ id: Number(values.reminder_id) } as Reminder) : null);
+				if (values.original_active !== undefined) {
+					originalActive = values.original_active === '1';
+					active = originalActive;
+				}
+				draft = {
+					reminder_date: values.reminder_date ?? draft.reminder_date,
+					reminder_time: values.reminder_time ?? draft.reminder_time,
+					reminder_note: values.reminder_note ?? draft.reminder_note
+				};
+				if (values.active_changed === '1') active = values.is_active === 'on';
+				open = true;
+				deleting = false;
 			}
-			draft = {
-				reminder_date: values.reminder_date ?? draft.reminder_date,
-				reminder_time: values.reminder_time ?? draft.reminder_time,
-				reminder_note: values.reminder_note ?? draft.reminder_note
-			};
-			if (values.active_changed === '1') active = values.is_active === 'on';
-			open = true;
-			deleting = false;
-		}
+		});
 	});
 	const save: SubmitFunction = () => {
 		guard.saving = true;
