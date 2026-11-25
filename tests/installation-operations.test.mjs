@@ -52,11 +52,14 @@ const sha = 'a'.repeat(40),
 	other = 'b'.repeat(40);
 test('update selection distinguishes main, stable transition, version order and failed release discovery', async () => {
 	assert.ok(compareVersions('0.10.0', '0.9.0') > 0);
-	const main = await selectTarget({ build: { commit: other } }, async (path) =>
-		path.startsWith('/releases') ? [] : { sha }
-	);
+	const main = await selectTarget({ build: { commit: other } }, async (path) => {
+		if (path.startsWith('/releases')) return [];
+		if (path === `/compare/${other}...${sha}`) return { status: 'ahead' };
+		return { sha };
+	});
 	assert.equal(main.commit, sha);
 	assert.equal(main.available, true);
+	assert.equal(main.direction, 'ahead');
 	const stableNoUpdate = await selectTarget({ release: '0.1.0' }, async (path) => {
 		assert.ok(path.startsWith('/releases'));
 		return [];
@@ -1106,38 +1109,153 @@ test('listBranches filters allowlist across pages, reports missing refs, and dis
 	);
 });
 
-test('selectTarget honors tracking_ref before release discovery and reports three-state commit comparison', async () => {
-	const seen = [];
+test('selectTarget honors tracking_ref before release discovery and enforces branch commit ancestry', async () => {
+	// 1. ahead: offers update and keeps existing note; explicit tracking_ref bypasses release discovery.
+	const seenAhead = [];
 	const tracked = await selectTarget(
 		{ tracking_ref: 'dev', build: { commit: sha } },
 		async (path) => {
-			seen.push(path);
+			seenAhead.push(path);
 			if (path === '/commits/dev') return { sha: other };
+			if (path === `/compare/${sha}...${other}`) return { status: 'ahead' };
 			throw new Error(`unexpected ${path}`);
 		}
 	);
-	assert.deepEqual(seen, ['/commits/dev'], 'explicit tracking_ref bypasses release discovery');
+	assert.deepEqual(
+		seenAhead,
+		['/commits/dev', `/compare/${sha}...${other}`],
+		'explicit tracking_ref bypasses release discovery and checks ancestry'
+	);
 	assert.equal(tracked.ref, 'dev');
 	assert.equal(tracked.commit, other);
 	assert.equal(tracked.available, true);
 	assert.equal(tracked.comparison, 'different');
+	assert.equal(tracked.direction, 'ahead');
 	assert.match(tracked.notes, /^dev changed;/);
 
-	const same = await selectTarget({ tracking_ref: 'dev', build: { commit: sha } }, async () => ({
-		sha
-	}));
+	// 2. behind: refuses update and explains moving backwards + repair --source.
+	const seenBehind = [];
+	const behind = await selectTarget(
+		{ tracking_ref: 'dev', build: { commit: sha } },
+		async (path) => {
+			seenBehind.push(path);
+			if (path === '/commits/dev') return { sha: other };
+			if (path === `/compare/${sha}...${other}`) return { status: 'behind' };
+			throw new Error(`unexpected ${path}`);
+		}
+	);
+	assert.deepEqual(seenBehind, ['/commits/dev', `/compare/${sha}...${other}`]);
+	assert.equal(behind.available, false);
+	assert.equal(behind.comparison, 'different');
+	assert.equal(behind.direction, 'behind');
+	assert.match(behind.notes, /newer than dev/i);
+	assert.match(behind.notes, /backwards/i);
+	assert.match(behind.notes, /repair --source/);
+
+	// 3. diverged: refuses update and explains Saturday will not guess.
+	const seenDiverged = [];
+	const diverged = await selectTarget(
+		{ tracking_ref: 'dev', build: { commit: sha } },
+		async (path) => {
+			seenDiverged.push(path);
+			if (path === '/commits/dev') return { sha: other };
+			if (path === `/compare/${sha}...${other}`) return { status: 'diverged' };
+			throw new Error(`unexpected ${path}`);
+		}
+	);
+	assert.deepEqual(seenDiverged, ['/commits/dev', `/compare/${sha}...${other}`]);
+	assert.equal(diverged.available, false);
+	assert.equal(diverged.comparison, 'different');
+	assert.equal(diverged.direction, 'diverged');
+	assert.match(diverged.notes, /diverged/i);
+	assert.match(diverged.notes, /will not guess/i);
+
+	// 4. identical: treated as same and refuses update.
+	const seenIdentical = [];
+	const identical = await selectTarget(
+		{ tracking_ref: 'dev', build: { commit: sha } },
+		async (path) => {
+			seenIdentical.push(path);
+			if (path === '/commits/dev') return { sha: other };
+			if (path === `/compare/${sha}...${other}`) return { status: 'identical' };
+			throw new Error(`unexpected ${path}`);
+		}
+	);
+	assert.deepEqual(seenIdentical, ['/commits/dev', `/compare/${sha}...${other}`]);
+	assert.equal(identical.available, false);
+	assert.equal(identical.comparison, 'same');
+	assert.equal(identical.direction, 'same');
+
+	// 5. equal SHAs: same, refuses update, and makes no compare call.
+	const seenSame = [];
+	const same = await selectTarget({ tracking_ref: 'dev', build: { commit: sha } }, async (path) => {
+		seenSame.push(path);
+		if (path === '/commits/dev') return { sha };
+		throw new Error(`unexpected ${path}`);
+	});
+	assert.deepEqual(seenSame, ['/commits/dev']);
 	assert.equal(same.available, false);
 	assert.equal(same.comparison, 'same');
+	assert.equal(same.direction, 'same');
 
+	// 6. unknown local commit: refuses update and makes no compare call.
 	for (const badCommit of [null, undefined, '', 'not-a-sha']) {
+		const seenUnknown = [];
 		const unknown = await selectTarget(
 			{ tracking_ref: 'main', build: { commit: badCommit } },
-			async () => ({ sha })
+			async (path) => {
+				seenUnknown.push(path);
+				if (path === '/commits/main') return { sha };
+				throw new Error(`unexpected ${path}`);
+			}
 		);
+		assert.deepEqual(seenUnknown, ['/commits/main']);
 		assert.equal(unknown.available, null);
 		assert.equal(unknown.comparison, 'unknown');
+		assert.equal(unknown.direction, 'unknown');
 		assert.match(unknown.notes, /installed commit is unknown.*main/);
 	}
+
+	// 7. compare 404: installed commit is not on GitHub -> unknown.
+	const seen404 = [];
+	const notOnGithub = await selectTarget(
+		{ tracking_ref: 'dev', build: { commit: sha } },
+		async (path) => {
+			seen404.push(path);
+			if (path === '/commits/dev') return { sha: other };
+			if (path === `/compare/${sha}...${other}`)
+				throw Object.assign(new Error('GitHub update check failed (404).'), { status: 404 });
+			throw new Error(`unexpected ${path}`);
+		}
+	);
+	assert.deepEqual(seen404, ['/commits/dev', `/compare/${sha}...${other}`]);
+	assert.equal(notOnGithub.available, null);
+	assert.equal(notOnGithub.comparison, 'unknown');
+	assert.equal(notOnGithub.direction, 'unknown');
+	assert.match(notOnGithub.notes, /not on GitHub/i);
+
+	// 8. compare network/other error: propagates and never silently offers an update.
+	const seenErr = [];
+	await assert.rejects(
+		selectTarget({ tracking_ref: 'dev', build: { commit: sha } }, async (path) => {
+			seenErr.push(path);
+			if (path === '/commits/dev') return { sha: other };
+			if (path === `/compare/${sha}...${other}`) throw new Error('network reset');
+			throw new Error(`unexpected ${path}`);
+		}),
+		/network reset/
+	);
+	assert.deepEqual(seenErr, ['/commits/dev', `/compare/${sha}...${other}`]);
+
+	// 9. malformed compare status: refuses with BRANCH_COMPARE instead of offering an update.
+	await assert.rejects(
+		selectTarget({ tracking_ref: 'dev', build: { commit: sha } }, async (path) => {
+			if (path === '/commits/dev') return { sha: other };
+			if (path === `/compare/${sha}...${other}`) return { status: 'mystery' };
+			throw new Error(`unexpected ${path}`);
+		}),
+		{ code: 'BRANCH_COMPARE' }
+	);
 
 	// Unknown installed commit persisted by checkUpdates cannot queue an ordinary update.
 	const f = await fixture(),
@@ -1157,6 +1275,7 @@ test('selectTarget honors tracking_ref before release discovery and reports thre
 		assert.equal(checked.purpose, 'update');
 		assert.equal(checked.target.available, null);
 		assert.equal(checked.target.comparison, 'unknown');
+		assert.equal(checked.target.direction, 'unknown');
 		await assert.rejects(
 			queueOperation('update', { check_id: checked.id, confirm: true }),
 			/No checked update is available/
@@ -1465,6 +1584,7 @@ test('branchCompatibility computes all verdicts, bypasses password/LAN guards on
 				request: async (path) => {
 					if (path.startsWith('/releases')) return [];
 					if (path === '/commits/main') return { sha };
+					if (path === `/compare/${config.build.commit}...${sha}`) return { status: 'ahead' };
 					if (path === `/contents/package.json?ref=${sha}`)
 						return packageResponse({ saturday: { access_api: 0, lan_api: 0 } });
 					throw new Error(`unexpected ${path}`);

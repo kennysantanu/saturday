@@ -74,12 +74,12 @@ function currentTrackedRef(config) {
 }
 function compareCommit(installedCommit, targetCommit) {
 	if (typeof installedCommit !== 'string' || !SHA_RE.test(installedCommit)) {
-		return { available: null, comparison: 'unknown' };
+		return { available: null, comparison: 'unknown', direction: 'unknown' };
 	}
 	if (installedCommit === targetCommit) {
-		return { available: false, comparison: 'same' };
+		return { available: false, comparison: 'same', direction: 'same' };
 	}
-	return { available: true, comparison: 'different' };
+	return { available: false, comparison: 'different', direction: 'unknown' };
 }
 function safeBranchSwitch(value) {
 	if (!value || typeof value !== 'object') return null;
@@ -330,20 +330,69 @@ async function resolveBranchCommit(ref, request = github) {
 		throw branchError('BRANCH_IDENTITY', `GitHub returned an invalid identity for ${ref}.`);
 	return commit.sha;
 }
-async function selectBranchTarget(ref, config, request = github) {
+async function selectBranchTarget(ref, config, request = github, { checkAncestry = true } = {}) {
 	const commit = await resolveBranchCommit(ref, request);
-	const { available, comparison } = compareCommit(config?.build?.commit, commit);
+	const installedCommit = config?.build?.commit;
+	let { available, comparison, direction } = compareCommit(installedCommit, commit);
+	let notes =
+		comparison === 'unknown'
+			? `The installed commit is unknown; Saturday cannot compare it with ${ref}.`
+			: `${ref} changed; a changed head is not proof of newer chronology.`;
+	if (comparison === 'different' && checkAncestry) {
+		let compared;
+		try {
+			compared = await request(`/compare/${installedCommit}...${commit}`);
+		} catch (e) {
+			if (e?.status === 404) {
+				return {
+					kind: 'development',
+					ref,
+					commit,
+					available: null,
+					comparison: 'unknown',
+					direction: 'unknown',
+					url: `https://github.com/${repository}/commit/${commit}`,
+					notes: `The installed commit is not on GitHub; Saturday cannot compare it with ${ref}.`
+				};
+			}
+			throw e;
+		}
+		switch (compared?.status) {
+			case 'ahead':
+				available = true;
+				comparison = 'different';
+				direction = 'ahead';
+				break;
+			case 'behind':
+				available = false;
+				comparison = 'different';
+				direction = 'behind';
+				notes = `The installed build is newer than ${ref}; updating would move it backwards. Use repair --source instead of updating.`;
+				break;
+			case 'diverged':
+				available = false;
+				comparison = 'different';
+				direction = 'diverged';
+				notes = `The installed build and ${ref} have diverged; Saturday will not guess which is newer.`;
+				break;
+			case 'identical':
+				available = false;
+				comparison = 'same';
+				direction = 'same';
+				break;
+			default:
+				throw branchError('BRANCH_COMPARE', `GitHub returned an invalid comparison for ${ref}.`);
+		}
+	}
 	return {
 		kind: 'development',
 		ref,
 		commit,
 		available,
 		comparison,
+		direction,
 		url: `https://github.com/${repository}/commit/${commit}`,
-		notes:
-			comparison === 'unknown'
-				? `The installed commit is unknown; Saturday cannot compare it with ${ref}.`
-				: `${ref} changed; a changed head is not proof of newer chronology.`
+		notes
 	};
 }
 export async function listBranches({ config = getInstallation(), request = github } = {}) {
@@ -673,7 +722,8 @@ export async function branchCompatibility({
 	try {
 		const live = await readLiveStorageFormats(config);
 		const local = await localCodeState(config);
-		const target = await selectBranchTarget(ref, config, request);
+		// Destructive branch switches cross lines intentionally and do not offer an ordinary update.
+		const target = await selectBranchTarget(ref, config, request, { checkAncestry: false });
 		const candidate = await candidateMetadata(target.commit, request, target, { reset_data: true });
 		target.requirements = candidate.requirements;
 		target.version = candidate.version;
