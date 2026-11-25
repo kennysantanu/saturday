@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount, tick, untrack, type Snippet } from 'svelte';
+	import { page } from '$app/state';
 	import { Editor } from '@tiptap/core';
+	import { closeHistory } from '@tiptap/pm/history';
 	import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
-	import { TextSelection } from '@tiptap/pm/state';
+	import { EditorState, TextSelection, type Transaction } from '@tiptap/pm/state';
 	import type { EditorView } from '@tiptap/pm/view';
 	import { markdownExtensions, privateMarkdown } from '$lib/markdown-extensions';
 	import { visualEditorLoss } from '$lib/markdown-visual';
@@ -48,6 +50,10 @@
 	// editor only when it genuinely differs from what the editor holds, never on trailing-newline or
 	// serializer-formatting differences that represent the same document.
 	let synced = '';
+	// Tracks loaded SvelteKit page data identity so in-place navigation to another document resets
+	// undo/redo history while ordinary external edits of the same document preserve it.
+	let loadedData: unknown;
+	let pendingDocReset = false;
 	const normalizeEnd = (text: string) => text.replace(/\r\n?/g, '\n').trimEnd();
 	function parseMarkdownDoc(current: Editor, markdown: string): ProseMirrorNode | null {
 		try {
@@ -74,42 +80,73 @@
 			? curDoc.type.create(curDoc.attrs, nextDoc.content.addToEnd(curDoc.lastChild))
 			: nextDoc;
 	}
-	function parseChangedDoc(current: Editor, next: string): ProseMirrorNode | null | false {
+	function parseChangedDoc(
+		current: Editor,
+		next: string,
+		resetHistory: boolean
+	): ProseMirrorNode | null | false {
 		if (
-			next === synced ||
-			normalizeEnd(next) === normalizeEnd(synced) ||
-			normalizeEnd(next) === normalizeEnd(current.getMarkdown())
+			!resetHistory &&
+			(next === synced ||
+				normalizeEnd(next) === normalizeEnd(synced) ||
+				normalizeEnd(next) === normalizeEnd(current.getMarkdown()))
 		)
 			return false;
 		const parsed = parseMarkdownDoc(current, next);
 		if (!parsed) return null;
+		if (resetHistory) return parsed;
 		const targetDoc = alignTrailing(current.state.doc, parsed);
 		return targetDoc.eq(current.state.doc) ? false : targetDoc;
 	}
-	function applyExternal(current: Editor, next: string, targetDoc: ProseMirrorNode | null) {
+	function resetEditorState(current: Editor, doc: ProseMirrorNode) {
+		current.view.updateState(EditorState.create({ doc, plugins: current.state.plugins }));
+		version++;
+	}
+	function applyExternal(
+		current: Editor,
+		next: string,
+		targetDoc: ProseMirrorNode | null,
+		resetHistory: boolean
+	) {
 		synced = next;
-		let applied = false;
-		if (targetDoc) {
-			const curDoc = current.state.doc;
-			const start = curDoc.content.findDiffStart(targetDoc.content);
-			const end = start === null ? null : curDoc.content.findDiffEnd(targetDoc.content);
-			if (start !== null && end !== null) {
-				const overlap = Math.max(0, start - Math.min(end.a, end.b));
-				try {
-					const tr = current.state.tr
-						.replace(start, end.a + overlap, targetDoc.slice(start, end.b + overlap))
-						.setMeta('preventUpdate', true)
-						.setMeta('addToHistory', false);
-					if (tr.doc.eq(targetDoc)) {
-						current.view.dispatch(tr);
-						applied = true;
+		if (resetHistory) {
+			if (targetDoc) {
+				resetEditorState(current, targetDoc);
+			} else {
+				current.commands.setContent(next, { contentType: 'markdown', emitUpdate: false });
+				resetEditorState(current, current.state.doc);
+			}
+		} else {
+			let tr: Transaction | null = null;
+			if (targetDoc) {
+				const curDoc = current.state.doc;
+				const start = curDoc.content.findDiffStart(targetDoc.content);
+				const end = start === null ? null : curDoc.content.findDiffEnd(targetDoc.content);
+				if (start !== null && end !== null) {
+					const overlap = Math.max(0, start - Math.min(end.a, end.b));
+					try {
+						const candidate = closeHistory(
+							current.state.tr
+								.replace(start, end.a + overlap, targetDoc.slice(start, end.b + overlap))
+								.setMeta('preventUpdate', true)
+						);
+						if (candidate.doc.eq(targetDoc)) tr = candidate;
+					} catch {
+						/* Fall back to setContent when the diff cannot be applied as a range replacement. */
 					}
-				} catch {
-					/* Fall back to setContent when the diff cannot be applied as a range replacement. */
 				}
 			}
+			if (tr) current.view.dispatch(tr);
+			else
+				current
+					.chain()
+					.command(({ tr }) => {
+						closeHistory(tr);
+						return true;
+					})
+					.setContent(next, { contentType: 'markdown', emitUpdate: false })
+					.run();
 		}
-		if (!applied) current.commands.setContent(next, { contentType: 'markdown', emitUpdate: false });
 		baseline = current.getMarkdown();
 		baselineDoc = current.state.doc;
 	}
@@ -328,6 +365,7 @@
 		}
 	}
 	onMount(() => {
+		loadedData = untrack(() => page.data);
 		editor = new Editor({
 			element,
 			extensions: [...markdownExtensions(), privateMarkdown()],
@@ -382,6 +420,7 @@
 					onchange(markdown, false);
 					return;
 				}
+				pendingDocReset = false;
 				onchange(markdown, markdown !== baseline || !editor.state.doc.eq(baselineDoc));
 			},
 			// Bump without letting a running effect depend on the counter it is writing.
@@ -395,14 +434,21 @@
 	$effect(() => {
 		const next = value;
 		const current = editor;
+		const currentData = page.data;
 		untrack(() => {
 			if (!current || current.isDestroyed) return;
-			const nextDoc = parseChangedDoc(current, next);
+			if (currentData !== loadedData) {
+				loadedData = currentData;
+				pendingDocReset = true;
+				queueMicrotask(() => (pendingDocReset = false));
+			}
+			const resetHistory = pendingDocReset;
+			const nextDoc = parseChangedDoc(current, next, resetHistory);
 			if (nextDoc === false) {
 				synced = next;
 				return;
 			}
-			applyExternal(current, next, nextDoc);
+			applyExternal(current, next, nextDoc, resetHistory);
 		});
 	});
 	$effect(() => {
