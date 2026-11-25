@@ -37,13 +37,18 @@ async function waitFor(check) {
 	}
 	throw new Error('Server transition timed out.');
 }
-async function waitForConnectedClients(config, expected, label) {
+async function waitForConnectedClients(
+	config,
+	expected,
+	label,
+	{ timeoutMs = 10000, stableMs = 0 } = {}
+) {
 	const count = await waitForValue(
 		label,
 		() => connectedClients(config),
 		(seen) => seen === expected,
 		{
-			timeoutMs: 10000,
+			timeoutMs,
 			intervalMs: 100,
 			describe: async (seen) => ({
 				connectedClients: seen,
@@ -52,6 +57,11 @@ async function waitForConnectedClients(config, expected, label) {
 		}
 	);
 	assert.equal(count, expected, label);
+	if (stableMs > 0) {
+		assert.equal(await connectedClients(config), expected, `${label} (immediate check)`);
+		await new Promise((res) => setTimeout(res, stableMs));
+		assert.equal(await connectedClients(config), expected, `${label} (after ${stableMs}ms)`);
+	}
 }
 async function waitForGenuineLease(config, pid, role, label) {
 	await waitForCondition(
@@ -466,7 +476,10 @@ test('production MCP EOF/SIGINT/SIGKILL and web SIGINT/forced-timeout shutdown h
 		mcpKill.kill('SIGKILL');
 		await new Promise((res) => mcpKill.once('exit', res));
 		assert.equal(existsSync(killLeasePath), true, 'SIGKILL leaves crash lease file');
-		await waitForConnectedClients(config, 0, 'dead SIGKILL lease is ignored');
+		await waitForConnectedClients(config, 0, 'dead SIGKILL lease is ignored', {
+			timeoutMs: 3000,
+			stableMs: 300
+		});
 		const killLease = JSON.parse(await readFile(killLeasePath, 'utf8'));
 		const reusedSleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
 			stdio: 'ignore'
@@ -477,7 +490,10 @@ test('production MCP EOF/SIGINT/SIGKILL and web SIGINT/forced-timeout shutdown h
 			join(leasesDir, `${reusedSleeper.pid}.json`),
 			JSON.stringify({ ...killLease, pid: reusedSleeper.pid })
 		);
-		await waitForConnectedClients(config, 0, 'synthetic PID reuse with dead endpoint is ignored');
+		await waitForConnectedClients(config, 0, 'synthetic PID reuse with dead endpoint is ignored', {
+			timeoutMs: 3000,
+			stableMs: 300
+		});
 
 		// 3. Production web forced-timeout SIGTERM branch (7s) removes its own v2 lease.
 		const probePort = createHttpServer();

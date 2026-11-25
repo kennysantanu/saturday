@@ -69,7 +69,7 @@ test('interaction dialog validates and closes after saving', async () => {
 			await new Promise((r) => setTimeout(r, 100));
 		}
 		assert(ready, logs);
-		browser = await puppeteer.launch({ headless: true, protocolTimeout: 30000 });
+		browser = await puppeteer.launch({ headless: true, protocolTimeout: 15000 });
 		const page = await browser.newPage();
 		await page.goto(base + `/networks/${person.id}`, { waitUntil: 'networkidle0' });
 		await clickWhenReady(page, 'button::-p-text(Add interaction)', {
@@ -351,7 +351,7 @@ test('production stage/history actions, result round trips and read-only overvie
 			t.diagnostic('Managed Chrome unavailable; native HTTP checks passed.');
 			return;
 		}
-		browser = await puppeteer.launch({ headless: true, protocolTimeout: 30000 });
+		browser = await puppeteer.launch({ headless: true, protocolTimeout: 15000 });
 		const page = await browser.newPage();
 		const errors = [];
 		page.on('pageerror', (e) => errors.push(e.message));
@@ -395,6 +395,16 @@ test('production stage/history actions, result round trips and read-only overvie
 			);
 			assert.equal(new URL(page.url()).pathname, `/jobs/${job.id}`);
 			assert.equal(new URL(page.url()).searchParams.get('return_to'), returnTo);
+			await new Promise((r) => setTimeout(r, 450));
+			await waitForSelectorGone(
+				page,
+				'[role="dialog"], [data-slot="dialog-content"], [aria-invalid="true"]',
+				{
+					label: `${label} dialog and validation errors to stay gone`,
+					timeoutMs: 200,
+					intervalMs: 50
+				}
+			);
 		};
 		await button('Change stage');
 		await waitForSelectorReady(page, '#move-stage', {
